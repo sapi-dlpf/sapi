@@ -32,7 +32,7 @@ import sys
 if sys.version_info <= (3, 0):
     erro = "Versao do intepretador python (" + str(platform.python_version()) + ") incorreta.\n"
     sys.stdout.write(erro)
-    sys.stdout.write("Este programa requer Python 3 (preferencialmente Python 3.5.2).\n")
+    sys.stdout.write("Este  programa requer Python 3 (preferencialmente Python 3.5.2).\n")
     sys.exit(1)
 
 # Módulos utilizados
