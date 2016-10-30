@@ -52,7 +52,56 @@ GFinalizadoComSucesso = 95
 GconfUrlBaseSapi = "http://10.41.84.5/setec3_dev/"
 Gdesenvolvimento = True
 
-# Retorna verdadeiro se execução está sendo efetuada em ambiente de 
+# Diversos sem persistência
+Gnome_agente = "Não definido"
+
+
+# Obtem e inicia (atômico) uma tarefa de um certo tipo (iped-ocr, ief, etc)
+# Parâmetros opcionais:
+#  storage: Quando o agente tem conexão limitada (apenas um storage)
+#  tamanho_minimo e tamanho_maximo (em bytes): Util para selecionar
+#    tarefas grandes ou pequenas, o que possivelmente irá corresponder
+#    ao esforço computacional.
+def sapisrv_obter_iniciar_tarefa(
+        tipo,
+        storage=None,
+        dispositivo=None,
+        tamanho_minimo=None,
+        tamanho_maximo=None,
+):
+    # Lista de parâmetros
+    param = {}
+    param['tipo'] = tipo
+    param['execucao_nome_agente'] = Gnome_agente
+    if (storage is not None):
+        param['storage'] = storage
+    if (dispositivo is not None):
+        param['dispositivo'] = dispositivo
+
+    # Invoca sapi_srv
+    (sucesso, msg_erro, resultado) = sapisrv_chamar_programa(
+        "sapisrv_obter_iniciar_tarefa.php", param)
+
+    # Talvez seja um erro intermitente.
+    # Agente tem que ser tolerante a erros, e ficar tentando sempre.
+    if not sucesso:
+        print_log_dual("Erro na chamada do sapisrv_obter_iniciar_tarefa", msg_erro)
+        # Não tem tarefa disponível para processamento
+        return (False, None)
+
+    # Chamada respondida com sucesso
+    # Servidor pode retornar dois valores possíveis:
+    #  disponivel=0: Não tem tarefa
+    #  disponivel=1: Tem tarefa para processamento
+    if resultado["disponivel"] == 0:
+        # Não tem nenhuma tarefa disponível
+        return (False, None)
+    else:
+        # Retornou uma tarefa para processamento
+        return (True, resultado["tarefa"])
+
+
+# Retorna verdadeiro se execução está sendo efetuada em ambiente de
 # desenvolvimento
 # ----------------------------------------------------------------------
 def ambiente_desenvolvimento():
