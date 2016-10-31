@@ -409,12 +409,11 @@ while (True):
             # Se a atualização falhar, fica tentando até conseguir
             # Se for problema transiente, vai resolver
             # Caso contrário, algum humano irá mais cedo ou mais tarde intervir
-            while not atualizar_status_tarefa(
-                    codigo_tarefa=codigo_tarefa,
-                    codigo_situacao_tarefa=codigo_situacao_tarefa,
-                    status=texto_status,
-                    dados_relevantes=dados_relevantes
-            ):
+            while not atualizar_status_tarefa(codigo_tarefa=codigo_tarefa,
+                                              codigo_situacao_tarefa=codigo_situacao_tarefa,
+                                              status=texto_status,
+                                              dados_relevantes=dados_relevantes
+                                              ):
                 print_log_dual("Falhou atualização de status de sucesso. Tentando novamente")
                 dormir(60)  # Tenta novamente em 1 minuto
 
@@ -424,7 +423,7 @@ while (True):
             continue;
 
 
-        # Fim do while
+            # Fim do while
 
 # Finaliza
 print_ok()

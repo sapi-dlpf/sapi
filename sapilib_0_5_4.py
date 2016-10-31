@@ -578,6 +578,31 @@ def acesso_storage_linux(ponto_montagem, conf_storage):
         print_ok("Se for este o caso, inclua na raiz o arquivo de controle com qualquer conteúdo.")
         return False
 
+# Atualiza status da tarefa do sapisrv
+def atualizar_status_tarefa(codigo_tarefa, codigo_situacao_tarefa, status, dados_relevantes=None, registrar_log=False):
+    # Parâmetros
+    param = {'codigo_tarefa': codigo_tarefa,
+             'codigo_situacao_tarefa': codigo_situacao_tarefa,
+             'status': status,
+             'execucao_nome_agente': Gnome_agente
+             }
+    if (dados_relevantes != None):
+        dados_relevantes_json = json.dumps(dados_relevantes, sort_keys=True)
+        param['dados_relevantes_json'] = dados_relevantes_json
+
+    # Invoca sapi_srv
+    (sucesso, msg_erro, resultado) = sapisrv_chamar_programa(
+        "sapisrv_atualizar_tarefa.php", param, registrar_log)
+
+    # Registra em log
+    if (sucesso):
+        print_log_dual("Atualizado status no servidor: ", status)
+    else:
+        # Se der erro, registra no log e prossegue (tolerância a falhas)
+        print_log_dual("Não foi possível atualizar status no servidor", msg_erro)
+
+    return sucesso
+
 # **********************************************************************
 # **********************************************************************
 #                  FINAL DO SAPI_LIB
