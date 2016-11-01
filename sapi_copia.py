@@ -7,12 +7,10 @@ from sapilib_0_5_4 import *
 GmodoInstantaneo = False
 tempo_sleep = 5
 tempo_atualizacao_progresso = 60
-tempo_ultimo_update = 0
+tempo_ultimo_update = time.time()
 
 cd_tarefa_atual = None
 arg_tipo = sys.argv[1]
-arg_origem = sys.argv[2]
-arg_destino = sys.argv[3]
 
 
 # Faz uma pausa por alguns segundos
@@ -57,7 +55,7 @@ while True:
         dormir(tempo_sleep)
         continue
     var_dump(tarefa)
-    #die("1")
+    # die("1")
     cd_tarefa_atual = tarefa["codigo_tarefa"]  # Identificador único da tarefa
     caminho_origem = tarefa["caminho_origem"]
     caminho_destino = tarefa["caminho_destino"]
@@ -101,5 +99,5 @@ while True:
         atualizar_tarefa_com_espera(cd_tarefa_atual, GAbortou, "Falha - caminho de origem "
                                     + caminho_origem + " não é arquivo ou diretório")
         continue
-
+    atualizar_tarefa_com_espera(cd_tarefa_atual, GFinalizadoComSucesso, "Cópia com sucesso")
     dormir(tempo_sleep)
