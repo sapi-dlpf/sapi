@@ -37,6 +37,7 @@ import sys
 import urllib
 import urllib.parse
 import urllib.request
+import subprocess
 
 # ------------ Constantes (na realidade variáveis Globais) -------------
 # Valores de codigo_situacao_status (para atualizar status de tarefas)
@@ -578,6 +579,7 @@ def acesso_storage_linux(ponto_montagem, conf_storage):
         print_ok("Se for este o caso, inclua na raiz o arquivo de controle com qualquer conteúdo.")
         return False
 
+
 # Atualiza status da tarefa do sapisrv
 def atualizar_status_tarefa(codigo_tarefa, codigo_situacao_tarefa, status, dados_relevantes=None, registrar_log=False):
     # Parâmetros
@@ -586,7 +588,7 @@ def atualizar_status_tarefa(codigo_tarefa, codigo_situacao_tarefa, status, dados
              'status': status,
              'execucao_nome_agente': Gnome_agente
              }
-    if (dados_relevantes != None):
+    if dados_relevantes is not None:
         dados_relevantes_json = json.dumps(dados_relevantes, sort_keys=True)
         param['dados_relevantes_json'] = dados_relevantes_json
 
@@ -595,13 +597,96 @@ def atualizar_status_tarefa(codigo_tarefa, codigo_situacao_tarefa, status, dados
         "sapisrv_atualizar_tarefa.php", param, registrar_log)
 
     # Registra em log
-    if (sucesso):
+    if sucesso:
         print_log_dual("Atualizado status no servidor: ", status)
     else:
         # Se der erro, registra no log e prossegue (tolerância a falhas)
         print_log_dual("Não foi possível atualizar status no servidor", msg_erro)
 
     return sucesso
+
+
+# Verifica se storage já está montado. Se não estiver, monta.
+# Retorna:
+# - Sucesso: Se montagem foi possível ou não
+# - ponto_montagem: Caminho para montagem
+# - mensagem_erro: Caso tenha ocorrido erro na montagem
+# =============================================================
+def acesso_storage_windows(conf_storage, utilizar_ip=False):
+    # var_dump(conf_storage)
+    # die('ponto586')
+
+    # No caso do windows, vamos utilizar o nome netbios
+    if utilizar_ip:
+        maquina=conf_storage["maquina_ip"]
+    else:
+        maquina = conf_storage["maquina_netbios"]
+
+    # Ponto de montagem implícito
+    # Não vou mapear para uma letra aqui, pois pode dar conflito
+    # com algo mapeado pelo usuário
+    # Logo, o caminho do storage é o ponto de montagem
+    # "\\" = "\", pois '\' é escape
+    caminho_storage = (
+        "\\" + "\\" + maquina +
+        "\\" + conf_storage["pasta_share"]
+    )
+    ponto_montagem = caminho_storage + "\\"
+    print_log_dual(ponto_montagem)
+    arquivo_controle = ponto_montagem + 'storage_sapi_nao_excluir.txt'
+
+    # print_ok(arquivo_controle)
+    # die('ponto531')
+    # Se já está montado
+    if os.path.exists(caminho_storage):
+        # Confere se existe arquivo indicativo de storage bem montado
+        # die('ponto603')
+        if os.path.isfile(arquivo_controle):
+            # Sucesso: Montagem do storage confirmada
+            # die('ponto606')
+            return True, ponto_montagem, ""
+        else:
+            # Falha
+            # die('ponto610')
+            print_ok("Storage está montado em " + caminho_storage)
+            print_ok("Contudo o mesmo não contém arquivo [" + arquivo_controle + "]")
+            print_ok("Isto pode indicar que o storage não foi montado com sucesso, ou que está corrompido")
+            return False, ponto_montagem, "Storage sem arquivo de controle"
+
+    # Ainda não está montado
+    print_ok("- Montando storage em: " + caminho_storage)
+
+    # Conecta no share do storage, utilizando net use.
+    # Exemplo:
+    # net use \\10.41.87.239\storage /user:sapi sapi
+    # Para desmontar (para teste), utilizar:
+    # net use \\10.41.87.239\storage /delete
+    comando = (
+        "net use " + caminho_storage +
+        " /user:" + conf_storage["usuario"] +
+        " " + conf_storage["senha"]
+    )
+
+    print_ok("Conectando com storage")
+    print_ok(comando)
+    subprocess.call(comando, shell=True)
+
+    # Verifica se montou
+    if not os.path.exists(caminho_storage):
+        # Falha
+        print_ok("Montagem de storage falhou [" + caminho_storage + "]")
+        return False, ponto_montagem, "Falhou na montagem"
+
+    # Confere se existe arquivo indicativo de storage bem montado
+    if not os.path.isfile(arquivo_controle):
+        # Falha
+        print_ok("Storage foi montado em " + caminho_storage)
+        print_ok("Contudo não foi localizado arquivo [" + arquivo_controle + "]")
+        print_ok("Isto pode indicar que o storage não foi montado com sucesso, ou está corrompido")
+        return False, ponto_montagem, "Storage não possui arquivo de controle"
+
+    # Sucesso: Montado e confirmado ok
+    return True, ponto_montagem, ""
 
 # **********************************************************************
 # **********************************************************************

@@ -38,7 +38,6 @@ if sys.version_info <= (3, 0):
 # Módulos utilizados
 import socket
 import time
-import subprocess
 import xml.etree.ElementTree as ElementTree
 import shutil
 
@@ -164,86 +163,6 @@ def storage_montado(ponto_montagem):
 
     # Ok, tudo certo
     return True
-
-
-# Verifica se storage já está montado. Se não estiver, monta.
-# Retorna:
-# - Sucesso: Se montagem foi possível ou não
-# - ponto_montagem: Caminho para montagem
-# - mensagem_erro: Caso tenha ocorrido erro na montagem
-# =============================================================
-def acesso_storage_windows(conf_storage):
-    # var_dump(conf_storage)
-    # die('ponto586')
-
-    # No caso do windows, vamos utilizar o nome netbios
-    # maquina=conf_storage["maquina_ip"]
-    maquina = conf_storage["maquina_netbios"]
-
-    # Ponto de montagem implícito
-    # Não vou mapear para uma letra aqui, pois pode dar conflito
-    # com algo mapeado pelo usuário
-    # Logo, o caminho do storage é o ponto de montagem
-    # "\\" = "\", pois '\' é escape
-    caminho_storage = (
-        "\\" + "\\" + maquina +
-        "\\" + conf_storage["pasta_share"]
-    )
-    ponto_montagem = caminho_storage + "\\"
-    arquivo_controle = ponto_montagem + 'storage_sapi_nao_excluir.txt'
-
-    # print_ok(arquivo_controle)
-    # die('ponto531')
-    # Se já está montado
-    if (os.path.exists(caminho_storage)):
-        # Confere se existe arquivo indicativo de storage bem montado
-        # die('ponto603')
-        if os.path.isfile(arquivo_controle):
-            # Sucesso: Montagem do storage confirmada
-            # die('ponto606')
-            return (True, ponto_montagem, "")
-        else:
-            # Falha
-            # die('ponto610')
-            print_ok("Storage está montado em " + caminho_storage)
-            print_ok("Contudo o mesmo não contém arquivo [" + arquivo_controle + "]")
-            print_ok("Isto pode indicar que o storage não foi montado com sucesso, ou que está corrompido")
-            return (False, ponto_montagem, "Storage sem arquivo de controle")
-
-    # Ainda não está montado
-    print_ok("- Montando storage em: " + caminho_storage)
-
-    # Conecta no share do storage, utilizando net use.
-    # Exemplo:
-    # net use \\10.41.87.239\storage /user:sapi sapi
-    # Para desmontar (para teste), utilizar:
-    # net use \\10.41.87.239\storage /delete
-    comando = (
-        "net use " + caminho_storage +
-        " /user:" + conf_storage["usuario"] +
-        " " + conf_storage["senha"]
-    )
-
-    print_ok("Conectando com storage")
-    print_ok(comando)
-    subprocess.call(comando, shell=True)
-
-    # Verifica se montou
-    if (not os.path.exists(caminho_storage)):
-        # Falha
-        print_ok("Montagem de storage falhou [" + caminho_storage + "]")
-        return (False, ponto_montagem, "Falhou na montagem")
-
-    # Confere se existe arquivo indicativo de storage bem montado
-    if (not os.path.isfile(arquivo_controle)):
-        # Falha
-        print_ok("Storage foi montado em " + caminho_storage)
-        print_ok("Contudo não foi localizado arquivo [" + arquivo_controle + "]")
-        print_ok("Isto pode indicar que o storage não foi montado com sucesso, ou está corrompido")
-        return (False, ponto_montagem, "Storage não possui arquivo de controle")
-
-    # Sucesso: Montado e confirmado ok
-    return (True, ponto_montagem, "")
 
 
 # Atualiza status da tarefa do sapisrv
