@@ -6,13 +6,13 @@ from sapilib_0_5_4 import *
 
 GmodoInstantaneo = False
 tempo_sleep = 5
-tempo_atualizacao_progresso = 5
+tempo_atualizacao_progresso = 60
 tempo_ultimo_status_update = time.time()
 
 cd_tarefa_atual = None
 arg_tipo = sys.argv[1]
 nome_agente = socket.gethostbyaddr(socket.gethostname())[0]
-debug = True
+debug = False
 
 
 # Faz uma pausa por alguns segundos
