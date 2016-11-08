@@ -1,6 +1,6 @@
 # encoding: utf-8
 # -*- coding: utf_8 -*-
-#=======================================================================
+# =======================================================================
 # SAPI - Sistema de Apoio a Procedimentos de Informática
 # 
 # Componente: sapi_tableau_td3
@@ -14,57 +14,53 @@
 #
 # Histórico:
 #  - v1.0 : Inicial
-#=======================================================================
+# =======================================================================
 # TODO: 
 # - 
-#=======================================================================
+# =======================================================================
 '''
 Created on 25 de jul de 2016
 
 @author: RODRIGO LANGE
 '''
 
-
-import autoit #pip install -U pyautoit
-import configparser #pip install -U configparser
+import configparser  # pip install -U configparser
+import glob
 import hashlib
 import os
-import platform
-import requests # pip install -U requests
+import pprint
 import shutil
+import socket
 import subprocess
 import sys
 import time
-import socket
-import pprint
-import glob
-from selenium import webdriver # pip install -U selenium
-from selenium.webdriver.common.keys import Keys
-from selenium.common.exceptions import NoSuchElementException
-from selenium.webdriver.support.ui import Select
-from SAPI_LIB import print_log_dual
+
+import autoit  # pip install -U pyautoit
 from SAPI_LIB import assegura_comunicacao_servidor_sapi
-from SAPI_LIB import sapisrv_obter_iniciar_tarefa
-from SAPI_LIB import var_dump
 from SAPI_LIB import atualizar_status_tarefa
 from SAPI_LIB import estaRodandoLinux
+from SAPI_LIB import print_log_dual
+from SAPI_LIB import sapisrv_obter_iniciar_tarefa
+from SAPI_LIB import var_dump
+from selenium import webdriver  # pip install -U selenium
+from selenium.common.exceptions import NoSuchElementException
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import Select
 
-
-#=======================================================================
+# =======================================================================
 # GLOBAIS
-#=======================================================================
-Gversao="0.4"
+# =======================================================================
+Gversao = "0.4"
 
-Gdesenvolvimento=True #Ambiente de desenvolvimento
-#Gdesenvolvimento=False #Ambiente de producao
+Gdesenvolvimento = True  # Ambiente de desenvolvimento
+# Gdesenvolvimento=False #Ambiente de producao
 
 # Base de dados (globais)
-GdadosGerais={} #Dicionário com dados gerais
-Gtarefas=[] # Lista de tarefas
-
+GdadosGerais = {}  # Dicionário com dados gerais
+Gtarefas = []  # Lista de tarefas
 
 # Define nome do agente, que será repassado ao servidor sapi
-Gnome_agente=socket.gethostbyaddr(socket.gethostname())[0]
+Gnome_agente = socket.gethostbyaddr(socket.gethostname())[0]
 
 # Utilizado para debug, imprime dicionario identado
 Gpp = pprint.PrettyPrinter(indent=4)
@@ -72,58 +68,56 @@ Gpp = pprint.PrettyPrinter(indent=4)
 # Se mais tarde tiver dois endereços 
 # (talvez um proxy para o setec3 na VLAN)
 # vai ter que aprimorar isto aqui
-#GconfUrlBaseSapi="http://10.41.84.5/setec3_dev/"
-GconfUrlBaseSapi="http://10.41.84.5/setec3/"
+# GconfUrlBaseSapi="http://10.41.84.5/setec3_dev/"
+GconfUrlBaseSapi = "http://10.41.84.5/setec3/"
 
 # Controle de tempos/pausas
-GtempoEntreAtualizacoesStatus=180
-GdormirSemServico=15
+GtempoEntreAtualizacoesStatus = 180
+GdormirSemServico = 15
 
 # Valores de codigo_situacao_status (para atualizar status de tarefas)
-GSemPastaNaoIniciado=1
-GAbortou=8
-GPastaDestinoCriada=30
-GEmAndamento=40
-GFinalizadoComSucesso=95
+GSemPastaNaoIniciado = 1
+GAbortou = 8
+GPastaDestinoCriada = 30
+GEmAndamento = 40
+GFinalizadoComSucesso = 95
 
-  
 
 # ======================================================================
 # Rotina Principal 
 # ======================================================================
 def main():
-    
     # Se o arquivo de configurações (CLIENTE.INI) não existir, cria um novo com os valores padrão
-    if not os.path.exists('CLIENTE.ini'): 
-        print_log_dual('Arquivo de configuração CLIENTE.ini não foi encontrado. Criando esse arquivo com opções padrão.')
+    if not os.path.exists('CLIENTE.ini'):
+        print_log_dual(
+            'Arquivo de configuração CLIENTE.ini não foi encontrado. Criando esse arquivo com opções padrão.')
         configura()
         print_log_dual('Arquivo de configuração CLIENTE.ini criado.')
 
     # VERIFICA A VERSÃO E ATUALIZA AS FERRAMENTAS HABILITADAS
-    
+
     print_log_dual('Verificando quais ferramentas estão habilitadas e se estão atualizadas.')
     verifica_ferramentas()
     print_log_dual('Ferramentas atualizadas e verificadas.')
-    
+
     # Obtém a listagem das ferramentas que estão habilitadas
-    ferramentas_habilitadas = lista_ferramentas_habilitadas() 
-    
+    ferramentas_habilitadas = lista_ferramentas_habilitadas()
+
     # Busca tarefas para cada ferramenta
     for x in range(0, len(ferramentas_habilitadas)):
         print_log_dual("=========================================")
         print_log_dual('Procurando tarefa para a ferramenta: ' + ferramentas_habilitadas[x])
         executa_tarefas(ferramentas_habilitadas[x])
-    
-    
+
     # INFORMA TAREFAS FINALIZADAS OU COM ERRO
 
-    #Finaliza
+    # Finaliza
     sys.exit(0)
-    
 
-#=======================================================================
+
+# =======================================================================
 # FUNÇÕES GERAIS DO SAPI - CLIENTE 
-#=======================================================================
+# =======================================================================
 
 # VERIFICA A VERSÃO E ATUALIZA AS FERRAMENTAS HABILITADAS
 def verifica_ferramentas():
@@ -136,29 +130,32 @@ def verifica_ferramentas():
         # Verifica se a ferramenta está disponível no cliente
         if config.getboolean("FERRAMENTAS", lista_ferramentas[x]):
             print_log_dual("Verificando se a ferramenta " + lista_ferramentas[x] + " está atualizada")
-            #VERIFICA A PASTA SE EXISTE. SE NÃO EXISTIR, COPIA DA ORIGEM
+            # VERIFICA A PASTA SE EXISTE. SE NÃO EXISTIR, COPIA DA ORIGEM
             pasta_ferramenta = config.get(lista_ferramentas[x], "pasta")
             pasta_origem = config.get(lista_ferramentas[x], "origem")
-            tipo_ferramenta = config.get(lista_ferramentas[x], "tipo") # PASTA / EXECUTÁVEL
+            tipo_ferramenta = config.get(lista_ferramentas[x], "tipo")  # PASTA / EXECUTÁVEL
             if tipo_ferramenta == 'Pasta':
                 print_log_dual("Verificando se a pasta da ferramenta " + lista_ferramentas[x] + " existe.")
-                if not os.path.exists(pasta_ferramenta):   # PASTA DE DESTINO DA FERRAMENTA NÃO EXISTE
+                if not os.path.exists(pasta_ferramenta):  # PASTA DE DESTINO DA FERRAMENTA NÃO EXISTE
                     print_log_dual("A pasta " + pasta_ferramenta + " não existe. Copiando...")
-                    if os.path.exists(pasta_origem):   # SE A PASTA DE ORIGEM EXISTE COPIA
-                        print_log_dual("A pasta de origem " + pasta_origem + " existe. Copiando para " + pasta_ferramenta)
+                    if os.path.exists(pasta_origem):  # SE A PASTA DE ORIGEM EXISTE COPIA
+                        print_log_dual(
+                            "A pasta de origem " + pasta_origem + " existe. Copiando para " + pasta_ferramenta)
                         shutil.copytree(pasta_origem, pasta_ferramenta)
-                    else: # PASTA DE ORIGEM NÃO EXISTE 
+                    else:  # PASTA DE ORIGEM NÃO EXISTE
                         print_log_dual("A pasta de origem " + pasta_origem + " não existe. Não dá para copiar. Saindo.")
                         sys.exit(1)
             elif tipo_ferramenta == 'Executavel':
                 print_log_dual("Verificando se o programa " + lista_ferramentas[x] + " está instalado.")
                 arquivo_ferramenta = pasta_ferramenta + "/" + config.get(lista_ferramentas[x], "executavel")
-                #verifica se a pasta existe OU se o hash do executável é igual ao estipulado no arquivo de configuração
-                if not os.path.exists(pasta_ferramenta) or hashlib.md5(open(arquivo_ferramenta, 'rb').read()).hexdigest() != config.get(lista_ferramentas[x], "hash_executavel"): 
+                # verifica se a pasta existe OU se o hash do executável é igual ao estipulado no arquivo de configuração
+                if not os.path.exists(pasta_ferramenta) or hashlib.md5(
+                        open(arquivo_ferramenta, 'rb').read()).hexdigest() != config.get(lista_ferramentas[x],
+                                                                                         "hash_executavel"):
                     print_log_dual("Programa não instalado. Instalando o programa...")
-                    comando = pasta_origem 
+                    comando = pasta_origem
                     comando += " "
-                    comando += config.get(lista_ferramentas[x], "parametros") #
+                    comando += config.get(lista_ferramentas[x], "parametros")  #
                     print_log_dual(comando)
                     if os.path.exists(comando):
                         autoit.run(comando)
@@ -167,10 +164,11 @@ def verifica_ferramentas():
                         time.sleep(2)
                         print_log_dual("Programa " + lista_ferramentas[x] + "instalado.")
                     else:
-                        print_log_dual("O arquivo de instalação do programa " + lista_ferramentas[x] + " não foi encontrado. Saindo.")
+                        print_log_dual("O arquivo de instalação do programa " + lista_ferramentas[
+                            x] + " não foi encontrado. Saindo.")
                         sys.exit(1)
             print_log_dual("A ferramenta " + lista_ferramentas[x] + " está atualizada.")
-    
+
     return
 
 
@@ -183,13 +181,14 @@ def iped(origem, destino, pasta_iped):
     # VERIFICA SE EXISTE A PASTA DE DESTINO
     if not os.path.exists(destino):
         print("Pasta/imagem de destino não existe...")
-    
+
     # VERIFICA SE JÁ TEM PROCESSAMENTO DO IPED NA PASTA DE DESTINO PARA SABER SE USA O '--append'
     if not os.path.exists(destino + '/Ferramenta de Pesquisa.exe'):
         resultado = subprocess.check_output(['java', '-jar', '-Xmx24G', pasta_iped, '-d', origem, '-o', destino])
     else:
-        resultado = subprocess.check_output(['java', '-jar', '-Xmx24G', pasta_iped, '-d', origem, '-o', destino, '--append'])
-    
+        resultado = subprocess.check_output(
+            ['java', '-jar', '-Xmx24G', pasta_iped, '-d', origem, '-o', destino, '--append'])
+
     print(resultado)
     if 'IPED finalizado.' in resultado:
         print("PROCESSOU OK")
@@ -197,9 +196,8 @@ def iped(origem, destino, pasta_iped):
         print("PROCESSOU COM ERROS")
     else:
         print("NÃO SEI COMO ACABOU")
-    
-    return
 
+    return
 
 
 # Função do IEF. Parâmetros:
@@ -215,9 +213,9 @@ def ief(origem, destino, tipo_execucao, perfil_execucao):
     # Lê o arquivo de configuração
     config.read("CLIENTE.ini")
     # Cria o perfil desejado do IEF
-    ief_config(config.get('IEF', "pasta"),perfil_execucao)
-    pasta_ief = config.get('IEF', "pasta") + "\\" + config.get('IEF', "executavel") 
-    if tipo_execucao == 'autoit': # USANDO O AUTOIT
+    ief_config(config.get('IEF', "pasta"), perfil_execucao)
+    pasta_ief = config.get('IEF', "pasta") + "\\" + config.get('IEF', "executavel")
+    if tipo_execucao == 'autoit':  # USANDO O AUTOIT
         print_log_dual("... Processando com o IEF - AUTOIT")
         print_log_dual(origem)
         autoit.run("C:\Program Files (x86)\Internet Evidence Finder\ief.exe")
@@ -226,7 +224,7 @@ def ief(origem, destino, tipo_execucao, perfil_execucao):
         versao_ief = "Magnet IEF v" + config.get('IEF', "versao")
         autoit.win_move(versao_ief, 0, 0)
         time.sleep(1)
-        autoit.mouse_click("left",560,332)
+        autoit.mouse_click("left", 560, 332)
         time.sleep(2)
         autoit.send(origem.replace("/", "\\"))
         time.sleep(1)
@@ -238,16 +236,16 @@ def ief(origem, destino, tipo_execucao, perfil_execucao):
         time.sleep(1)
         autoit.send("{ENTER}")
         time.sleep(5)
-        autoit.mouse_click("left",1080,614) # clica no NEXT
+        autoit.mouse_click("left", 1080, 614)  # clica no NEXT
         time.sleep(5)
-        autoit.mouse_click("left",1080,614) # clica no NEXT
+        autoit.mouse_click("left", 1080, 614)  # clica no NEXT
         time.sleep(5)
         autoit.send(destino.replace("/", "\\"))
         time.sleep(5)
-        autoit.mouse_click("left",1080,614) # clica no NEXT
-    elif tipo_execucao == 'cli': # USANDO LINHA DE COMANDO
+        autoit.mouse_click("left", 1080, 614)  # clica no NEXT
+    elif tipo_execucao == 'cli':  # USANDO LINHA DE COMANDO
         print_log_dual("Processando com o IEF - LINHA DE COMANDO")
-        comando = '"' + pasta_ief + '"' + ' -i ' + '"' + origem + '" -s full -o ' + '"' + destino + '"'  
+        comando = '"' + pasta_ief + '"' + ' -i ' + '"' + origem + '" -s full -o ' + '"' + destino + '"'
         comando = comando.replace("/", "\\")
         print_log_dual("Comando executado: " + comando)
         resultado = subprocess.check_output(comando)
@@ -256,7 +254,8 @@ def ief(origem, destino, tipo_execucao, perfil_execucao):
 
     # GERANDO O RELATORIO
     print_log_dual("Gerando relatório do IEF")
-    comando = '"' + 'C:\Program Files (x86)\Internet Evidence Finder\IEF Report Viewer\IEFrv.exe' + '" ' + '"' + destino.replace("/", "\\") + '"'
+    comando = '"' + 'C:\Program Files (x86)\Internet Evidence Finder\IEF Report Viewer\IEFrv.exe' + '" ' + '"' + destino.replace(
+        "/", "\\") + '"'
     print_log_dual(comando)
     autoit.run(comando)
     versao_report = "IEF Report Viewer v" + config.get('IEF', "versao")
@@ -264,11 +263,11 @@ def ief(origem, destino, tipo_execucao, perfil_execucao):
     time.sleep(1)
     autoit.win_move(versao_report, 0, 0)
     time.sleep(1)
-    autoit.mouse_click("left",26,36)
+    autoit.mouse_click("left", 26, 36)
     time.sleep(2)
-    autoit.mouse_click("left",87,177)
+    autoit.mouse_click("left", 87, 177)
     time.sleep(2)
-    autoit.mouse_click("left",640,431)
+    autoit.mouse_click("left", 640, 431)
     time.sleep(2)
     autoit.win_wait_active(versao_report, 0, text="Export completed.")
     time.sleep(2)
@@ -282,14 +281,12 @@ def ief(origem, destino, tipo_execucao, perfil_execucao):
     return True
 
 
-
-
 def ief_config(pasta_ief, perfil_execucao):
     print_log_dual("Gerando arquivo de configuração do IEF.")
     for f in glob.glob(pasta_ief + "/profiles/*.ini"):
         os.remove(f)
-    arquivo=open(pasta_ief + "/profiles/config.ini", 'w')
-    #if perfil_execucao == 'ief-mobile':
+    arquivo = open(pasta_ief + "/profiles/config.ini", 'w')
+    # if perfil_execucao == 'ief-mobile':
     arquivo.write("[main]")
     arquivo.write("default=True")
     arquivo.write("version=6.8.2.3062")
@@ -660,14 +657,14 @@ def ief_config(pasta_ief, perfil_execucao):
     arquivo.write("Videos=True")
     arquivo.write("Word=True")
     arquivo.write("")
-    
-        
-    #elif perfil_execucao == 'ief':
-        
+
+    # elif perfil_execucao == 'ief':
+
     arquivo.close()
     return
 
-def tableautd3(tableau_ID = '192.168.0.149'):
+
+def tableautd3(tableau_ID='192.168.0.149'):
     '''
     Se o servidor Windows não está mais sendo conectado, pode ser que o serviço tenha travado. 
     Para reiniciar o serviço, use os comandos:
@@ -677,20 +674,20 @@ def tableautd3(tableau_ID = '192.168.0.149'):
     Se não resolver, modifique a seguinte chave para o valor ‘3′:
     HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters\Size    
     '''
-    #ABRE BROWSER
+    # ABRE BROWSER
     browser = webdriver.Firefox()
     browser.get('http://' + tableau_ID)
     browser.implicitly_wait(10)
-    #time.sleep(2)
+    # time.sleep(2)
     browser.maximize_window()
-    #LOGIN
+    # LOGIN
     assert 'TD3 Web - Login' in browser.title
     elem = browser.find_element_by_id('usr')
     elem.send_keys('Profile1' + Keys.RETURN)
     elem = browser.find_element_by_id('pwd')
     elem.send_keys('password' + Keys.RETURN)
     time.sleep(5)
-    #TELA PRINCIPAL
+    # TELA PRINCIPAL
     assert 'TD3 Web - Main Menu' in browser.title
     # VERIFICA SE TEM ORIGEM
     try:
@@ -698,18 +695,18 @@ def tableautd3(tableau_ID = '192.168.0.149'):
     except NoSuchElementException:
         print("não achei origem")
         sys.exit(1)
-    
+
     # VERIFICA SE TEM DESTINO (STORAGE)
     try:
         browser.find_element_by_xpath('html/body/div[11]/div[2]/div/div/a/img[1]')
     except NoSuchElementException:
         print("não achei destino. Vou configurar...")
-        #ENTRA EM SETTINGS
+        # ENTRA EM SETTINGS
         browser.find_element_by_xpath('html/body/div[10]/div/div[9]/button').click()
         time.sleep(2)
         assert 'TD3 Web - Settings' in browser.title
         browser.find_element_by_xpath('html/body/div[10]/div[2]/button[3]').click()
-        #time.sleep(2)
+        # time.sleep(2)
         elem = browser.find_element_by_xpath('html/body/div[2]/div/div/div[2]/div[2]/div[1]/div/input')
         elem.clear()
         elem.send_keys('192.168.0.129')
@@ -723,38 +720,38 @@ def tableautd3(tableau_ID = '192.168.0.149'):
         elem.clear()
         elem.send_keys('sapi')
         elem = browser.find_element_by_xpath('html/body/div[2]/div/div/div[2]/div[1]/div/div/label').click()
-        #time.sleep(10)
+        # time.sleep(10)
         elem = browser.find_element_by_xpath('html/body/div[2]/div/div/div[3]/button')
         elem.click()
-        #time.sleep(1)
+        # time.sleep(1)
         elem = browser.find_element_by_xpath('html/body/div[10]/div[2]/button[7]')
         elem.click()
-        #time.sleep(2)
+        # time.sleep(2)
 
     # VERIFICA SE TEM ORIGEM
     try:
         browser.find_element_by_xpath('html/body/div[8]/div[2]/div/div/a/img[1]')
     except NoSuchElementException:
         print("Não achei origem")
-        
+
     # CONFIGURA DUPLICAÇÃO
     elem = browser.find_element_by_xpath('html/body/div[10]/div/div[1]/button').click()
-    #time.sleep(2)
+    # time.sleep(2)
     elem = browser.find_element_by_xpath('html/body/div[18]/div[3]/button[2]').click()
-    #time.sleep(2)
-    elem = browser.find_element_by_xpath('html/body/div[7]/div[2]/div/input') # EXAMINER
+    # time.sleep(2)
+    elem = browser.find_element_by_xpath('html/body/div[7]/div[2]/div/input')  # EXAMINER
     elem.clear()
-    elem.send_keys('SETEC/PF/PR')    
-    elem = browser.find_element_by_xpath('html/body/div[7]/div[3]/div/input') # CASE ID
-    elem.clear()
-    elem.send_keys('')
-    elem = browser.find_element_by_xpath('html/body/div[7]/div[4]/div/textarea') # CASE NOTES
+    elem.send_keys('SETEC/PF/PR')
+    elem = browser.find_element_by_xpath('html/body/div[7]/div[3]/div/input')  # CASE ID
     elem.clear()
     elem.send_keys('')
-    elem = Select(browser.find_element_by_id('dup-type')) # DUPLICATION TYPE (Disk-to-File)
+    elem = browser.find_element_by_xpath('html/body/div[7]/div[4]/div/textarea')  # CASE NOTES
+    elem.clear()
+    elem.send_keys('')
+    elem = Select(browser.find_element_by_id('dup-type'))  # DUPLICATION TYPE (Disk-to-File)
     elem.select_by_visible_text('Disk-to-File')
-    elem = browser.find_element_by_xpath('html/body/div[7]/div[6]/div/button').click() # DESTINATION DIR
-    #time.sleep(4)
+    elem = browser.find_element_by_xpath('html/body/div[7]/div[6]/div/button').click()  # DESTINATION DIR
+    # time.sleep(4)
     try:
         browser.find_element_by_xpath('html/body/div[8]/div[3]/button[2]').click()
         time.sleep(2)
@@ -771,38 +768,40 @@ def tableautd3(tableau_ID = '192.168.0.149'):
         print("Indo para pasta raiz")
 
     elem = browser.find_element_by_xpath('html/body/div[8]/div[3]/button[3]').click()
-    #time.sleep(4)
+    # time.sleep(4)
     elem = browser.find_element_by_xpath('html/body/div[2]/div/div/div[2]/div[1]/div/input')
     elem.clear()
     elem.send_keys('Memo1234-16')
     elem = browser.find_element_by_xpath('html/body/div[2]/div/div/div[3]/div[1]/button').click()
     time.sleep(4)
     elem = browser.find_element_by_xpath('html/body/div[8]/div[3]/button[1]').click()
-    #time.sleep(4)
-    
-    
-    elem = Select(browser.find_element_by_xpath('html/body/div[7]/div[7]/div/select')) # IMAGE DIR NAMING
+    # time.sleep(4)
+
+
+    elem = Select(browser.find_element_by_xpath('html/body/div[7]/div[7]/div/select'))  # IMAGE DIR NAMING
     elem.select_by_visible_text('Serial + Model Number')
-    elem = Select(browser.find_element_by_xpath('html/body/div[7]/div[8]/div/select')) # IMAGE FILE NAMING (User Defined)
+    elem = Select(
+        browser.find_element_by_xpath('html/body/div[7]/div[8]/div/select'))  # IMAGE FILE NAMING (User Defined)
     elem.select_by_visible_text('User Defined')
-    time.sleep(2) #tem que aguardar pois o tipo Custom abre um novo campo abaixo
-    elem = browser.find_element_by_xpath('html/body/div[7]/div[9]/div/input') # IMAGE FILE NAME ()
+    time.sleep(2)  # tem que aguardar pois o tipo Custom abre um novo campo abaixo
+    elem = browser.find_element_by_xpath('html/body/div[7]/div[9]/div/input')  # IMAGE FILE NAME ()
     elem.clear()
     elem.send_keys('Item01_ItemArrecadacao01')
-    elem = Select(browser.find_element_by_xpath('html/body/div[7]/div[10]/div/select')) # FILE FORMAT (E01 - EnCase format)
+    elem = Select(
+        browser.find_element_by_xpath('html/body/div[7]/div[10]/div/select'))  # FILE FORMAT (E01 - EnCase format)
     elem.select_by_visible_text('E01 - EnCase format')
-    elem = Select(browser.find_element_by_xpath('html/body/div[7]/div[11]/div/select')) # FILE SIZE (2GB)
+    elem = Select(browser.find_element_by_xpath('html/body/div[7]/div[11]/div/select'))  # FILE SIZE (2GB)
     elem.select_by_visible_text('2 GB')
-    elem = Select(browser.find_element_by_xpath('html/body/div[7]/div[14]/div/select')) # ERROR GRANULARITY (Exaustive)
+    elem = Select(browser.find_element_by_xpath('html/body/div[7]/div[14]/div/select'))  # ERROR GRANULARITY (Exaustive)
     elem.select_by_visible_text('Exhaustive')
-    elem = Select(browser.find_element_by_xpath('html/body/div[7]/div[15]/div/select')) # ERROR RETRY (retry once)
+    elem = Select(browser.find_element_by_xpath('html/body/div[7]/div[15]/div/select'))  # ERROR RETRY (retry once)
     elem.select_by_visible_text('Retry once')
-    elem = Select(browser.find_element_by_xpath('html/body/div[7]/div[16]/div/select')) # VERIFICATION (off)
+    elem = Select(browser.find_element_by_xpath('html/body/div[7]/div[16]/div/select'))  # VERIFICATION (off)
     elem.select_by_visible_text('Off')
-    #time.sleep(2)
+    # time.sleep(2)
     elem = browser.find_element_by_xpath('html/body/div[7]/div[17]/button').click()
-    #time.sleep(10)
-    
+    # time.sleep(10)
+
     # INICIA DUPLICAÇÃO
     elem = browser.find_element_by_xpath('html/body/div[18]/div[2]/button').click()
 
@@ -818,10 +817,10 @@ def tableautd3(tableau_ID = '192.168.0.149'):
     x_taxa = browser.find_element_by_xpath('html/body/div[8]/div[1]/table/tbody/tr[5]/td/p/span').text
     x_md5 = browser.find_element_by_xpath('html/body/div[8]/div[1]/table/tbody/tr[6]/td/p/span').text
     x_sha1 = browser.find_element_by_xpath('html/body/div[8]/div[1]/table/tbody/tr[7]/td/p/span').text
-    duplicacao = {'Status': x_status, 'Tempo_decorrido': x_tempo, 'Tamanho': x_tamanho, 'Taxa': x_taxa, 'MD5': x_md5, 'SHA1': x_sha1}
+    duplicacao = {'Status': x_status, 'Tempo_decorrido': x_tempo, 'Tamanho': x_tamanho, 'Taxa': x_taxa, 'MD5': x_md5,
+                  'SHA1': x_sha1}
     print(duplicacao)
-    
-    
+
     return duplicacao
 
 
@@ -836,83 +835,85 @@ def configura():
     config.set("FERRAMENTAS", "regripper", "False")
     config.set("FERRAMENTAS", "nirsoft", "False")
     config.set("FERRAMENTAS", "sysinternals", "False")
-    
+
     config.add_section("NIRSOFT")
     config.set("NIRSOFT", "versao", "")
     config.set("NIRSOFT", "pasta", "")
     config.set("NIRSOFT", "executavel", "")
     config.set("NIRSOFT", "hash_executavel", "")
-    config.set("NIRSOFT", "tipo", "Pasta") # arquivo (só copia pasta); executável (instala)
+    config.set("NIRSOFT", "tipo", "Pasta")  # arquivo (só copia pasta); executável (instala)
     config.set("NIRSOFT", "origem", "")
     config.set("NIRSOFT", "profile", "")
-    
+
     config.add_section("SYSINTERNALS")
     config.set("SYSINTERNALS", "versao", "")
     config.set("SYSINTERNALS", "pasta", "")
     config.set("SYSINTERNALS", "executavel", "")
     config.set("SYSINTERNALS", "hash_executavel", "")
-    config.set("SYSINTERNALS", "tipo", "Pasta") # arquivo (só copia pasta); executável (instala)
+    config.set("SYSINTERNALS", "tipo", "Pasta")  # arquivo (só copia pasta); executável (instala)
     config.set("SYSINTERNALS", "origem", "")
     config.set("SYSINTERNALS", "profile", "")
-    
+
     config.add_section("REGRIPPER")
     config.set("REGRIPPER", "versao", "")
     config.set("REGRIPPER", "pasta", "")
     config.set("REGRIPPER", "executavel", "")
     config.set("REGRIPPER", "hash_executavel", "")
-    config.set("REGRIPPER", "tipo", "Pasta") # arquivo (só copia pasta); executável (instala)
+    config.set("REGRIPPER", "tipo", "Pasta")  # arquivo (só copia pasta); executável (instala)
     config.set("REGRIPPER", "origem", "")
     config.set("REGRIPPER", "profile", "")
-    
+
     config.add_section("BELKASOFT")
     config.set("REGRIPPER", "versao", "")
     config.set("REGRIPPER", "pasta", "")
     config.set("REGRIPPER", "executavel", "")
     config.set("REGRIPPER", "hash_executavel", "")
-    config.set("REGRIPPER", "tipo", "Pasta") # arquivo (só copia pasta); executável (instala)
+    config.set("REGRIPPER", "tipo", "Pasta")  # arquivo (só copia pasta); executável (instala)
     config.set("REGRIPPER", "origem", "")
     config.set("REGRIPPER", "profile", "")
-    
+
     config.add_section("IEF")
     config.set("IEF", "versao", "6.8.2.3062")
     config.set("IEF", "pasta", "C:/Program Files (x86)/Internet Evidence Finder")
     config.set("IEF", "executavel", "IEF.exe")
     config.set("IEF", "hash_executavel", "21cd66cce2841fadd3349f625c043e04")
-    config.set("IEF", "tipo", "Executavel") # arquivo (só copia pasta); executavel (instala)
+    config.set("IEF", "tipo", "Executavel")  # arquivo (só copia pasta); executavel (instala)
     config.set("IEF", "origem", r"C:\Users\PCF-\Downloads\IEFv682.3062setup.exe")
-    config.set("IEF", "parametros", "/SILENT /NORESTART /CLOSEAPPLICATIONS") # campo que só existe no tipo EXECUTAVEL
-    
+    config.set("IEF", "parametros", "/SILENT /NORESTART /CLOSEAPPLICATIONS")  # campo que só existe no tipo EXECUTAVEL
+
     config.add_section("IEF-MOBILE")
     config.set("IEF-MOBILE", "versao", "6.8.2.3062")
     config.set("IEF-MOBILE", "pasta", "C:/Program Files (x86)/Internet Evidence Finder")
     config.set("IEF-MOBILE", "executavel", "IEF.exe")
     config.set("IEF-MOBILE", "hash_executavel", "21cd66cce2841fadd3349f625c043e04")
-    config.set("IEF-MOBILE", "tipo", "Executavel") # arquivo (só copia pasta); executavel (instala)
+    config.set("IEF-MOBILE", "tipo", "Executavel")  # arquivo (só copia pasta); executavel (instala)
     config.set("IEF-MOBILE", "origem", r"C:\Users\PCF-\Downloads\IEFv682.3062setup.exe")
-    config.set("IEF-MOBILE", "parametros", "/SILENT /NORESTART /CLOSEAPPLICATIONS") # campo que só existe no tipo EXECUTAVEL
-    
+    config.set("IEF-MOBILE", "parametros",
+               "/SILENT /NORESTART /CLOSEAPPLICATIONS")  # campo que só existe no tipo EXECUTAVEL
+
     config.add_section("IPED_SEM_OCR")
     config.set("IPED_SEM_OCR", "versao", "3.10")
     config.set("IPED_SEM_OCR", "pasta", "C:/IPED-3.10_SEM_OCR")
     config.set("IPED_SEM_OCR", "executavel", "iped.jar")
     config.set("IPED_SEM_OCR", "hash_executavel", "ecb6ee867cf2fe2dc6917a33333607bf")
-    config.set("IPED_SEM_OCR", "tipo", "Arquivo") # arquivo (só copia pasta); executável (instala)
+    config.set("IPED_SEM_OCR", "tipo", "Arquivo")  # arquivo (só copia pasta); executável (instala)
     config.set("IPED_SEM_OCR", "origem", "R:/IPED-3.10_SEM_OCR")
     config.set("IPED_SEM_OCR", "profile", "")
-        
+
     config.add_section("IPED")
     config.set("IPED", "versao", "3.10")
     config.set("IPED", "pasta", "C:/IPED-3.10")
     config.set("IPED", "executavel", "iped.jar")
     config.set("IPED", "hash_executavel", "ecb6ee867cf2fe2dc6917a33333607bf")
-    config.set("IPED", "tipo", "Arquivo") # arquivo (só copia pasta); executável (instala)
+    config.set("IPED", "tipo", "Arquivo")  # arquivo (só copia pasta); executável (instala)
     config.set("IPED", "origem", "R:/IPED-3.10")
     config.set("IPED", "profile", "")
-    
+
     arquivo = open("CLIENTE.ini", "w")
     config.write(arquivo)
     arquivo.close()
     return
+
 
 # Função para criar/apagar mapeamento de rede
 def mapear(endereco_ip, compartilhamento, usuario, senha):
@@ -925,9 +926,10 @@ def mapear(endereco_ip, compartilhamento, usuario, senha):
         # mapeamento no Windows
         comando = "net use * \\\\" + endereco_ip + "\\" + compartilhamento + " /USER:" + usuario + " " + senha
         resultado = subprocess.check_output(comando)
-        mapeamento = resultado.decode("windows-1252")[10] + ":"#Pega o 10º caractere que é a letra da unidade criada
-        #print("Foi criada a unidade " + mapeamento + ":")
+        mapeamento = resultado.decode("windows-1252")[10] + ":"  # Pega o 10º caractere que é a letra da unidade criada
+        # print("Foi criada a unidade " + mapeamento + ":")
     return mapeamento
+
 
 # Apaga o mapeamento
 def apagar_mapeamento(mapeamento):
@@ -939,19 +941,18 @@ def apagar_mapeamento(mapeamento):
         comando = "net use " + mapeamento + " /del"
         resultado = subprocess.check_output(comando)
         print(resultado)
-    
+
     return
 
 
-
-def generate_file_md5(rootdir, filename, blocksize=2**20):
+def generate_file_md5(rootdir, filename, blocksize=2 ** 20):
     m = hashlib.md5()
-    with open( os.path.join(rootdir, filename) , "rb" ) as f:
+    with open(os.path.join(rootdir, filename), "rb") as f:
         while True:
             buf = f.read(blocksize)
             if not buf:
                 break
-            m.update( buf )
+            m.update(buf)
     return m.hexdigest()
 
 
@@ -960,9 +961,9 @@ def lista_ferramentas_habilitadas():
     listagem_ferramentas_habilitadas = []
     config = configparser.ConfigParser()
     config.read("CLIENTE.ini")
-    for key in config['FERRAMENTAS']: 
+    for key in config['FERRAMENTAS']:
         if config.getboolean("FERRAMENTAS", key):
-            listagem_ferramentas_habilitadas += [key] 
+            listagem_ferramentas_habilitadas += [key]
     return listagem_ferramentas_habilitadas
 
 
@@ -971,20 +972,20 @@ def executa_tarefas(qual_tarefa):
     # Em desenvolvimento não executa, para ganhar tempo
     if not Gdesenvolvimento:
         assegura_comunicacao_servidor_sapi()
-    
+
     # CONECTA COM O SERVIDOR E VERIFICA SE EXISTEM TAREFAS PARA CADA FERRAMENTA
     print_log_dual("Solicitando tarefa ao servidor do tipo: " + qual_tarefa)
-    (disponivel, tarefa)=sapisrv_obter_iniciar_tarefa(qual_tarefa)
+    (disponivel, tarefa) = sapisrv_obter_iniciar_tarefa(qual_tarefa)
 
     # Para ver o conjunto completo, descomentar a linha abaixo
     var_dump(tarefa)
-    
+
     # Se não tem nenhuma tarefa disponível, dorme um pouco
     if not disponivel:
         print_log_dual("Servidor informou que não existe tarefa " + qual_tarefa + " para processamento.")
         return
 
-    #continue
+    # continue
 
     # Ok, temos trabalho a fazer
     # ------------------------------------------------------------------
@@ -994,15 +995,17 @@ def executa_tarefas(qual_tarefa):
     # Os dados do storage estão em tarefa["dados_storage"]
     # Cria o mapeamento do storage
     # É montado primeiro para saber o local de montagem/letra da unidade
-    letra=mapear(endereco_ip=tarefa["dados_storage"]["maquina_ip"], compartilhamento=tarefa["dados_storage"]["pasta_share"], usuario=tarefa["dados_storage"]["usuario"], senha=tarefa["dados_storage"]["senha"])
+    letra = mapear(endereco_ip=tarefa["dados_storage"]["maquina_ip"],
+                   compartilhamento=tarefa["dados_storage"]["pasta_share"], usuario=tarefa["dados_storage"]["usuario"],
+                   senha=tarefa["dados_storage"]["senha"])
 
     # O sistema retorna um conjunto bastante amplo de dados
     # Os mais relevantes estão aqui
-    codigo_tarefa=tarefa["codigo_tarefa"] # Identificador único da tarefa
-    caminho_origem=letra + "/" + tarefa["caminho_origem"]
-    caminho_destino=letra + "/" + tarefa["caminho_destino"]
+    codigo_tarefa = tarefa["codigo_tarefa"]  # Identificador único da tarefa
+    caminho_origem = letra + "/" + tarefa["caminho_origem"]
+    caminho_destino = letra + "/" + tarefa["caminho_destino"]
 
-    print_log_dual("Processando tarefa: ",codigo_tarefa)
+    print_log_dual("Processando tarefa: ", codigo_tarefa)
 
     # Conferir se pasta/arquivo de origem está ok
     # ------------------------------------------------------------------
@@ -1010,11 +1013,11 @@ def executa_tarefas(qual_tarefa):
     # Neste ponto, seria importante verificar se esta origem está ok
     # Ou seja, se existe o arquivo ou pasta de origem
     if os.path.exists(caminho_origem):
-        print_log_dual("Caminho de origem (",caminho_origem,"): localizado")
+        print_log_dual("Caminho de origem (", caminho_origem, "): localizado")
     else:
-        print_log_dual("Caminho de origem (",caminho_origem,"): não localizado. Saindo.")
+        print_log_dual("Caminho de origem (", caminho_origem, "): não localizado. Saindo.")
         sys.exit(1)
-    
+
     # Criar pasta de destino
     # ------------------------------------------------------------------
     # Teria que criar a pasta de destino, caso ainda não exista
@@ -1022,16 +1025,15 @@ def executa_tarefas(qual_tarefa):
     # Neste cenário, teria que conferir se a pasta não tem nada
     # de útil (indicando alguma concorrência....ou processo abortado)
     if os.path.exists(caminho_destino):
-        print_log_dual("Caminho de destino (",caminho_destino,"): Já existe. Verificando se possui arquivos.")
+        print_log_dual("Caminho de destino (", caminho_destino, "): Já existe. Verificando se possui arquivos.")
         if os.listdir(caminho_destino) == []:
-            print_log_dual("Caminho de destino (",caminho_destino,"): Já existe, mas está vazia. Pode continuar.")
+            print_log_dual("Caminho de destino (", caminho_destino, "): Já existe, mas está vazia. Pode continuar.")
         else:
-            print_log_dual("Caminho de destino (",caminho_destino,"): Já existe, mas não está vazia. Saindo.")
+            print_log_dual("Caminho de destino (", caminho_destino, "): Já existe, mas não está vazia. Saindo.")
             sys.exit(1)
     else:
         os.makedirs(caminho_destino)
-        print_log_dual("Caminho de destino (",caminho_destino,"): Criado")
-
+        print_log_dual("Caminho de destino (", caminho_destino, "): Criado")
 
     # Fork para executar e esperar resposta
     # ------------------------------------------------------------------
@@ -1040,91 +1042,92 @@ def executa_tarefas(qual_tarefa):
     # executa a tarefa, e o programa principal se
     # encarregaria de controlar a execução
     print_log_dual("Invocando programa ", qual_tarefa, " e aguardando resultado")
-    #pid = os.fork()
-    #if pid == 0:
+    # pid = os.fork()
+    # if pid == 0:
     #    print_log_dual("invocado programa: "+comando)
     #    # Executa o programa externo e fica esperando o resultado
     #    os.system(comando) # Se mata o pai, morre também...melhorar isto
     #    print_log_dual("Programa externo encerrou")
     #    sys.exit()
 
-    
-    
+
+
     # Programa principal controla a execução
     # ------------------------------------------------------------------
-    codigo_situacao_tarefa=GEmAndamento 
+    codigo_situacao_tarefa = GEmAndamento
     atualizar_status_tarefa(
         codigo_tarefa=codigo_tarefa,
         codigo_situacao_tarefa=codigo_situacao_tarefa,
         status=texto_status
-        )
+    )
 
     if qual_tarefa == 'ief-mobile':
-        if ief(origem=caminho_origem, destino=caminho_destino+"/ief", tipo_execucao='cli', perfil_execucao='ief-mobile'):
-            texto_status="Finalizado com sucesso"
-            codigo_situacao_tarefa=GFinalizadoComSucesso
+        if ief(origem=caminho_origem, destino=caminho_destino + "/ief", tipo_execucao='cli',
+               perfil_execucao='ief-mobile'):
+            texto_status = "Finalizado com sucesso"
+            codigo_situacao_tarefa = GFinalizadoComSucesso
             atualizar_status_tarefa(
-                        codigo_tarefa=codigo_tarefa,
-                        codigo_situacao_tarefa=codigo_situacao_tarefa,
-                        status=texto_status
-                        )
+                codigo_tarefa=codigo_tarefa,
+                codigo_situacao_tarefa=codigo_situacao_tarefa,
+                status=texto_status
+            )
         return
 
     elif qual_tarefa == 'ief':
-        if ief(origem=caminho_origem, destino=caminho_destino+"/ief", tipo_execucao='cli', perfil_execucao='ief'):
-            texto_status="Finalizado com sucesso"
-            codigo_situacao_tarefa=GFinalizadoComSucesso
+        if ief(origem=caminho_origem, destino=caminho_destino + "/ief", tipo_execucao='cli', perfil_execucao='ief'):
+            texto_status = "Finalizado com sucesso"
+            codigo_situacao_tarefa = GFinalizadoComSucesso
             atualizar_status_tarefa(
-                        codigo_tarefa=codigo_tarefa,
-                        codigo_situacao_tarefa=codigo_situacao_tarefa,
-                        status=texto_status
-                        )
+                codigo_tarefa=codigo_tarefa,
+                codigo_situacao_tarefa=codigo_situacao_tarefa,
+                status=texto_status
+            )
         return
-    
-    
-    terminou=False
-            codigo_situacao_tarefa=GEmAndamento 
-            atualizar_status_tarefa(
-                    codigo_tarefa=codigo_tarefa,
-                    codigo_situacao_tarefa=codigo_situacao_tarefa,
-                    status=texto_status
-                    )
-            # Uma pequena pausa, e continua para a próxima simulação de andamento
-            # Cada simulação deve demorar entre 90 e 100 segundos
-            time.sleep(100-r)
-            continue;
-        
-        # Simula sucesso, 90% de probabilidade no demo
-        if (r>=90):
-            
-            # Simulação de sucesso, 90% de probabilidade no demo (90 a 99)
-            if (r<=99):
-                texto_status="Finalizado com sucesso"
-                codigo_situacao_tarefa=GFinalizadoComSucesso 
-            else: #(r==100), Simula falha, 10% de probabilidade
-                texto_status="Falhou - abortou (simulado)"
-                codigo_situacao_tarefa=GAbortou 
-                
-            # Se a atualização falhar, fica tentando até conseguir
-            # Se for problema transiente, vai resolver
-            # Caso contrário, algum humano irá mais cedo ou mais tarde intervir
-            while not atualizar_status_tarefa(
-                    codigo_tarefa=codigo_tarefa,
-                    codigo_situacao_tarefa=codigo_situacao_tarefa,
-                    status=texto_status
-                    ):
-                print_log_dual("Falhou atualização de status de sucesso. Tentando novamente")
-                time.sleep(60) # Tenta novamente em 1 minuto
-                    
-            terminou=True # Abandona loop de verificação de situação
-            print_log_dual("Dormindo após concluir...para dar chance a outros de pegar tarefas...apenas teste")
-            time.sleep(30) # Uma pausa apenas para teste..poder consultar sem nenhum agente trabalhando
-            continue;
+
+    terminou = False
+    codigo_situacao_tarefa = GEmAndamento
+    atualizar_status_tarefa(
+        codigo_tarefa=codigo_tarefa,
+        codigo_situacao_tarefa=codigo_situacao_tarefa,
+        status=texto_status
+    )
+    # Uma pequena pausa, e continua para a próxima simulação de andamento
+    # Cada simulação deve demorar entre 90 e 100 segundos
+    time.sleep(100 - r)
+    continue;
+
+    # Simula sucesso, 90% de probabilidade no demo
 
 
-    # Fim do while
-    
-    apagar_mapeamento(letra)
+if (r >= 90):
+
+    # Simulação de sucesso, 90% de probabilidade no demo (90 a 99)
+    if (r <= 99):
+        texto_status = "Finalizado com sucesso"
+        codigo_situacao_tarefa = GFinalizadoComSucesso
+    else:  # (r==100), Simula falha, 10% de probabilidade
+        texto_status = "Falhou - abortou (simulado)"
+        codigo_situacao_tarefa = GAbortou
+
+        # Se a atualização falhar, fica tentando até conseguir
+    # Se for problema transiente, vai resolver
+    # Caso contrário, algum humano irá mais cedo ou mais tarde intervir
+    while not atualizar_status_tarefa(
+            codigo_tarefa=codigo_tarefa,
+            codigo_situacao_tarefa=codigo_situacao_tarefa,
+            status=texto_status
+    ):
+        print_log_dual("Falhou atualização de status de sucesso. Tentando novamente")
+        time.sleep(60)  # Tenta novamente em 1 minuto
+
+    terminou = True  # Abandona loop de verificação de situação
+    print_log_dual("Dormindo após concluir...para dar chance a outros de pegar tarefas...apenas teste")
+    time.sleep(30)  # Uma pausa apenas para teste..poder consultar sem nenhum agente trabalhando
+    continue;
+
+# Fim do while
+
+apagar_mapeamento(letra)
 # Finaliza
 
 
@@ -1134,24 +1137,23 @@ def executa_tarefas(qual_tarefa):
 
 
 
-     
-    
-    resposta_origem = 'R:/Dropbox/DPF/____ PERICIA_JATO ____/TESTE/Item02_ItemArrecadacao03/Item02_ItemArrecadacao03.E01'
-    resposta_pasta_destino = 'R:/Dropbox/DPF/____ PERICIA_JATO ____/TESTE/'
-    resposta_ferramenta = pedidos.json()
-    if resposta_ferramenta['args']['ferramenta'] in ['IPED_SEM_OCR', 'IPED']:
-        arquivo_ferramenta = config.get(lista_ferramentas[x], "pasta") + "/" + config.get(lista_ferramentas[x], "executavel")
-        iped(resposta_origem, resposta_pasta_destino, arquivo_ferramenta)
-    elif resposta_ferramenta['args']['ferramenta'] == 'IEF':
-        resposta_pasta_destino = resposta_pasta_destino + "ief"
-        if not os.path.exists(resposta_pasta_destino):
-            ief(resposta_origem, resposta_pasta_destino, arquivo_ferramenta, 'cli')
-    elif resposta_ferramenta['args']['ferramenta'] == 'TABLEAU_TD3':
-        print("Usando Tableau TD3")
-        tableautd3()
-    return
 
 
+resposta_origem = 'R:/Dropbox/DPF/____ PERICIA_JATO ____/TESTE/Item02_ItemArrecadacao03/Item02_ItemArrecadacao03.E01'
+resposta_pasta_destino = 'R:/Dropbox/DPF/____ PERICIA_JATO ____/TESTE/'
+resposta_ferramenta = pedidos.json()
+if resposta_ferramenta['args']['ferramenta'] in ['IPED_SEM_OCR', 'IPED']:
+    arquivo_ferramenta = config.get(lista_ferramentas[x], "pasta") + "/" + config.get(lista_ferramentas[x],
+                                                                                      "executavel")
+    iped(resposta_origem, resposta_pasta_destino, arquivo_ferramenta)
+elif resposta_ferramenta['args']['ferramenta'] == 'IEF':
+    resposta_pasta_destino = resposta_pasta_destino + "ief"
+    if not os.path.exists(resposta_pasta_destino):
+        ief(resposta_origem, resposta_pasta_destino, arquivo_ferramenta, 'cli')
+elif resposta_ferramenta['args']['ferramenta'] == 'TABLEAU_TD3':
+    print("Usando Tableau TD3")
+    tableautd3()
+return
 
 if __name__ == "__main__":
     hora_inicio = time.time()
@@ -1159,11 +1161,5 @@ if __name__ == "__main__":
     main()
     hora_fim = time.time()
     duracao = hora_fim - hora_inicio
-    print_log_dual('Tempo decorrido:'+ str(duracao) +'seconds')
+    print_log_dual('Tempo decorrido:' + str(duracao) + 'seconds')
     print_log_dual('Programa finalizado normalmente.')
-    
-
-
-
-
-
