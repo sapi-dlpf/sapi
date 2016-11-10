@@ -19,7 +19,7 @@
 # - 
 # =======================================================================
 '''
-Created on 25 de jul de 2016
+@created: 25/06/2016
 
 @author: RODRIGO LANGE
 '''
@@ -36,12 +36,12 @@ import sys
 import time
 
 import autoit  # pip install -U pyautoit
-from SAPI_LIB import assegura_comunicacao_servidor_sapi
-from SAPI_LIB import atualizar_status_tarefa
-from SAPI_LIB import estaRodandoLinux
-from SAPI_LIB import print_log_dual
-from SAPI_LIB import sapisrv_obter_iniciar_tarefa
-from SAPI_LIB import var_dump
+from sapilib_0_5_4 import assegura_comunicacao_servidor_sapi
+from sapilib_0_5_4 import atualizar_status_tarefa
+from sapilib_0_5_4 import estaRodandoLinux
+from sapilib_0_5_4 import print_log_dual
+from sapilib_0_5_4 import sapisrv_obter_iniciar_tarefa
+from sapilib_0_5_4 import var_dump
 from selenium import webdriver  # pip install -U selenium
 from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.common.keys import Keys
@@ -664,7 +664,7 @@ def ief_config(pasta_ief, perfil_execucao):
     return
 
 
-def tableautd3(tableau_ID='192.168.0.149'):
+def tableautd3(tableau_id='192.168.0.149'):
     '''
     Se o servidor Windows não está mais sendo conectado, pode ser que o serviço tenha travado. 
     Para reiniciar o serviço, use os comandos:
@@ -676,7 +676,7 @@ def tableautd3(tableau_ID='192.168.0.149'):
     '''
     # ABRE BROWSER
     browser = webdriver.Firefox()
-    browser.get('http://' + tableau_ID)
+    browser.get('http://' + tableau_id)
     browser.implicitly_wait(10)
     # time.sleep(2)
     browser.maximize_window()
@@ -776,8 +776,6 @@ def tableautd3(tableau_ID='192.168.0.149'):
     time.sleep(4)
     elem = browser.find_element_by_xpath('html/body/div[8]/div[3]/button[1]').click()
     # time.sleep(4)
-
-
     elem = Select(browser.find_element_by_xpath('html/body/div[7]/div[7]/div/select'))  # IMAGE DIR NAMING
     elem.select_by_visible_text('Serial + Model Number')
     elem = Select(
@@ -938,6 +936,7 @@ def apagar_mapeamento(mapeamento):
         comando = ''
     else:
         # mapeamento no Windows
+        mapeamento += ":"
         comando = "net use " + mapeamento + " /del"
         resultado = subprocess.check_output(comando)
         print(resultado)
@@ -1026,7 +1025,7 @@ def executa_tarefas(qual_tarefa):
     # de útil (indicando alguma concorrência....ou processo abortado)
     if os.path.exists(caminho_destino):
         print_log_dual("Caminho de destino (", caminho_destino, "): Já existe. Verificando se possui arquivos.")
-        if os.listdir(caminho_destino) == []:
+        if not os.listdir(caminho_destino):
             print_log_dual("Caminho de destino (", caminho_destino, "): Já existe, mas está vazia. Pode continuar.")
         else:
             print_log_dual("Caminho de destino (", caminho_destino, "): Já existe, mas não está vazia. Saindo.")
@@ -1049,8 +1048,6 @@ def executa_tarefas(qual_tarefa):
     #    os.system(comando) # Se mata o pai, morre também...melhorar isto
     #    print_log_dual("Programa externo encerrou")
     #    sys.exit()
-
-
 
     # Programa principal controla a execução
     # ------------------------------------------------------------------
@@ -1094,15 +1091,15 @@ def executa_tarefas(qual_tarefa):
     # Uma pequena pausa, e continua para a próxima simulação de andamento
     # Cada simulação deve demorar entre 90 e 100 segundos
     time.sleep(100 - r)
-    continue;
+    continue
 
     # Simula sucesso, 90% de probabilidade no demo
 
 
-if (r >= 90):
+if r >= 90:
 
     # Simulação de sucesso, 90% de probabilidade no demo (90 a 99)
-    if (r <= 99):
+    if r <= 99:
         texto_status = "Finalizado com sucesso"
         codigo_situacao_tarefa = GFinalizadoComSucesso
     else:  # (r==100), Simula falha, 10% de probabilidade
@@ -1123,21 +1120,12 @@ if (r >= 90):
     terminou = True  # Abandona loop de verificação de situação
     print_log_dual("Dormindo após concluir...para dar chance a outros de pegar tarefas...apenas teste")
     time.sleep(30)  # Uma pausa apenas para teste..poder consultar sem nenhum agente trabalhando
-    continue;
+    continue
 
 # Fim do while
 
 apagar_mapeamento(letra)
 # Finaliza
-
-
-
-
-
-
-
-
-
 
 resposta_origem = 'R:/Dropbox/DPF/____ PERICIA_JATO ____/TESTE/Item02_ItemArrecadacao03/Item02_ItemArrecadacao03.E01'
 resposta_pasta_destino = 'R:/Dropbox/DPF/____ PERICIA_JATO ____/TESTE/'
@@ -1147,7 +1135,7 @@ if resposta_ferramenta['args']['ferramenta'] in ['IPED_SEM_OCR', 'IPED']:
                                                                                       "executavel")
     iped(resposta_origem, resposta_pasta_destino, arquivo_ferramenta)
 elif resposta_ferramenta['args']['ferramenta'] == 'IEF':
-    resposta_pasta_destino = resposta_pasta_destino + "ief"
+    resposta_pasta_destino += "ief"
     if not os.path.exists(resposta_pasta_destino):
         ief(resposta_origem, resposta_pasta_destino, arquivo_ferramenta, 'cli')
 elif resposta_ferramenta['args']['ferramenta'] == 'TABLEAU_TD3':
