@@ -15,7 +15,7 @@
 #  - v1.0 : Inicial
 # =======================================================================
 # TODO:
-# -
+# - Verificar queda de rede no meio da cópia
 # =======================================================================
 
 
@@ -56,7 +56,6 @@ def funcao_copia_com_status(src, dst):
     global Gtempo_ultimo_status_update
     if time.time() > Gtempo_ultimo_status_update:
         Gtempo_ultimo_status_update += Gtempo_atualizacao_progresso
-        print_log_dual("Copiando arquivo " + src)
         atualizar_status_tarefa(Gcd_tarefa_atual, GEmAndamento, "Copiando arquivo " + src)
     shutil.copy2(src, dst)
 
@@ -89,8 +88,8 @@ def copia_com_status(file_size, fsrc, fdst, length=16 * 1024):
         if time.time() > Gtempo_ultimo_status_update:
             Gtempo_ultimo_status_update += Gtempo_atualizacao_progresso
             if not Gdebug:
-                atualizar_status_tarefa(Gcd_tarefa_atual, GEmAndamento, "Cópia em andamento: ")
-            print_log_dual("Copiados %s - %.1f%%" % (formata_tamanho(bytes_lidos), bytes_lidos * 100 / file_size))
+                atualizar_status_tarefa(Gcd_tarefa_atual, GEmAndamento, "Cópia em andamento: Copiados %s - %.1f%%" % (
+                    formata_tamanho(bytes_lidos), bytes_lidos * 100 / file_size))
         if not buf:
             break
         fdst.write(buf)
@@ -134,14 +133,23 @@ while True:
         Gcd_tarefa_atual = tarefa["codigo_tarefa"]  # Identificador único da tarefa
         caminho_origem = tarefa["caminho_origem"]
         caminho_destino = tarefa["caminho_destino"]
-        sucesso, ponto_de_montagem_origem, erro_montagem = acesso_storage_windows(tarefa["dados_storage"], True)
-        if sucesso:
-            print_log_dual("montado ponto de origem: " + ponto_de_montagem_origem)
-
-        sucesso, ponto_de_montagem_destino, erro_montagem = acesso_storage_windows(tarefa["dados_storage_entrega"],
-                                                                                   True)
-        if sucesso:
-            print_log_dual("montado ponto de entrega: " + ponto_de_montagem_destino)
+        sucesso = False
+        while not sucesso:
+            sucesso, ponto_de_montagem_origem, erro_montagem = acesso_storage_windows(tarefa["dados_storage"], True)
+            if sucesso:
+                print_log_dual("Montado ponto de origem: " + ponto_de_montagem_origem)
+            else:
+                print_log_dual("Falha na montagem do storage de origem: " + ponto_de_montagem_origem)
+                dormir(Gtempo_sleep)
+        sucesso = False
+        while not sucesso:
+            sucesso, ponto_de_montagem_destino, erro_montagem = acesso_storage_windows(tarefa["dados_storage_entrega"],
+                                                                                       True)
+            if sucesso:
+                print_log_dual("Montado ponto de entrega: " + ponto_de_montagem_destino)
+            else:
+                print_log_dual("Falha na montagem do storage de destino: " + ponto_de_montagem_destino)
+                dormir(Gtempo_sleep)
         caminho_origem = ponto_de_montagem_origem + caminho_origem
         caminho_destino = ponto_de_montagem_destino + caminho_destino
     if not os.path.exists(caminho_origem):
