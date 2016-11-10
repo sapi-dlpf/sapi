@@ -75,9 +75,9 @@ def atualizar_tarefa_com_espera(cd_tarefa, cd_situacao_tarefa, texto_status):
 def formata_tamanho(num, sufixo='B'):
     for unidade in ['', 'K', 'M', 'G', 'T', 'P', 'E', 'Z']:
         if abs(num) < 1024.0:
-            return "%3.1f%s%s" % (num, unidade, sufixo)
+            return "%.1f%s%s" % (num, unidade, sufixo)
         num /= 1024.0
-    return "%.1f%s%s" % (num, 'Yi', sufixo)
+    return "%.1f%s%s" % (num, 'Y', sufixo)
 
 
 def copia_com_status(file_size, fsrc, fdst, length=16 * 1024):
@@ -121,9 +121,8 @@ while True:
     if not disponivel:
         print_log_dual("Servidor informou que não existe tarefa para processamento. Esperando (", Gtempo_sleep,
                        " segundos)")
-
-        dormir(Gtempo_sleep)
         if not Gdebug:
+            dormir(Gtempo_sleep)
             continue
     # var_dump(tarefa)
     # die("1")
