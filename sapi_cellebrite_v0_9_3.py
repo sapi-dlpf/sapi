@@ -20,28 +20,35 @@
 #  - v1.0 : Inicial
 # =======================================================================
 # TODO: 
-# - 
+# -
+# - ...
 # =======================================================================
 
-from __future__ import print_function
-
-import platform
-import sys
-
-# Testa se está rodando a versão correta do python
-if sys.version_info <= (3, 0):
-    erro = "Versao do intepretador python (" + str(platform.python_version()) + ") incorreta.\n"
-    sys.stdout.write(erro)
-    sys.stdout.write("Este programa requer Python 3 (preferencialmente Python 3.5.2).\n")
-    sys.exit(1)
 
 # Módulos utilizados
+# ====================================================================================================
+# Baseado no PEP8, os imports tem que estar todos no ínicio do arquivo
+# No entanto, neste caso, o if acima serve para testar se existe alguma incompatibilidade de versão
+# E isto tem que ser feito bem no início, antes de qualquer outra coisa, inclusive dos imports,
+# caso contrário pode ocorrer erro de runtime de um import que não existe no python2.7, por exemplo
+from __future__ import print_function
+import platform
+import sys
 import socket
 import time
 import xml.etree.ElementTree as ElementTree
 import shutil
 
+# Verifica se está rodando versão correta de Python
+# ====================================================================================================
+if sys.version_info <= (3, 0):
+    sys.stdout.write("Versao do intepretador python (" + str(platform.python_version()) + ") incorreta.\n")
+    sys.stdout.write("Este programa requer Python 3 (preferencialmente Python 3.5.2).\n")
+    sys.exit(1)
+
 # Interface gráfica (tk)
+# Este nome de modulo só existe em Python3
+# Logo, tem que ficar abaixo do teste de python3
 from tkinter import Tk
 
 # =======================================================================
@@ -67,15 +74,13 @@ GtempoEntreAtualizacoesStatus = 180
 # **********************************************************************
 
 # Para código produtivo, o comando abaixo deve ser substituído pelo
-# código integral de sapi.py, para evitar dependência
+# código integral de sapi_lib_xxx.py, para evitar dependência
 from sapilib_0_5_4 import *
 
 
 # **********************************************************************
 # PRODUCAO 
 # **********************************************************************
-
-
 
 
 # ======================================================================
@@ -87,23 +92,28 @@ from sapilib_0_5_4 import *
 # Funções Auxiliares Ambiente W I N D O W S
 # ======================================================================
 
-def getClipboard():
-    try:
-        root = Tk()
-        root.withdraw()
-        clip = root.clipboard_get()
-    except BaseException as e:
-        print_ok("Nao foi possivel recuperado dados do clipboard")
-        clip = ""
+def get_clipboard():
+    # try:
+    #     root = Tk()
+    #     root.withdraw()
+    #     clip = root.clipboard_get()
+    # except BaseException as e:
+    #     print("Nao foi possivel recuperar dados do clipboard")
+    #     clip = ""
+
+    # Vamos gerar erros, para ver qual é o tipo de exception que ocorre
+    root = Tk()
+    root.withdraw()
+    clip = root.clipboard_get()
 
     return clip
 
 
 # Recupera os componentes da tarefa correntes e retorna em tupla
 # ----------------------------------------------------------------------
-def obterTarefaItemCorrente():
+def obter_tarefa_item_corrente():
     x = Gtarefas[Gicor - 1]
-    return (x["tarefa"], x["item"])
+    return (x.get("tarefa"), x.get("item"))
 
 
 # Se pasta não existe, cria	
@@ -137,11 +147,11 @@ def tamanho_pasta(start_path):
 # Converte Bytes para formato Humano
 def converte_bytes_humano(size, precision=1):
     suffixes = ['B', 'KB', 'MB', 'GB', 'TB', "PB", "EB", "ZB", "YB"]
-    suffixIndex = 0
-    while size > 1024 and suffixIndex < 8:
-        suffixIndex += 1  # increment the index of the suffix
-        size = size / 1024.0  # apply the division
-    return "%.*f%s" % (precision, size, suffixes[suffixIndex])
+    suffix_index = 0
+    while size > 1024 and suffix_index < 8:
+        suffix_index += 1  # increment the index of the suffix
+        size /= 1024.0  # apply the division
+    return "%.*f%s" % (precision, size, suffixes[suffix_index])
 
 
 # Retorna True se existe storage montado no ponto_montagem
@@ -176,7 +186,7 @@ def atualizar_status_tarefa(codigo_tarefa, codigo_situacao_tarefa, status, dados
              'status': status,
              'execucao_nome_agente': nome_agente
              }
-    if (dados_relevantes != None):
+    if (dados_relevantes is not None):
         dados_relevantes_json = json.dumps(dados_relevantes, sort_keys=True)
         param['dados_relevantes_json'] = dados_relevantes_json
 
@@ -198,7 +208,7 @@ def atualizar_status_tarefa(codigo_tarefa, codigo_situacao_tarefa, status, dados
 #  - pasta: Memorando_19317-16_Lava_Jato_RJ-12/item04Arrecadacao06/item04Arrecadacao06_imagem
 #  - nome_arquivo: item04Arrecadacao06.E01
 # ----------------------------------------------------------------------
-def decompoeCaminho(caminho):
+def decompoe_caminho(caminho):
     partes = caminho.split("/")
 
     nome_arquivo = partes.pop()
@@ -223,10 +233,6 @@ def validar_arquivo_xml(arquivo, item, explicar=True):
     quantidade_componentes = 0
 
     # dicionários para montagem de dados para laudo
-    d_ident = {}  # Dados de identificação
-    d_ident_geral = {}  # Dados gerais de identificação
-
-    d_aquis = {}  # Dados de aquisição
     d_aquis_geral = {}  # Dados gerais da aquisição
 
     # Abre arquivo XML e faz parse
@@ -238,7 +244,8 @@ def validar_arquivo_xml(arquivo, item, explicar=True):
     # Valida cabeçalho do XML
     # XML tem que começar por
     # <?xml version="1.0" encoding="utf-8"?>
-    # <project id="6867effe-489a-4ece-8fc7-c1e3bb644efc" name="Item 11" reportVersion="5.2.0.0" licenseID="721705392" containsGarbage="False" extractionType="FileSystem" xmlns="http://pa.cellebrite.com/report/2.0">
+    # <project id="6867effe-489a-4ece-8fc7-c1e3bb644efc" name="Item 11" reportVersion="5.2.0.0" licenseID="721705392"
+    # containsGarbage="False" extractionType="FileSystem" xmlns="http://pa.cellebrite.com/report/2.0">
     # ------------------------------------------------------------------
     # A raiz tem que ser <project>
     if ('project' not in root.tag):
@@ -264,12 +271,12 @@ def validar_arquivo_xml(arquivo, item, explicar=True):
     # 'reportVersion': '5.2.0.0'
 
     # Versão do relatório
-    reportVersion = a.get('reportVersion', None)
-    if reportVersion not in ['5.2.0.0']:
+    report_version = a.get('reportVersion', None)
+    if report_version not in ['5.2.0.0']:
         # Apenas um aviso. Continua
-        if_print_ok(explicar, "Aviso: Relatório com esta versão (", reportVersion,
+        if_print_ok(explicar, "Aviso: Relatório com esta versão (", report_version,
                     ") não foi testada com este validador. Pode haver incompatibilidade")
-    d_aquis_geral['reportVersion'] = reportVersion
+    d_aquis_geral['reportVersion'] = report_version
 
     # Nome do projeto
     name = a.get('name', None)
@@ -284,12 +291,14 @@ def validar_arquivo_xml(arquivo, item, explicar=True):
     # O nome da extração identifica a sua natureza
     # Apenas alguns nomes são válidos
     # ------------------------------------------------------------------
-    '''
-        <extractionInfo id="0" name="Aparelho - Lógica" isCustomName="True" type="Logical" deviceName="Report" fullName="Cellebrite UFED Reports" index="0" IsPartialData="False" />
-        <extractionInfo id="1" name="Aparelho - Sistema de arquivos (Downgrade)" isCustomName="True" type="FileSystem" deviceName="SAMG531F" fullName="Samsung SM-G531F Galaxy Grand Prime" index="1" IsPartialData="False" />
-        <extractionInfo id="2" name="Cartão SIM 2" isCustomName="True" type="Logical" deviceName="Report" fullName="Cellebrite UFED Reports" index="2" IsPartialData="False" />
-        <extractionInfo id="3" name="Cartão SIM 1" isCustomName="True" type="Logical" deviceName="Report" fullName="Cellebrite UFED Reports" index="3" IsPartialData="False" />
-    '''
+    # <extractionInfo id="0" name="Aparelho - Lógica" isCustomName="True" type="Logical" deviceName="Report"
+    #   fullName="Cellebrite UFED Reports" index="0" IsPartialData="False" />
+    # <extractionInfo id="1" name="Aparelho - Sistema de arquivos (Downgrade)" isCustomName="True" type="FileSystem" 
+    #   deviceName="SAMG531F" fullName="Samsung SM-G531F Galaxy Grand Prime" index="1" IsPartialData="False" />
+    # <extractionInfo id="2" name="Cartão SIM 2" isCustomName="True" type="Logical" deviceName="Report"
+    #   fullName="Cellebrite UFED Reports" index="2" IsPartialData="False" />
+    # <extractionInfo id="3" name="Cartão SIM 1" isCustomName="True" type="Logical" deviceName="Report"
+    #   fullName="Cellebrite UFED Reports" index="3" IsPartialData="False" />
 
     # Valida cada extração
     # ------------------------------------------------------------------
@@ -359,11 +368,13 @@ def validar_arquivo_xml(arquivo, item, explicar=True):
     # Verifica quantidade de extrações
     if (qtd_extracao_aparelho == 0):
         if_print_ok(explicar,
-                    "Aviso: Não foi encontrada nenhuma extração com nome contendo a palavra 'Aparelho'. Isto é incomum. Assegure-se que está correto.")
+                    "Aviso: Não foi encontrada nenhuma extração com nome contendo a palavra 'Aparelho'.",
+                    "Isto é incomum. Assegure-se que está correto.")
 
     if (qtd_extracao_sim == 0):
         if_print_ok(explicar,
-                    "Aviso: Não foi encontrada nenhuma extração com nome contendo a palavra 'SIM'. Isto é incomum. Assegure-se que isto está correto.")
+                    "Aviso: Não foi encontrada nenhuma extração com nome contendo a palavra 'SIM'.",
+                    "Isto é incomum. Assegure-se que isto está correto.")
 
     # ------------------------------------------------------------------
     # Informações adicionais
@@ -377,27 +388,23 @@ def validar_arquivo_xml(arquivo, item, explicar=True):
 
     # Busca versão do physical Analyzer
     p = ns + "metadata/" + ns + "item" + "[@name='UFED_PA_Version']"
-    UFED_PA_Version = None
-    if (root.find(p) != None):
-        UFED_PA_Version = root.find(p).text
-
-    # print("UFED_PA_Version=",UFED_PA_Version)
-
+    ufed_pa_version = None
+    if (root.find(p) is not None):
+        ufed_pa_version = root.find(p).text
 
     # ------------------------------------------------------------------
     # Dados das extrações
     # ------------------------------------------------------------------
 
-    '''
-      <metadata section="Extraction Data">
-        <item name="DeviceInfoExtractionStartDateTime" sourceExtraction="1"><![CDATA[14/09/2016 16:49:42(UTC-3)]]></item>
-        <item name="DeviceInfoExtractionEndDateTime" sourceExtraction="1"><![CDATA[14/09/2016 17:32:15(UTC-3)]]></item>
-        <item name="DeviceInfoUnitIdentifier" sourceExtraction="1"><![CDATA[UFED S/N 5933940]]></item>
-        <item name="DeviceInfoUnitVersion" sourceExtraction="1"><![CDATA[5.2.0.689]]></item>
-        <item name="DeviceInfoInternalVersion" sourceExtraction="1"><![CDATA[4.3.8.689]]></item>
-        <item name="DeviceInfoSelectedManufacturer" sourceExtraction="1"><![CDATA[Samsung GSM]]></item>
-        ... continua
-    '''
+    # <metadata section="Extraction Data">
+    #   <item name="DeviceInfoExtractionStartDateTime" sourceExtraction="1">
+    #       <![CDATA[14/09/2016 16:49:42(UTC-3)]]></item>
+    #   <item name="DeviceInfoExtractionEndDateTime" sourceExtraction="1"><![CDATA[14/09/2016 17:32:15(UTC-3)]]></item>
+    #   <item name="DeviceInfoUnitIdentifier" sourceExtraction="1"><![CDATA[UFED S/N 5933940]]></item>
+    #   <item name="DeviceInfoUnitVersion" sourceExtraction="1"><![CDATA[5.2.0.689]]></item>
+    #   <item name="DeviceInfoInternalVersion" sourceExtraction="1"><![CDATA[4.3.8.689]]></item>
+    #   <item name="DeviceInfoSelectedManufacturer" sourceExtraction="1"><![CDATA[Samsung GSM]]></item>
+    #   ... continua
 
     # Localiza a seção <metadata section="Extraction Data">
     p = ns + 'metadata' + '[@section="Extraction Data"]'
@@ -406,34 +413,34 @@ def validar_arquivo_xml(arquivo, item, explicar=True):
     for item in secao:
         # Armazena todos os valores
         name = item.get('name', None)
-        sourceExtraction = item.get('sourceExtraction', None)
-        if (sourceExtraction == None):
+        source_extraction = item.get('sourceExtraction', None)
+        if (source_extraction is None):
             # Tem que ser associado a alguma extração
             continue
 
         valor = item.text
         # print('name=',name,' sourceExtraction = ',sourceExtraction, " valor=",valor)
-        if (sourceExtraction != None):
-            if (sourceExtraction not in dext):
-                dext[sourceExtraction] = {}
-            dext[sourceExtraction][name] = valor
-
-    # var_dump(dext)
-
+        if (source_extraction is not None):
+            if (source_extraction not in dext):
+                dext[source_extraction] = {}
+            dext[source_extraction][name] = valor
 
     # ------------------------------------------------------------------
     # Informações sobre os dispositivos
     # Na realidade, também tem relação com as extração
     # Não sei porque foi separado em duas seçoes.
     # ------------------------------------------------------------------
-    '''
-    <metadata section="Device Info">
-        <item id="42f3c65b-d20f-4b60-949c-d77e92da93bb" name="DeviceInfoAndroidID" sourceExtraction="1"><![CDATA[ec4c58699c0e4f1e]]></item>
-        <item id="53b63a05-927a-4c2c-b415-3e3811b90290" name="DeviceInfoAndroidID" sourceExtraction="0"><![CDATA[ec4c58699c0e4f1e]]></item>
-        <item id="432da4c4-e060-4134-804c-f0cd0ee80a81" name="DeviceInfoDetectedManufacturer" sourceExtraction="0"><![CDATA[samsung]]></item>
-        <item id="fdff5848-2077-42f6-a488-8f743233266a" name="DeviceInfoDetectedModel" sourceExtraction="0"><![CDATA[SM-G531BT]]></item>
-        <item id="28bfe23c-861f-4ab4-836a-aebbf9b51ef2" name="DeviceInfoRevision" sourceExtraction="0"><![CDATA[5.1.1 LMY48B G531BTVJU0AOL1]]></item>
-    '''
+    # <metadata section="Device Info">
+    #     <item id="42f3c65b-d20f-4b60-949c-d77e92da93bb" name="DeviceInfoAndroidID" sourceExtraction="1">
+    #       <![CDATA[ec4c58699c0e4f1e]]></item>
+    #     <item id="53b63a05-927a-4c2c-b415-3e3811b90290" name="DeviceInfoAndroidID" sourceExtraction="0">
+    #       <![CDATA[ec4c58699c0e4f1e]]></item>
+    #     <item id="432da4c4-e060-4134-804c-f0cd0ee80a81" name="DeviceInfoDetectedManufacturer" sourceExtraction="0">
+    #       <![CDATA[samsung]]></item>
+    #     <item id="fdff5848-2077-42f6-a488-8f743233266a" name="DeviceInfoDetectedModel" sourceExtraction="0">
+    #       <![CDATA[SM-G531BT]]></item>
+    #     <item id="28bfe23c-861f-4ab4-836a-aebbf9b51ef2" name="DeviceInfoRevision" sourceExtraction="0">
+    #       <![CDATA[5.1.1 LMY48B G531BTVJU0AOL1]]></item>
 
     # Localiza a seção <metadata section="Device Info">
     p = ns + 'metadata' + '[@section="Device Info"]'
@@ -441,16 +448,13 @@ def validar_arquivo_xml(arquivo, item, explicar=True):
     # print(secao)
     for item in secao:
         name = item.get('name', None)
-        sourceExtraction = item.get('sourceExtraction', None)
+        source_extraction = item.get('sourceExtraction', None)
         valor = item.text
         # print('name=',name,' sourceExtraction = ',sourceExtraction, " valor=",valor)
-        if (sourceExtraction != None):
-            if (sourceExtraction not in dext):
-                dext[sourceExtraction] = {}
-            dext[sourceExtraction][name] = valor
-
-    # var_dump(dext)
-
+        if (source_extraction is not None):
+            if (source_extraction not in dext):
+                dext[source_extraction] = {}
+            dext[source_extraction][name] = valor
 
     # ------------------------------------------------------------------
     # Prepara propriedades para laudo
@@ -481,7 +485,7 @@ def validar_arquivo_xml(arquivo, item, explicar=True):
     'ExtractionType', 					# Descrição do método de extração (ex: 'Lógico [ Android Backup ]')
     #'extractionInfo_IsPartialData', 	# O que são dados parciais? Extração parcial? Relatório parcial? Uso futuro!?
     #'extractionInfo_type', 				# Tipo de extração (Ex: 'Logical') => ExtractionType está em português
-    #'ufedExtractionApkDowngradeTitle',  # Uma explicação do próprio UFED sobre o download de APK. => bonitinho...mas por enquanto desnecessário
+    #'ufedExtractionApkDowngradeTitle',  # Uma explicação do próprio UFED sobre o download de APK. => bonitinho...
 
 
     # Exclusivos de aparelhos
@@ -523,9 +527,6 @@ def validar_arquivo_xml(arquivo, item, explicar=True):
         'ExtractionType': 'sapiExtracoes'
     }
 
-    # var_dump(dext)
-
-
     # Processa as extrações do aparelho, separando o que é relevante para laudo
     # -------------------------------------------------------------------------
     if (qtd_extracao_aparelho > 0):
@@ -551,7 +552,7 @@ def validar_arquivo_xml(arquivo, item, explicar=True):
         dcomp['sapiExtracoes'] = ', '.join(lista_extracoes)
 
         # Inclui componente
-        quantidade_componentes = quantidade_componentes + 1
+        quantidade_componentes += 1
         ix_comp = "comp" + str(quantidade_componentes)
 
         dlaudo[ix_comp] = dcomp
@@ -564,7 +565,7 @@ def validar_arquivo_xml(arquivo, item, explicar=True):
     for i in dext:
         if not dext[i].get("sapiSIM", False):
             continue
-        dcomp = {}
+        dcomp = dict()
         dcomp["sapiTipoComponente"] = "sim"
         # Nome da extração definida pelo perito
         dcomp["sapiNomeComponente"] = dext[i]["extractionInfo_name"]
@@ -576,20 +577,12 @@ def validar_arquivo_xml(arquivo, item, explicar=True):
             dcomp[proplaudo_sim[j]] = dext[i][j]
 
         # Inclui componente nos dados relevantes para laudo
-        quantidade_componentes = quantidade_componentes + 1
+        quantidade_componentes += 1
         ix_comp = "comp" + str(quantidade_componentes)
         dlaudo[ix_comp] = dcomp
 
-    # print_ok("Apos insercao algum SIM")
-    # var_dump(d_ident)
-    # die('ponto712')
-
     # TODO: Outros dispositivos...cartões SD, por exemplo
     # Tem que ter um exemplo....
-
-
-    # var_dump(dext)
-    # var_dump(d_ident)
 
     # Finaliza dados para laudo
     # -----------------------------------------------------------------
@@ -607,8 +600,6 @@ def validar_arquivo_xml(arquivo, item, explicar=True):
 
     # var_dump(dados)
     # die('ponto1044')
-
-
 
     return (True, dados)
 
@@ -666,13 +657,13 @@ def validar_arquivo_xml(arquivo, item, explicar=True):
     '''
 
 
-def exibirDadosLaudo(d):
-    print_ok("-" * 20, " Dados para laudo ", "-" * 20)
+def exibir_dados_laudo(d):
+    print("-" * 20 + " Dados para laudo " + "-" * 20)
 
     pp = pprint.PrettyPrinter(indent=4)
     pp.pprint(d)
 
-    print_ok("-" * 60)
+    print("-" * 60)
 
     return
 
@@ -684,10 +675,10 @@ def exibirDadosLaudo(d):
         q=q+1
         # Pula linha
         if (q>1):
-            print_ok()
-        print_ok(str(q)+")",i)
+            print()
+        print(str(q)+")",i)
         for j in sorted(d[i]):
-            print_ok("  ",d[i][j])
+            print("  ",d[i][j])
 
             for k in sorted(d[i][j]):
 
@@ -696,9 +687,9 @@ def exibirDadosLaudo(d):
                     continue
 
                 # Exibe campo para usuário
-                print_ok('    %12s : %s' % (j, d[i][j]))
+                print('    %12s : %s' % (j, d[i][j]))
 
-    print_ok("-"*60)
+    print("-"*60)
 
     return
     '''
@@ -733,9 +724,9 @@ def valida_pasta_relatorio_cellebrite(pasta, explicar=False):
 
 
 # Chama copia e intercepta/trata erros
-def copiaCellebrite_ok():
+def copia_cellebrite_ok():
     try:
-        copiaCellebrite()
+        copia_cellebrite()
     except KeyboardInterrupt:
         print("Operação interrompida pelo usuário")
         return
@@ -743,13 +734,13 @@ def copiaCellebrite_ok():
 
 # Valida e copia relatórios do UFED/Cellebrite
 # ----------------------------------------------------------------------
-def copiaCellebrite():
-    print_ok()
-    print_ok("Cópia de relatório para storage")
-    print_ok("Contactando servidor. Aguarde...")
+def copia_cellebrite():
+    print()
+    print("Cópia de relatório para storage")
+    print("Contactando servidor. Aguarde...")
 
     # Recupera tarefa
-    (tarefa, item) = obterTarefaItemCorrente()
+    (tarefa, item) = obter_tarefa_item_corrente()
 
     # var_dump(item)
 
@@ -762,8 +753,8 @@ def copiaCellebrite():
     # Insucesso. Provavelmente a tarefa não foi encontrada
     if (not sucesso):
         # Continua no loop
-        print_ok("Erro: ", msg_erro)
-        print_ok("Efetue refresh na lista de tarefa")
+        print("Erro: ", msg_erro)
+        print("Efetue refresh na lista de tarefa")
         return False
 
     # var_dump(item["item"])
@@ -772,27 +763,26 @@ def copiaCellebrite():
     # Exibe dados do item para usuário confirmar
     # se escolheu o item correto
     # ------------------------------------------------------------------
-    print_ok()
-    print_ok("-" * 129)
-    print_ok("Item: ", tarefa["dados_item"]["item_apreensao"])
-    print_ok("Material: ", tarefa["dados_item"]["material"])
-    print_ok("Descrição: ", tarefa["dados_item"]["descricao"])
-    print_ok("-" * 129)
-    print_ok()
+    print()
+    print("-" * 129)
+    print("Item: ", tarefa["dados_item"]["item_apreensao"])
+    print("Material: ", tarefa["dados_item"]["material"])
+    print("Descrição: ", tarefa["dados_item"]["descricao"])
+    print("-" * 129)
+    print()
     # prosseguir=pergunta_sim_nao("Prosseguir para este item? ",default="n")
     # if (not prosseguir):
-    #	return
+    #    return
 
     # ------------------------------------------------------------------
     # Verifica se tarefa tem o tipo certo
     # ------------------------------------------------------------------
     if (not tarefa["tipo"] == "extracao"):
         # Isto aqui não deveria acontecer nunca...mas para garantir...
-        print_ok("Tarefa do tipo [", tarefa["tipo"], "] não pode ser resolvida por sapi_cellebrite")
+        print("Tarefa do tipo [", tarefa["tipo"], "] não pode ser resolvida por sapi_cellebrite")
         return
 
     # TODO: Se tarefa tiver sido finalizada com sucesso, avisar também
-
 
     # ------------------------------------------------------------------
     # Verifica se tarefa está com o status correto
@@ -804,14 +794,12 @@ def copiaCellebrite():
 
     if (int(tarefa["codigo_situacao_tarefa"]) == GFinalizadoComSucesso):
         # Isto aqui não deveria acontecer nunca...mas para garantir...
-        print_ok("Cancelado: Tarefa já foi finalizada com sucesso.")
-        print_ok()
-        print_ok("Caso seja necessário refazer esta tarefa, utilize a opção de REINICIAR tarefa no SETEC3.")
+        print("Cancelado: Tarefa já foi finalizada com sucesso.")
+        print()
+        print("Caso seja necessário refazer esta tarefa, utilize a opção de REINICIAR tarefa no SETEC3.")
         return
 
     # TODO: Se tarefa tiver sido finalizada com sucesso, avisar também
-
-
 
     # -----------------------------------------------------------------
     # Montagem de storage
@@ -821,32 +809,32 @@ def copiaCellebrite():
     (sucesso, ponto_montagem, erro) = acesso_storage_windows(tarefa["dados_storage"])
     if not sucesso:
         erro = "Acesso ao storage [" + ponto_montagem + "] falhou"
-        print_ok(erro)
+        print(erro)
         return
 
     # Desmonta caminho, separando pasta de arquivo
     # prefixando com ponto de montagem
     # Para o cellebrite, que faz cópia de uma pasta inteira, isto não faz sentido
-    # (caminho,nome_arquivo)=decompoeCaminho(tarefa["caminho_destino"])
+    # (caminho,nome_arquivo)=decompoe_caminho(tarefa["caminho_destino"])
 
     caminho_destino = ponto_montagem + tarefa["caminho_destino"]
 
-    print_ok("Este comando irá efetuar a cópia da pasta de relatórios gerados pelo Cellebrite para o storage.")
-    print_ok("A cópia será antecedida por uma validação nos relatórios.")
-    print_ok()
-    print_ok("1) Pasta de destino: ", caminho_destino)
+    print("Este comando irá efetuar a cópia da pasta de relatórios gerados pelo Cellebrite para o storage.")
+    print("A cópia será antecedida por uma validação nos relatórios.")
+    print()
+    print("1) Pasta de destino: ", caminho_destino)
 
     # Verifica se pasta de destino já existe
     # Isto não é permitido
     if os.path.exists(caminho_destino):
-        print_ok()
-        print_ok("Cancelado: A pasta de destino JÁ EXISTE")
-        print_ok()
-        print_ok("Não é possível iniciar cópia de relatório nesta situação.")
-        print_ok(
-            "Se nada nesta pasta de destino já existente tem utilidade, limpe a pasta e execute novamente este comando.")
-        print_ok(
-            "Se os dados na pasta de destino estão ok, utilize o comando *si para validar a pasta. Após a validação, o sistema possibilitará a atualização da situação da tarefa para 'concluído'")
+        print()
+        print("Cancelado: A pasta de destino JÁ EXISTE")
+        print()
+        print("Não é possível iniciar cópia de relatório nesta situação.")
+        print("Se nada nesta pasta de destino já existente tem utilidade, ",
+              "limpe a pasta e execute novamente este comando.")
+        print("Se os dados na pasta de destino estão ok, utilize o comando *si para validar a pasta. ",
+              "Após a validação, o sistema possibilitará a atualização da situação da tarefa para 'concluído'")
         return ()
 
     # ------------------------------------------------------------------
@@ -854,25 +842,26 @@ def copiaCellebrite():
     # ------------------------------------------------------------------
     # Solicita que usuário informe a pasta local que contém
     # os relatórios do Cellebrite para o item corrente
+    caminho_origem = ""
     while True:
 
         # Loop para selecionar pasta
         selecionada_pasta = False
         while not selecionada_pasta:
-            print_ok()
-            print_ok("2) Pasta de Origem")
-            print_ok("Siga o procedimento abaixo para informar a pasta de origem:")
-            print_ok("- Com o file explorer, localize a pasta que contém o relatório.")
-            print_ok("- Na barra de exibição do nome completo da pasta, de um CTRL-C para copiar para o clipboard.")
-            print_ok(
+            print()
+            print("2) Pasta de Origem")
+            print("Siga o procedimento abaixo para informar a pasta de origem:")
+            print("- Com o file explorer, localize a pasta que contém o relatório.")
+            print("- Na barra de exibição do nome completo da pasta, de um CTRL-C para copiar para o clipboard.")
+            print(
                 "- O sistema irá pegar o que estiver no clipboard, exibir, e solicitar confirmação para prosseguir.")
-            print_ok("<ENTER> para continuar")
+            print("<ENTER> para continuar")
             input()
 
             # Exibe a pasta obtida do clipboard, para usuário conferir
-            caminho_origem = getClipboard()
-            print_ok("Pasta de origem (clipboard): ", caminho_origem)
-            print_ok()
+            caminho_origem = get_clipboard()
+            print("Pasta de origem (clipboard): ", caminho_origem)
+            print()
             selecionada_pasta = pergunta_sim_nao("Prosseguir para pasta exibida acima? ", default="n")
 
         # Verificação básica da pasta, para ver se contém os arquivos típicos
@@ -881,25 +870,25 @@ def copiaCellebrite():
             continue
 
         # Ok, tudo certo
-        print_ok()
-        print_ok("Pasta de origem contém arquivos típicos de uma extração do Cellebrite.")
+        print()
+        print("Pasta de origem contém arquivos típicos de uma extração do Cellebrite.")
         break
 
     # Verifica se o arquivo XML contido na pasta de origem está ok
-    print_ok("Iniciando validação de XML. Isto pode demorar, dependendo do tamanho do arquivo. Aguarde...")
+    print("Iniciando validação de XML. Isto pode demorar, dependendo do tamanho do arquivo. Aguarde...")
     arquivo_xml = caminho_origem + "/Relatório.xml"
     (resultado, dados) = validar_arquivo_xml(arquivo_xml, item=item["item"], explicar=True)
     if (not resultado):
         return False
 
     # Confira se
-    print_ok()
-    print_ok("XML válido. Os seguintes dados foram selecionados para utilização em laudo:")
-    print_ok()
-    exibirDadosLaudo(dados['laudo'])
+    print()
+    print("XML válido. Os seguintes dados foram selecionados para utilização em laudo:")
+    print()
+    exibir_dados_laudo(dados['laudo'])
 
-    print_ok()
-    print_ok("Confira os dados acima, e prossiga se estiver ok.")
+    print()
+    print("Confira os dados acima, e prossiga se estiver ok.")
     prosseguir = pergunta_sim_nao("Copiar pasta de origem para storage? ", default="n")
     if not prosseguir:
         return
@@ -926,14 +915,14 @@ def copiaCellebrite():
     # que a cópia acabou
     arquivo_xml_origem = caminho_origem + "/Relatório.xml"
     arquivo_xml_origem_renomeado = arquivo_xml_origem + "_em_copia"
-    print_log(
-        "Renomeando arquivo [" + arquivo_xml_origem + "] para [" + arquivo_xml_origem_renomeado + "]. No final da cópia o nome original será restaurado")
+    print_log("Renomeando arquivo [" + arquivo_xml_origem + "] para [" + arquivo_xml_origem_renomeado + "].",
+              "No final da cópia o nome original será restaurado")
     try:
         os.rename(arquivo_xml_origem, arquivo_xml_origem_renomeado)
     except BaseException as e:
         # Erro fatal
         print_log_dual("Rename falhou: ", str(e))
-        print_ok()
+        print()
         sys.exit()
     print_log("Renomeado com sucesso")
 
@@ -945,9 +934,9 @@ def copiaCellebrite():
         shutil.copytree(caminho_origem, caminho_destino)
     except BaseException as e:
         # Erro fatal: Guarda no log e exibe na tela
-        print_ok("\n", "**** ERRO ****")
+        print("\n", "**** ERRO ****")
         print_log_dual("Erro na Cópia da pasta: ", str(e))
-        print_ok()
+        print()
         sys.exit()
     print_log_dual("Cópia concluída com sucesso")
 
@@ -962,7 +951,7 @@ def copiaCellebrite():
     except BaseException as e:
         # Erro fatal
         print_log_dual("Rename falhou: ", str(e))
-        print_ok()
+        print()
         sys.exit()
     print_log("Renomeado com sucesso")
 
@@ -972,7 +961,7 @@ def copiaCellebrite():
     # afinal a origem já foi validada.
     # ------------------------------------------------------------------
 
-    (codigo_situacao_tarefa, texto_status, dados_relevantes) = determinarSituacaoItemCellebrite(explicar=True)
+    (codigo_situacao_tarefa, texto_status, dados_relevantes) = determinar_situacao_item_cellebrite(explicar=True)
 
     # Atualiza o status da tarefa com o resultado
     print_log("Fork: Atualizando tarefa com: ", codigo_situacao_tarefa, "-", texto_status)
@@ -1007,16 +996,14 @@ def copiaCellebrite():
 
     # ==== FIM Jogar para background ============
 
-
-
     # ------------------------------------------------------------------
     # Faz um fork, para iniciar copia e liberar programa para continuar
     # ------------------------------------------------------------------
     pai = os.fork()
     if pai != 0:
         # Se é o processo pai, retorna para receber novo comando
-        print_ok("Cópia iniciada em background. Ao término, você será notificado através de mensagem na console")
-        print_ok()
+        print("Cópia iniciada em background. Ao término, você será notificado através de mensagem na console")
+        print()
         return
 
     # ------------------------------------------------------------------
@@ -1037,15 +1024,15 @@ def copiaCellebrite():
     # **** Conferir resultado
     # **** Status de finalizado
 
-
     # Efetua cópia da pasta de origem dos relatórios para storage
-    comando = 'guymager cfg="' + caminho_arquivo_configuracao_local + '" log="' + caminho_arquivo_log + '"'
+    comando_sis = 'guymager cfg="' + caminho_arquivo_configuracao_local + '" log="' + caminho_arquivo_log + '"'
 
     # Problema: Quando mata o processo principal, os filhos também morrem
     # inclusive o guymager
     # Tentei varias opções, mas nada deu muito resultado
     # pid = subprocess.Popen(comando, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE)
-    # pid = subprocess.Popen(comando, shell=True) # Isto aqui também não funcionou...mata o guyimager quando interrompe o pai
+    # A opção abaixo também não funcionou....mata o guyimager quando interrompe o pai
+    # pid = subprocess.Popen(comando, shell=True)
 
     # Faz mais um fork, para deixar o guyimager rodando independente
     # O processo pai executa o guymager, fica esperando, e depois encerra
@@ -1053,9 +1040,9 @@ def copiaCellebrite():
     # O filho (neto neste caso) fica acompanhando o andamento
     pai = os.fork()
     if pai != 0:
-        print_log("invocado guymager: " + comando)
+        print_log("invocado guymager: " + comando_sis)
         # Executa o guymager e fica esperando o resultado
-        os.system(comando)  # Se mata o pai, morre também...melhorar isto
+        os.system(comando_sis)  # Se mata o pai, morre também...melhorar isto
         print_log("Retornou de guyimager. Encerrando pid")
         # Se terminou o guymager, encerra este processo
         sys.exit()
@@ -1071,15 +1058,13 @@ def copiaCellebrite():
     # Controlar a evolução e encerrar apenas quando houver finalização
     # Isto aqui é nova thread. Logo, para encerrar, sair com exit
 
-
-    concluido = False
     tempo_ultima_atualizacao = None
     while (True):
         # Pausa entre verificações de mudança de estado (segundos)
         time.sleep(30)
 
-        # print_ok()
-        # print_ok("Fork: Acordeix : %s" % time.ctime())
+        # print()
+        # print("Fork: Acordeix : %s" % time.ctime())
 
         # Verificar no log do guymager se usuário encerrou
         # Se não tem log do guymager, tem algo errado
@@ -1089,13 +1074,11 @@ def copiaCellebrite():
         # b) Concluída: Sucesso
         # c) Concluída: Abortada
 
-
         # Recupera situação do item
         (codigo_situacao_tarefa, texto_status) = determinarSituacaoItem(explicar=False)
-        # print_ok()
-        # print_ok("Situacao Atual: ",str(codigo_situacao_tarefa)," - ",texto_status)
-        # print_ok()
-
+        # print()
+        # print("Situacao Atual: ",str(codigo_situacao_tarefa)," - ",texto_status)
+        # print()
 
         # Atualiza status se estiver em andamento
         if (codigo_situacao_tarefa >= GEmAndamento):
@@ -1141,11 +1124,6 @@ def copiaCellebrite():
             sys.exit()
 
 
-
-
-            # Determina a situação de um item
-
-
 # Explicar=True: Faz com que seja exibida (print) a explicação
 # Retorna tupla:
 #   1) codigo_situacao_tarefa: Retorna o código da situação.
@@ -1153,9 +1131,8 @@ def copiaCellebrite():
 #      -1 ou nulo: Comando não foi executado
 #   2) texto_situacao: Texto complementar da situação
 #   3) dados_relevantes: Dados relevantes, para utilização em laudo
-
 # ----------------------------------------------------------------------
-def determinarSituacaoItemCellebrite(explicar=False):
+def determinar_situacao_item_cellebrite(explicar=False):
     # Constantes de codigo_situacao
     erro_interno = -1
 
@@ -1163,7 +1140,7 @@ def determinarSituacaoItemCellebrite(explicar=False):
     if_print_ok(explicar, "Contactando servidor. Aguarde...")
 
     # Recupera tarefa
-    (tarefa, item) = obterTarefaItemCorrente()
+    (tarefa, item) = obter_tarefa_item_corrente()
 
     # var_dump(item)
     # var_dump(tarefa)
@@ -1178,8 +1155,8 @@ def determinarSituacaoItemCellebrite(explicar=False):
     # Insucesso. Provavelmente a tarefa não foi encontrada
     if (not sucesso):
         # Continua no loop
-        print_ok("Erro: ", msg_erro)
-        print_ok("Efetue refresh na lista de tarefa")
+        print("Erro: ", msg_erro)
+        print("Efetue refresh na lista de tarefa")
         return (erro_interno, "", {})
 
     # var_dump(item["item"])
@@ -1187,19 +1164,19 @@ def determinarSituacaoItemCellebrite(explicar=False):
     # ------------------------------------------------------------------
     # Exibe dados do item para usuário
     # ------------------------------------------------------------------
-    print_ok()
-    print_ok("-" * 129)
-    print_ok("Item: ", tarefa["dados_item"]["item_apreensao"])
-    print_ok("Material: ", tarefa["dados_item"]["material"])
-    print_ok("Descrição: ", tarefa["dados_item"]["descricao"])
-    print_ok("-" * 129)
+    print()
+    print("-" * 129)
+    print("Item: ", tarefa["dados_item"]["item_apreensao"])
+    print("Material: ", tarefa["dados_item"]["material"])
+    print("Descrição: ", tarefa["dados_item"]["descricao"])
+    print("-" * 129)
 
     # ------------------------------------------------------------------
     # Verifica se tarefa tem o tipo certo
     # ------------------------------------------------------------------
     if (not tarefa["tipo"] == "extracao"):
         # Isto aqui não deveria acontecer nunca...mas para garantir...
-        print_ok("Tarefa do tipo [", tarefa["tipo"], "] não pode ser tratada por sapi_cellebrite")
+        print("Tarefa do tipo [", tarefa["tipo"], "] não pode ser tratada por sapi_cellebrite")
         return (erro_interno, "", {})
 
     # -----------------------------------------------------------------
@@ -1210,7 +1187,7 @@ def determinarSituacaoItemCellebrite(explicar=False):
     (sucesso, ponto_montagem, erro) = acesso_storage_windows(tarefa["dados_storage"])
     if not sucesso:
         erro = "Acesso ao storage [" + ponto_montagem + "] falhou"
-        print_ok(erro)
+        print(erro)
         return (erro_interno, "", {})
 
     caminho_destino = ponto_montagem + tarefa["caminho_destino"]
@@ -1226,15 +1203,15 @@ def determinarSituacaoItemCellebrite(explicar=False):
 
     # Default, para algo que iniciou.
     # Mas irá verificar mais adiante, se está em estágio mais avançado
-    codigo_status = GPastaDestinoCriada
-    status = "Pasta criada"
+    # codigo_status = GPastaDestinoCriada
+    # status = "Pasta criada"
 
     # Verificação básica da pasta, para ver se contém os arquivos típicos
     if not valida_pasta_relatorio_cellebrite(pasta=caminho_destino, explicar=explicar):
         status = "Existem arquivos básicos faltando"
         codigo_status = GEmAndamento
         if_print_ok(explicar, status)
-        return (GSemPastaNaoIniciado, status, {})
+        return (codigo_status, status, {})
 
     # Ok, já tem todos os arquivos básicos
     status = "- Pasta contém todos os arquivos básicos"
@@ -1249,15 +1226,15 @@ def determinarSituacaoItemCellebrite(explicar=False):
         status = "Arquivo XML inconsistente"
         codigo_status = GAbortou
         if_print_ok(explicar, status)
-        return (GSemPastaNaoIniciado, status, {})
+        return (codigo_status, status, {})
 
     # Se está tudo certo, exibe o resultado dos dados coletados para laudo
     # se estiver no modo de explicação
     if_print_ok(explicar, "- XML válido")
     if (explicar):
-        print_ok("- Os seguintes dados foram selecionados para utilização em laudo:")
+        print("- Os seguintes dados foram selecionados para utilização em laudo:")
         # Exibe dados do laudo
-        exibirDadosLaudo(dados_relevantes['laudo'])
+        exibir_dados_laudo(dados_relevantes['laudo'])
 
     # Sucesso
     status = "Relatório Cellebrite armazenado com sucesso"
@@ -1266,21 +1243,21 @@ def determinarSituacaoItemCellebrite(explicar=False):
 
 
 # Exibe situação do item
-def exibirSituacaoItem():
-    print_ok()
-    print_ok("Verificação da situação da tarefa corrente")
+def exibir_situacao_item():
+    print()
+    print("Verificação da situação da tarefa corrente")
 
-    (codigo_situacao_tarefa, texto_status, dados_relevantes) = determinarSituacaoItemCellebrite(explicar=True)
-    print_ok()
-    print_ok("- Situacao conforme pasta de destino: ", str(codigo_situacao_tarefa), "-", texto_status)
+    (codigo_situacao_tarefa, texto_status, dados_relevantes) = determinar_situacao_item_cellebrite(explicar=True)
+    print()
+    print("- Situacao conforme pasta de destino: ", str(codigo_situacao_tarefa), "-", texto_status)
 
     # Se falhou, não tem o que fazer
     if (codigo_situacao_tarefa == -1):
-        print_ok("Não foi possível determinar a situação do item. Verifique a conectividade com o storage")
+        print("Não foi possível determinar a situação do item. Verifique a conectividade com o storage")
         return
 
     # Recupera tarefa
-    (tarefa, item) = obterTarefaItemCorrente()
+    (tarefa, item) = obter_tarefa_item_corrente()
 
     # Recupera dados atuais da tarefa do servidor,
     codigo_tarefa = tarefa["codigo_tarefa"]
@@ -1291,40 +1268,44 @@ def exibirSituacaoItem():
     # Insucesso
     if (not sucesso):
         # Continua no loop
-        print_ok("Falha na busca da tarefa no servidor: ", msg_erro)
+        print("Falha na busca da tarefa no servidor: ", msg_erro)
         return
 
     # Exibe o status da tarefa no servidor
-    print_ok("- Situação reportada pelo servidor  : ",
-             tarefa_servidor["codigo_situacao_tarefa"],
-             "-",
-             tarefa_servidor["descricao_situacao_tarefa"])
+    print("- Situação reportada pelo servidor  : ",
+          tarefa_servidor["codigo_situacao_tarefa"],
+          "-",
+          tarefa_servidor["descricao_situacao_tarefa"])
 
     # Se a situação é mesma, está tudo certo
     if (codigo_situacao_tarefa == int(tarefa_servidor["codigo_situacao_tarefa"])):
-        print_ok()
-        print_ok("- Situação observada na pasta de destino está coerente com a situação do servidor.")
+        print()
+        print("- Situação observada na pasta de destino está coerente com a situação do servidor.")
         return
 
     # Se a situação é mesma, está tudo certo
     if (codigo_situacao_tarefa < int(tarefa_servidor["codigo_situacao_tarefa"])):
-        print_ok()
-        print_ok("Situação observada é divergente da situação reportada pelo servidor.")
-        print_ok("Reporte esta situação ao desenvolvedor.")
+        print()
+        print("Situação observada é divergente da situação reportada pelo servidor.")
+        print("Reporte esta situação ao desenvolvedor.")
         return
 
     # Se houver divergência entre situação atual e situação no servidor
     # pergunta se deve atualizar
-    print_ok()
-    print_ok(
-        "ATENÇÃO: A situação da tarefa no servidor não está coerente com a situação observada na pasta de destino.")
-    print_ok(
-        "Isto ocorre quando o usuário faz uma cópia manual dos dados diretamente para o servidor, sem utilizar o agente sapi_cellebrite.")
-    print_ok(
-        "Também pode ocorrer esta situação caso tenha havido alguma falha no procedimento de atualização automática após a cópia no sapi_cellebrite (Em caso de dúvida, consulte o log local, e alerte o desenvolvedor).")
-    print_ok(
-        "No caso desta tarefa em particular, para sanar o problema basta efetuar a atualização manual (respondendo S na próxima pergunta)");
-    print_ok()
+    mensagem = ('\n'
+                'ATENÇÃO: A situação da tarefa no servidor não está coerente com a situação '
+                'observada na pasta de destino.\n'
+                'Isto ocorre quando o usuário faz uma cópia manual dos dados diretamente para o servidor, '
+                'sem utilizar o agente sapi_cellebrite.\n'
+                'Também pode ocorrer esta situação caso tenha havido alguma falha no procedimento '
+                'de atualização automática após a cópia no sapi_cellebrite '
+                '(Em caso de dúvida, consulte o log local, e alerte o desenvolvedor).\n'
+                'No caso desta tarefa em particular, para sanar o problema basta efetuar a atualização manual '
+                '(respondendo S na próxima pergunta)\n'
+                )
+    print()
+    print(mensagem)
+    print()
     atualizar = pergunta_sim_nao("Atualizar servidor com o status observado? ", default="n")
     if (not atualizar):
         return
@@ -1337,34 +1318,34 @@ def exibirSituacaoItem():
         dados_relevantes=dados_relevantes
     )
     if (not ok):
-        print_ok()
-        print_ok("ATENÇÃO: Não foi possível atualizar a situação no servidor: ", msg_erro)
-        print_ok()
+        print()
+        print("ATENÇÃO: Não foi possível atualizar a situação no servidor: ", msg_erro)
+        print()
     else:
-        print_ok()
-        print_ok("Tarefa atualizada com sucesso no servidor")
-        print_ok()
+        print()
+        print("Tarefa atualizada com sucesso no servidor")
+        print()
 
     return
 
 
 # Chama função e intercepta CTR-C
 # =============================================================
-def receberComandoOk():
+def receber_comando_ok():
     try:
-        return receberComando()
+        return receber_comando()
     except KeyboardInterrupt:
         # TODO: Verificar se tem algum processo filho rodando
         # Se não tiver, finaliza normalmente
         # Caso contrário, não permitie
         # Por enquanto, simplesmente ignora o CTR-C
-        print_ok("Para encerrar, utilize comando *qq")
+        print("Para encerrar, utilize comando *qq")
         return ("", "")
 
 
 # Recebe e confere a validade de um comando de usuário
 # =============================================================
-def receberComando():
+def receber_comando():
     comandos = {
         # Comandos de navegacao
         '+': 'Navega para a tarefa seguinte da lista',
@@ -1383,67 +1364,69 @@ def receberComando():
 
     }
 
-    cmdNavegacao = ["+", "-", "*ir"]
-    cmdItem = ["*cr", "*si"]  # *du - dump, não aparece na listagem
-    cmdGeral = ["*sg", "*tm", "*qq"]
+    cmd_navegacao = ["+", "-", "*ir"]
+    cmd_item = ["*cr", "*si"]
+    cmd_geral = ["*sg", "*tm", "*qq"]
 
     comando_ok = False
+    comando_recebido = ""
+    argumento_recebido = ""
     while not comando_ok:
-        print_ok()
+        print()
         entrada = input("Comando (?=ajuda): ")
         entrada = entrada.lower().strip()
         l = entrada.split(" ", 2)
-        comando = ""
+        comando_recebido = ""
         if (len(l) >= 1):
-            comando = l[0]
-        argumento = ""
+            comando_recebido = l[0]
+        argumento_recebido = ""
         if (len(l) >= 2):
-            argumento = l[1]
+            argumento_recebido = l[1]
 
-        if comando in comandos:
+        if comando_recebido in comandos:
             # Se está na lista de comandos, ok
             comando_ok = True
-        elif comando.isdigit():
+        elif comando_recebido.isdigit():
             # um número é um comando válido
             comando_ok = True
-        elif (comando == "H" or comando == "?"):
+        elif (comando_recebido == "H" or comando_recebido == "?"):
             # Exibe ajuda para comando
-            print_ok()
-            print_ok("Navegacao:")
-            for key in cmdNavegacao:
-                print_ok(key, " : ", comandos[key])
-            print_ok()
-            print_ok("Processamento da tarefa corrente (marcada com =>):")
-            for key in cmdItem:
-                print_ok(key, " : ", comandos[key])
-            print_ok()
-            print_ok("Comandos gerais:")
-            for key in cmdGeral:
-                print_ok(key, " : ", comandos[key])
-        elif (comando == ""):
-            print_ok("Para ajuda, digitar comando 'h' ou '?'")
+            print()
+            print("Navegacao:")
+            for key in cmd_navegacao:
+                print(key, " : ", comandos[key])
+            print()
+            print("Processamento da tarefa corrente (marcada com =>):")
+            for key in cmd_item:
+                print(key, " : ", comandos[key])
+            print()
+            print("Comandos gerais:")
+            for key in cmd_geral:
+                print(key, " : ", comandos[key])
+        elif (comando_recebido == ""):
+            print("Para ajuda, digitar comando 'h' ou '?'")
         else:
-            if (comando != ""):
-                print_ok("Comando (" + comando + ") inválido")
+            if (comando_recebido != ""):
+                print("Comando (" + comando_recebido + ") inválido")
 
-    return (comando, argumento)
+    return (comando_recebido, argumento_recebido)
 
 
 # Exibe lista de tarefas
 # ----------------------------------------------------------------------
-def exibirSituacao():
+def exibir_situacao():
     cls()
 
     # Exibe cabecalho (Memorando/protocolo)
-    print_ok(GdadosGerais["identificacaoSolicitacao"])
-    print_ok('-' * 129)
+    print(GdadosGerais["identificacaoSolicitacao"])
+    print('-' * 129)
 
     # Lista de tarefas
     q = 0
     for dado in Gtarefas:
-        q = q + 1
-        t = dado["tarefa"]
-        i = dado["item"]
+        q += 1
+        t = dado.get("tarefa")
+        i = dado.get("item")
 
         # Sinalizador de Corrente
         corrente = "  "
@@ -1453,42 +1436,40 @@ def exibirSituacao():
         # var_dump(i)
         # cabecalho
         if (q == 1):
-            # print_ok('%2s %2s %6s %-25s %15s %-30.30s %-40.45s' % (" ","Sq", "tarefa", "item", "Material", u"Situação", u"Descrição"))
-            print_ok('%2s %2s %6s %-30.30s %15s %-69.69s' % (
+            print('%2s %2s %6s %-30.30s %15s %-69.69s' % (
                 " ", "Sq", "tarefa", "Situação", "Material", "Item : Descrição"))
-            print_ok('-' * 129)
+            print('-' * 129)
         # Tarefa
-        # print_ok('%2s %2s %6s %-25.25s %15s %-30.30s %-40.45s' % (corrente, q, t["codigo_tarefa"], t["item"], i["material"], t["estado_descricao"], i["descricao"]))
         item_descricao = t["item"] + " : " + i["descricao"]
-        print_ok('%2s %2s %6s %-30.30s %15s %-69.69s' % (
+        print('%2s %2s %6s %-30.30s %15s %-69.69s' % (
             corrente, q, t["codigo_tarefa"], t["estado_descricao"], i["material"], item_descricao))
 
         if (q == Gicor):
-            print_ok('-' * 129)
+            print('-' * 129)
 
     return
 
 
 # Salva situação atual para arquivo
 # ----------------------------------------------------------------------
-def salvarEstado():
+def salvar_estado():
     # Monta dicionario de estado
-    estado = {}
+    estado = dict()
     estado["Gtarefas"] = Gtarefas
     estado["GdadosGerais"] = GdadosGerais
 
     # Abre arquivo de estado para gravação
-    nomeArquivo = "estado.sapi"
-    arquivoEstado = open(nomeArquivo, "w")
+    nome_arquivo = "estado.sapi"
+    arquivo_estado = open(nome_arquivo, "w")
 
     # Grava e encerra
-    json.dump(estado, arquivoEstado, indent=4)
-    arquivoEstado.close()
+    json.dump(estado, arquivo_estado, indent=4)
+    arquivo_estado.close()
 
 
 # Carrega situação de arquivo
 # ----------------------------------------------------------------------
-def carregarEstado():
+def carregar_estado():
     # Irá atualizar as duas variáveis relacionadas com estado
     global Gtarefas
     global GdadosGerais
@@ -1498,9 +1479,9 @@ def carregarEstado():
         return
 
     # Le dados do arquivo e fecha
-    arqEstado = open("estado.sapi", "r")
-    estado = json.load(arqEstado)
-    arqEstado.close()
+    arq_estado = open("estado.sapi", "r")
+    estado = json.load(arq_estado)
+    arq_estado.close()
 
     # Recupera variaveis do estado
     Gtarefas = estado["Gtarefas"]
@@ -1508,17 +1489,18 @@ def carregarEstado():
 
 
 # Avisa que dados vieram do estado
-# print_ok("Dados carregados do estado.sapi")
-# sprint_ok("Isto so deve acontecer em ambiente de desenvolvimento")
+# print("Dados carregados do estado.sapi")
+# sprint("Isto so deve acontecer em ambiente de desenvolvimento")
 
 
 # Carrega situação de arquivo
 # ----------------------------------------------------------------------
-def obterMemorandoTarefas():
-    print_ok()
+def obter_memorando_tarefas():
+    print()
 
     # Solicita que o usuário se identifique através da matricula
     # ----------------------------------------------------------
+    lista_solicitacoes = None
     while True:
         matricula = input("Entre com sua matricula: ")
         matricula = matricula.lower().strip()
@@ -1530,12 +1512,12 @@ def obterMemorandoTarefas():
         # Insucesso....normalmente matricula incorreta
         if (not sucesso):
             # Continua no loop
-            print_ok("Erro: ", msg_erro)
+            print("Erro: ", msg_erro)
             continue
 
         # Matricula ok, vamos ver se tem solicitacoes de exame
         if (len(lista_solicitacoes) == 0):
-            print_ok(
+            print(
                 "Não existe nenhuma solicitacao de exame com tarefas SAPI para esta matrícula. Verifique no setec3")
             continue
 
@@ -1544,48 +1526,48 @@ def obterMemorandoTarefas():
 
     # Exibe lista de solicitações de exame do usuário
     # -----------------------------------------------
-    print_ok()
+    print()
     q = 0
     for d in lista_solicitacoes:
-        q = q + 1
+        q += 1
         if (q == 1):
             # Cabecalho
-            print_ok('%2s  %10s  %s' % ("N.", "Protocolo", "Documento"))
+            print('%2s  %10s  %s' % ("N.", "Protocolo", "Documento"))
         protocolo_ano = d["numero_protocolo"] + "/" + d["ano_protocolo"]
-        print_ok('%2d  %10s  %s' % (q, protocolo_ano, d["identificacao"]))
+        print('%2d  %10s  %s' % (q, protocolo_ano, d["identificacao"]))
 
-    # print_ok("type(lista_solicitacoes)=",type(lista_solicitacoes))
-
+    # print("type(lista_solicitacoes)=",type(lista_solicitacoes))
 
     # Usuário escolhe a solicitação de exame de interesse
     # --------------------------------------------------------
+    tarefas = None
     while True:
         #
-        print_ok()
+        print()
         num_solicitacao = input(
             "Selecione a solicitação de exame, indicando o número de sequencia (N.) na lista acima: ")
         num_solicitacao = num_solicitacao.strip()
         if not num_solicitacao.isdigit():
-            print_ok("Entre com o numero da solicitacao")
+            print("Entre com o numero da solicitacao")
             continue
 
         # Verifica se existe na lista
         num_solicitacao = int(num_solicitacao)
-        if not (num_solicitacao >= 1 and num_solicitacao <= len(lista_solicitacoes)):
+        if not (1 <= num_solicitacao <= len(lista_solicitacoes)):
             # Número não é válido
-            print_ok("Entre com o numero da solicitacao, entre 1 e ", str(len(lista_solicitacoes)))
+            print("Entre com o numero da solicitacao, entre 1 e ", str(len(lista_solicitacoes)))
             continue
 
         ix_solicitacao = int(num_solicitacao) - 1
 
         # Ok, selecionado
-        print_ok()
+        print()
         solicitacao = lista_solicitacoes[ix_solicitacao]
         GdadosGerais["identificacaoSolicitacao"] = (
             solicitacao["identificacao"] +
             " Protocolo: " +
             solicitacao["numero_protocolo"] + "/" + solicitacao["ano_protocolo"])
-        # print_ok("Selecionado:",solicitacao["identificacao"])
+        # print("Selecionado:",solicitacao["identificacao"])
         sys.stdout.write("Buscando tarefas de imagem para " + GdadosGerais["identificacaoSolicitacao"] + "...")
 
         # Carrega as tarefas de extração da solicitação selecionada
@@ -1601,10 +1583,10 @@ def obterMemorandoTarefas():
 
         # Analisa tarefas recuperadas
         if (len(tarefas) == 0):
-            print_ok()
-            print_ok()
-            print_ok("Esta solicitação de exame NÃO TEM NENHUMA TAREFA DE EXTRAÇÃO. Verifique no SETEC3.")
-            print_ok()
+            print()
+            print()
+            print("Esta solicitação de exame NÃO TEM NENHUMA TAREFA DE EXTRAÇÃO. Verifique no SETEC3.")
+            print()
         else:
             # Ok, tudo certo
             sys.stdout.write("OK")
@@ -1614,11 +1596,11 @@ def obterMemorandoTarefas():
     return tarefas
 
 
-def refreshTarefas():
+def refresh_tarefas():
     # Irá atualizar a variáel global de tarefas
     global Gtarefas
 
-    print_ok("Buscando situação atualizada no servidor (SETEC3). Aguarde...")
+    print("Buscando situação atualizada no servidor (SETEC3). Aguarde...")
 
     codigo_solicitacao_exame_siscrim = GdadosGerais["codigo_solicitacao_exame_siscrim"]
 
@@ -1636,36 +1618,36 @@ def refreshTarefas():
 
 # Exibir informações sobre tarefa
 # ----------------------------------------------------------------------
-def dumpTarefa():
-    print_ok("===============================================")
+def dump_tarefa():
+    print("===============================================")
 
     var_dump(Gtarefas[Gicor])
 
-    print_ok("===============================================")
+    print("===============================================")
 
 
 # Funções relacionada com movimentação nas tarefas
 # ----------------------------------------------------------------------
-def avancarItem():
+def avancar_item():
     global Gicor
 
     if (Gicor < len(Gtarefas)):
-        Gicor = Gicor + 1
+        Gicor += 1
 
 
-def recuarItem():
+def recuar_item():
     global Gicor
 
     if (Gicor > 1):
-        Gicor = Gicor - 1
+        Gicor -= 1
 
 
-def posicionarItem(n):
+def posicionar_item(n):
     global Gicor
 
     n = int(n)
 
-    if (n >= 1 and n <= len(Gtarefas)):
+    if (1 <= n <= len(Gtarefas)):
         Gicor = n
 
 
@@ -1673,62 +1655,48 @@ def posicionarItem(n):
 # Código para teste
 # ======================================================================
 
+# d={}
+# d['chave1']=10
+# d['chave2']=['abc','def']
+# d['chave3']={'c31': 12.5, 'c32': ['xyz', 'def']}
 
 
-'''
-d={}
-d['chave1']=10
-d['chave2']=['abc','def']
-d['chave3']={'c31': 12.5, 'c32': ['xyz', 'def']}
+# d_json=json.dumps(d,sort_keys=True)
+# print(d_json)
+# die('ponto2031')
 
 
-d_json=json.dumps(d,sort_keys=True)
-print(d_json)
+# import pyperclip # The name you have the file
+# x = pyperclip.paste()
+# print(x)
 
+# start_time=time.time()
+# time.sleep(5)
+# tempo=time.time()-start_time
+#
+# print("tempo = ", tempo)
+# #print("tempo = ", str(tempo))
+# die('ponto1345')
+# var_dump(tempo)
 
-die('ponto2031')
-'''
+# pasta='c:/tempr'
+# tamanho=tamanho_pasta(pasta)
+# print(pasta,tamanho, converte_bytes_humano(tamanho))
+#
+# pasta='c:/teste_iped'
+# tamanho=tamanho_pasta(pasta)
+# print(pasta,tamanho, converte_bytes_humano(tamanho))
+#
+# die('ponto1174')
 
-'''
-import pyperclip # The name you have the file
-x = pyperclip.paste()
-print(x)
-'''
-
-'''
-start_time=time.time() 
-time.sleep(5)
-tempo=time.time()-start_time 
-
-print_ok("tempo = ", tempo)
-#print_ok("tempo = ", str(tempo))
-die('ponto1345')
-var_dump(tempo)
-'''
-
-'''
-pasta='c:/tempr'
-tamanho=tamanho_pasta(pasta)
-print(pasta,tamanho, converte_bytes_humano(tamanho))
-
-pasta='c:/teste_iped'
-tamanho=tamanho_pasta(pasta)
-print(pasta,tamanho, converte_bytes_humano(tamanho))
-
-die('ponto1174')
-
-'''
-
-'''
-from teste_modulo import *
-
-class teste:
-	def f1():
-		print("Ok, chamou f1")
-
-teste.f1()
-sys.exit()
-'''
+# from teste_modulo import *
+#
+# class teste:
+# 	def f1():
+# 		print("Ok, chamou f1")
+#
+# teste.f1()
+# sys.exit()
 
 # ======================================================================
 # Rotina Principal 
@@ -1736,10 +1704,10 @@ sys.exit()
 
 # Iniciando
 # ---------
-print_ok()
-print_ok("SAPI - Cellebrite (Versao " + Gversao + ")")
-print_ok("=========================================")
-print_ok()
+print()
+print("SAPI - Cellebrite (Versao " + Gversao + ")")
+print("=========================================")
+print()
 print_log('Iniciando sapi_cellebrite - ', Gversao)
 
 # Testa comunicação com servidor SAPI
@@ -1754,22 +1722,22 @@ if not Gdesenvolvimento:
 # Para desenvolvimento...recupera tarefas de arquivo
 # Para versão produtiva, ajustar valor da global
 if Gdesenvolvimento:
-    carregarEstado()
+    carregar_estado()
 if (len(Gtarefas) == 0):
-    Gtarefas = obterMemorandoTarefas()
+    Gtarefas = obter_memorando_tarefas()
 if Gdesenvolvimento:
-    salvarEstado()
+    salvar_estado()
 
 # Processamento das tarefas
 # ---------------------------
-refreshTarefas()
-exibirSituacao()
+refresh_tarefas()
+exibir_situacao()
 
 # Recebe comandos
 while (True):
-    (comando, argumento) = receberComandoOk()
+    (comando, argumento) = receber_comando_ok()
     if (comando == '*qq'):
-        print_ok("Finalizado por comando do usuario")
+        print("Finalizado por comando do usuario")
         break
 
     # Executa os comandos
@@ -1777,40 +1745,40 @@ while (True):
 
     # Comandos de navegação
     if (comando == '+'):
-        avancarItem()
-        exibirSituacao()
+        avancar_item()
+        exibir_situacao()
     elif (comando == '-'):
-        recuarItem()
-        exibirSituacao()
+        recuar_item()
+        exibir_situacao()
     elif (comando == "*ir"):
-        posicionarItem(argumento)
-        exibirSituacao()
+        posicionar_item(argumento)
+        exibir_situacao()
 
     # Comandos de item
     if (comando == '*du'):
-        dumpTarefa()
+        dump_tarefa()
         continue
     elif (comando == '*cr'):
-        copiaCellebrite_ok()
+        copia_cellebrite_ok()
         continue
     elif (comando == '*si'):
-        exibirSituacaoItem()
+        exibir_situacao_item()
         continue
 
     # Comandos gerais
     if (comando == '*sg'):
-        refreshTarefas()
-        exibirSituacao()
+        refresh_tarefas()
+        exibir_situacao()
         continue
     elif (comando == '*tm'):
-        Gtarefas = obterMemorandoTarefas()
+        Gtarefas = obter_memorando_tarefas()
         if (len(Gtarefas) > 0):
             Gicor = 1  # Inicializa indice da tarefa corrente
-            exibirSituacao()
+            exibir_situacao()
         continue
 
         # Loop de comando
 
 # Finaliza
-print_ok()
-print_ok("FIM SAPI - Cellebrite (Versão ", Gversao, ")")
+print()
+print("FIM SAPI - Cellebrite (Versão ", Gversao, ")")
