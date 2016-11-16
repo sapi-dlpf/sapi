@@ -51,6 +51,7 @@ if sys.version_info <= (3, 0):
 # Logo, tem que ficar abaixo do teste de python3
 from tkinter import Tk
 
+
 # =======================================================================
 # GLOBAIS
 # =======================================================================
