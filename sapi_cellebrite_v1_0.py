@@ -65,7 +65,8 @@ Gtarefas = []  # Lista de tarefas
 Gicor = 1
 
 # Controle de frequencia de atualizacao
-GtempoEntreAtualizacoesStatus = 180
+# GtempoEntreAtualizacoesStatus = 180 # Tempo normal de produção
+GtempoEntreAtualizacoesStatus = 10 # Debug: Gerar bastante log
 
 # **********************************************************************
 # PRODUCAO DEPLOYMENT AJUSTAR
@@ -862,7 +863,7 @@ def copia_cellebrite():
     # Verificações antes da cópia
     # -----------------------------------------------------------------------------------------------------------------
     print()
-    print("- Cópia de relatório Cellebrite para storage")
+    print("- Cópia de relatório Cellebrite para storage.")
     print("- Contactando servidor para obter dados atualizados da tarefa. Aguarde...")
 
     # Recupera tarefa
@@ -955,8 +956,8 @@ def copia_cellebrite():
 
     caminho_destino = ponto_montagem + tarefa["caminho_destino"]
 
-    print("- Este comando irá efetuar a cópia da pasta de relatórios gerados pelo Cellebrite para o storage.")
-    print("- A cópia será antecedida por uma validação nos relatórios.")
+    print("- Este comando irá efetuar validação e cópia da pasta de relatórios do Cellebrite/UFED para o storage.")
+    print()
     print("- Pasta de destino: ", caminho_destino)
 
     # Verifica se pasta de destino já existe
@@ -970,18 +971,21 @@ def copia_cellebrite():
         print("- Não é possível iniciar cópia de relatório nesta situação.")
         print("- Se o conteúdo atual da pasta de destino não tem utilidade, ",
               "autorize a limpeza da pasta (opção abaixo).")
-        print("- Por outro lado, se os dados na pasta de destino já estão ok, pois anteriormente já foi feito a cópia,",
-              "não autorize a limpeza e em seguida utilize o comando *si para validar a pasta. ",
+        print("- Caso contrário, ou seja, se os dados na pasta de destino estão ok (foram copiados anteriormente), ",
+              "cancele a cópia (responda N na próxima pergunta) e em seguida utilize o comando *si para validar a pasta. ",
               "Após a validação com sucesso, o sistema atualizará a situação da tarefa para 'concluído'")
 
         # xxx
         print()
         prosseguir = pergunta_sim_nao(
-            "< Você realmente deseja excluir os arquivos atuais da pasta de destino (assegure-se de estar tratando do item correto)?",
+            "< Você realmente deseja excluir a pasta de destino (assegure-se de estar tratando do item correto)?",
             default="n")
         if not prosseguir:
             # Encerra
+            print("- Cancelado: Não é possível executar cópia para pasta de destino existente.")
             return
+        print("- Ok, pasta de destino será excluída durante procedimento de cópia")
+        print_log("Usuário solicitou exclusão da pasta de destino: ", caminho_destino)
 
         # Guarda indicativo que será necessário limpeza da pasta de destino
         limpar_pasta_destino_antes_copiar = True
@@ -1065,13 +1069,13 @@ def copia_cellebrite():
         print_centralizado('')
 
     print()
-    print("- Verifique os dados acima, e se estiver tudo certo autorize a cópia")
-    prosseguir = pergunta_sim_nao("< Copiar relatórios para pasta de destino? ", default="n")
+    print("- Verifique os dados acima, e se estiver tudo certo confirme para iniciar a cópia")
+    prosseguir = pergunta_sim_nao("< Dados acima correspondem ao exame efetuado? ", default="n")
     if not prosseguir:
         return
     #
-    # copia_background = pergunta_sim_nao("< Efetuar cópia em background? ", default="n")
-    copia_background = False
+    copia_background = pergunta_sim_nao("< Efetuar cópia em background? ", default="n")
+    #copia_background = False
     if copia_background:
         proc = multiprocessing.Process(
             target=efetuar_copia,
@@ -1082,7 +1086,12 @@ def copia_cellebrite():
         # O fluxo retona imediatamente para cá, e voltamos para à rotina principal
         # permitindo que usuário efetue outras operações
         # Ao término, o usuário será avisado
+        print()
+        print("- Cópia iniciada em background. Você será avisado ao término do processamento.")
+        print()
     else:
+        # Não é em background
+        print("- Cópia iniciada. Isto pode demorar...Aguarde....")
         # Inicia cópia e aguarda o término
         # Neste caso, o usuário terá que aguardar até o término da cópia
         efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevantes,
@@ -1109,9 +1118,6 @@ def efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevant
     # Registra que está copiando em background
     if copia_background:
         print_var(tipo_print, "Iniciando cópia em background (pid=", os.getpid(), ")")
-    else:
-        # Não é em background
-        print("Cópia iniciada. Isto pode demorar...Aguarde....")
 
     # ------------------------------------------------------------------
     # Conceito:
@@ -1156,7 +1162,8 @@ def efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevant
 
         # 2) Efetuar a cópia
         # ------------------------------------------------------------------
-        print_var(tipo_print, "Iniciando cópia de:[", caminho_origem, "] para:[", caminho_destino, "]")
+        texto_status="Iniciando cópia de '"+ caminho_origem + "' para '" + caminho_destino + "'"
+        atualizar_status_tarefa_andamento(codigo_tarefa, texto_status)
         shutil.copytree(caminho_origem, caminho_destino)
         texto_status = "Comando de cópia concluído"
         atualizar_status_tarefa_andamento(codigo_tarefa, texto_status)
@@ -1218,6 +1225,7 @@ def efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevant
         return
 
     # Cópia concluída
+    print()
     print_var(tela_log, "Cópia da pasta ", caminho_origem, " finalizada com SUCESSO")
 
     # Cópia finalizada
@@ -1236,13 +1244,13 @@ def efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevant
 
     if (not ok):
         print()
-        print_var(tela_log, "Não foi possível atualizar status de sucesso da tarefa: ", msg_erro)
-        print_var(tela_log, "Após regular situação, utilize comando *SI para atualizar situação da tarefa")
+        print_var(tela_log, "Não foi possível atualizar status de finalização da tarefa: ", msg_erro)
+        print_var(tela_log, "Após diagnosticar e resolver a causa do problema,  utilize comando *SI para atualizar situação da tarefa")
         print()
         return
 
     # Status atualizado
-    print_var(tela_log, "Tarefa atualizada com sucesso")
+    print_var(tela_log, "Tarefa ", codigo_tarefa, " atualizada para 'SUCESSO'")
 
     # Encerra o processo de acompanhamento de cópia
     if copia_background:
@@ -1252,6 +1260,9 @@ def efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevant
 
 # Efetua a cópia de uma pasta
 def acompanhar_copia(tipo_print, codigo_tarefa, caminho_destino):
+
+    print_var(tipo_print, "Processo de acompanhamento de tarefa: Vivo")
+
     # Um delay inicial, para dar tempo da cópia começar
     time.sleep(GtempoEntreAtualizacoesStatus)
 
@@ -1861,7 +1872,7 @@ if __name__ == '__main__':
     print("SAPI - Cellebrite (Versao " + Gversao + ")")
     print("=========================================")
     print()
-    print("- Dica: Para uma visualização adequada, configure a sua console com largura de 130 caracteres")
+    print("- Dica: Para uma visualização adequada, configure o buffer de tela e tamanho de janela com largura de 130 caracteres")
     print()
     print()
     print_log('Iniciando sapi_cellebrite - ', Gversao)
