@@ -20,6 +20,8 @@
 #  - v1.0 : Inicial
 # =======================================================================
 # TODO: Como garantir que a cópia foi efetuada com sucesso? Hashes?
+# TODO: XML está quase do tamanho do PDF (em alguns casos, fica bem grande).
+#       Criar opção para excluir do destino? Excluir sempre?
 # =======================================================================
 
 
@@ -66,7 +68,7 @@ Gicor = 1
 
 # Controle de frequencia de atualizacao
 # GtempoEntreAtualizacoesStatus = 180 # Tempo normal de produção
-GtempoEntreAtualizacoesStatus = 10 # Debug: Gerar bastante log
+GtempoEntreAtualizacoesStatus = 10  # Debug: Gerar bastante log
 
 # **********************************************************************
 # PRODUCAO DEPLOYMENT AJUSTAR
@@ -99,8 +101,8 @@ from sapilib_0_5_4 import *
 # Interface gráfica (tk)
 # from tkinter import Tk
 import tkinter
-# import tkinter as tk
 from tkinter import filedialog
+
 
 class Janela(tkinter.Frame):
     def __init__(self, master=None):
@@ -108,13 +110,13 @@ class Janela(tkinter.Frame):
         self.pack()
 
     def selecionar_arquivo(self):
-        self.file_name = filedialog.askopenfilename(filetypes=([('All files', '*.*'),
-                                                                ('ODT files', '*.odt'),
-                                                                ('CSV files', '*.csv')]))
+        self.file_name = tkinter.filedialog.askopenfilename(filetypes=([('All files', '*.*'),
+                                                                        ('ODT files', '*.odt'),
+                                                                        ('CSV files', '*.csv')]))
         return self.file_name
 
     def selecionar_pasta(self):
-        directory = filedialog.askdirectory()
+        directory = tkinter.filedialog.askdirectory()
         return directory
 
 
@@ -246,9 +248,95 @@ def decompoe_caminho(caminho):
     return (pasta, nome_arquivo)
 
 
+# Processa arquivo XML, retornando erros e avisos
+# resultado: Sucesso (true) ou fracasso (false)
+# dados_relevantes: Dados para laudo
+# erros: Lista de erros
+# avisos: Lista de avisos
+# ----------------------------------------------------------------------
+def processar_arquivo_xml(arquivo, numero_item, explicar=True):
+    # Cria um arquivo temporario para armazenar a versão sintética do arquivo XML
+    arquivo_temporario = tempfile.NamedTemporaryFile(delete=False)
+    caminho_arquivo_temporario = arquivo_temporario.name
+    arquivo_temporario.close()
+
+    # Sintetiza arquivo recebido, armazenando no arquivo temporário
+    sintetizar_arquivo_xml(arquivo, caminho_arquivo_temporario)
+
+    # Efetua a validação do arquivo temporário
+    (resultado, dados_relevantes, erros, avisos) = validar_arquivo_xml(caminho_arquivo_temporario, numero_item,
+                                                                       explicar)
+
+    # Elimina arquivo temporário, pois não é mais necessário
+    os.unlink(caminho_arquivo_temporario)
+
+    # Retorna resultado
+    return (resultado, dados_relevantes, erros, avisos)
+
+
+# Dependendo do caso, o arquivo XML é muito grande
+# Nesta situação, o parse completo fica muito lento e em alguns casos acaba a memória.
+# Logo, extrai apenas as partes relevantes do arquivo
+def sintetizar_arquivo_xml(arquivo, caminho_arquivo_temporario):
+    # Criar arquivo de saída e copia inicio do arquivo XML
+    # -----------------------------------------------------
+    with codecs.open(caminho_arquivo_temporario, 'w+b', encoding='utf-8') as ftemp:
+        with codecs.open(arquivo, "r", "utf-8") as fentrada:
+            for linha in fentrada:
+                # Interrompe a cópia quando encontrar um dos elementos da lista abaixo
+                irrelevantes = ["<images", "<taggedFiles", "<decodedData", "<carvedFiles", "<infectedFiles"]
+                encontrou = False
+                for termo in irrelevantes:
+                    if termo in linha: encontrou = True
+
+                if encontrou:
+                    ftemp.write("")
+                    break
+
+                # Grava linha na saída
+                ftemp.write(linha)
+
+    # Extrai as linhas de bloco de modelType relevantes
+    # -------------------------------------------------
+    # <modelType type="SIMData">
+    # ...
+    # </modelType>
+
+    # Lista de seções modelType que contém informações úteis
+    # <modelType type="UserAccount">    # Contas de usuário
+    # <modelType type="SIMData">        # Dados do simCard, incluindo MSISDN
+    lista_model_type = ['<modelType type="UserAccount">', '<modelType type="SIMData">']
+
+    with codecs.open(caminho_arquivo_temporario, 'a+b', encoding='utf-8') as ftemp:
+        with codecs.open(arquivo, "r", "utf-8") as fentrada:
+            iniciado = False
+            for linha in fentrada:
+
+                if not iniciado:
+                    for mt in lista_model_type:
+                        if mt in linha:
+                            iniciado = True
+
+                if iniciado:
+                    # Grava linha linha
+                    ftemp.write(linha)
+
+                if iniciado and '</modelType>' in linha:
+                    ftemp.write("")
+                    iniciado = False
+
+    # Encerra XML
+    with codecs.open(caminho_arquivo_temporario, 'a+b', encoding='utf-8') as ftemp:
+        ftemp.write("</project>")
+
+    print_log("Arquivo XML sintetizado gravado em ", caminho_arquivo_temporario)
+
+    return
+
+
 # Validar arquivo XML do cellebrite
 # ----------------------------------------------------------------------
-def validar_arquivo_xml(arquivo, item, explicar=True):
+def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
     # Dados para retorno
     # ------------------------------------------------------------------
     dados = {}
@@ -267,53 +355,10 @@ def validar_arquivo_xml(arquivo, item, explicar=True):
     # dicionários para montagem de dados para laudo
     d_aquis_geral = {}  # Dados gerais da aquisição
 
-    # Abre arquivo XML e faz parse
+    # Abre arquivo XML sintetico e faz parse
     # ------------------------------------------------------------------
-    # Dependendo do caso, o arquivo XML é muito grande
-    # Nesta situação, o parse completo fica muito lento e em alguns casos acaba a memória.
-    # Logo, subdividi o arquivo, pegando apenas a parte relativo à definição do exame,
-    # e descartando o restante.
-
-    # Cria um arquivo temporario, o qual será excluido com ulink ao final do processamento
-    arquivo_temporario = tempfile.NamedTemporaryFile(delete=False)
-    caminho_arquivo_temporario = arquivo_temporario.name
-    arquivo_temporario.close()
-
-    # Para teste, vamos deixar fixo
-    # caminho_arquivo_temporario = "parcial.xml"
-
-    # Extrai apenas linhas relevantes do arquivo original
-    with codecs.open(caminho_arquivo_temporario, 'w+b', encoding='utf-8') as ftemp:
-        with codecs.open(arquivo, "r", "utf-8") as fentrada:
-            for linha in fentrada:
-
-                # Verifica se chegou em uma parte do arquivo que já não temos mais interesse
-                # A parte que contém dados relevantes para laudo fica localizada no início do XML, nos tags
-                # <sourceExtractions>, <caseInformation> e <metadata>
-                # As partes seguintes não contém (até o momento) nenhuma informação relavante para laudo
-                irrelevantes = ["<images", "<taggedFiles", "<decodedData", "<carvedFiles", "<infectedFiles"]
-                encontrou = False
-                for termo in irrelevantes:
-                    if termo in linha: encontrou = True
-
-                if encontrou:
-                    # Finaliza arquivo, e encerra
-                    ftemp.write("</project>")
-                    break
-
-                # Grava linha linha
-                ftemp.write(linha)
-
-    # var_dump(caminho_arquivo_temporario)
-    # die('ponto288')
-
-
-    # Faz parse no arquivo parcial simplificado
-    tree = ElementTree.parse(caminho_arquivo_temporario)
+    tree = ElementTree.parse(caminho_arquivo)
     root = tree.getroot()
-
-    # Elimina arquivo temporário, pois não é mais necessário
-    os.unlink(caminho_arquivo_temporario)
 
     # ------------------------------------------------------------------
     # Valida cabeçalho do XML
@@ -338,7 +383,6 @@ def validar_arquivo_xml(arquivo, item, explicar=True):
     # Verifica atributos do projeto
     # ------------------------------------------------------------------
     a = root.attrib
-    # var_dump(a)
 
     # 'containsGarbage': 'False',
     # 'extractionType': 'FileSystem',
@@ -360,11 +404,11 @@ def validar_arquivo_xml(arquivo, item, explicar=True):
 
     # Nome do projeto
     name = a.get('name', None)
-    if (item not in name):
+    if (numero_item not in name):
         # Se o nome do projeto está fora do padrão, emite apenas um aviso
-        mensagem = ("Nome do projeto (" + name + ") não contém referência ao item. "
+        mensagem = ("Nome do projeto (" + name + ") não contém referência ao item de exame. "
                     + "Para evitar confusão, recomenda-se que o nome do projeto contenha no seu nome o item de apreensão, "
-                    + "algo como: 'Item" + item + "'")
+                    + "algo como: 'Item" + numero_item + "'")
         avisos += [mensagem]
         if_print_ok(explicar, mensagem)
         # return (False, dados)
@@ -434,7 +478,7 @@ def validar_arquivo_xml(arquivo, item, explicar=True):
                         "' com nome fora do padrão, pois não contém nenhum dos termos esperados (" +
                         ",".join(termos_nome_extracao) +
                         ")")
-            erros += [mensagem]
+            avisos += [mensagem]
             if_print_ok(explicar, mensagem)
 
     # Acho que não vai precisar disto...pode contar pelo tipo
@@ -443,36 +487,6 @@ def validar_arquivo_xml(arquivo, item, explicar=True):
     # d_aquis_geral['qtd_extracao_sd']=qtd_extracao_sd
     # d_aquis_geral['qtd_extracao_backup']=qtd_extracao_backup
 
-    # Verifica conjunto de extrações
-    # ------------------------------------------------------------------
-
-    # Se tem algum erro na seção de extração, não tem como prosseguir.
-    if len(erros) > 0:
-        return (False, dados, erros, avisos)
-
-    # Verifica quantidade de extrações e emite avisos para situações incomuns
-    if (qtd_extracao_aparelho == 0):
-        mensagem = ("Não foi encontrada nenhuma extração com nome contendo a palavra 'Aparelho'." +
-                    " O material não tem aparelho? Assegure-se que está correto.")
-        avisos += [mensagem]
-        if_print_ok(explicar, mensagem)
-
-    if (qtd_extracao_sim == 0):
-        mensagem = ("Não foi encontrada nenhuma extração com nome contendo a palavra 'SIM'." +
-                    "Realmente não tem SIM Card?. Assegure-se que isto está correto.")
-        avisos += [mensagem]
-        if_print_ok(explicar, mensagem)
-
-    if (qtd_extracao_sd > 0):
-        mensagem = ("Sistema ainda não preparado para tratar cartão SD. Consulte desenvolvedor.")
-        avisos += [mensagem]
-        if_print_ok(explicar, mensagem)
-
-    if (qtd_extracao_backup > 0):
-        mensagem = (
-            "Sistema ainda não preparado para tratar relatório de processamento de Backup. Consulte desenvolvedor.")
-        avisos += [mensagem]
-        if_print_ok(explicar, mensagem)
 
     # ------------------------------------------------------------------
     # Informações adicionais
@@ -524,6 +538,53 @@ def validar_arquivo_xml(arquivo, item, explicar=True):
                 dext[source_extraction] = {}
             dext[source_extraction][name] = valor
 
+
+    # Infere o tipo de componente baseado no fabricante DeviceInfoSelectedManufacturer
+    # SIM Card => Sim Card
+    # Mass Storage Device => SD
+    # ?? Como fica para Backup...tem que aguardar ter um para ver
+    # * (o restante) => Aparelho
+    for i in dext:
+        for n in dext[i]:
+            die('ponto579')
+
+
+
+    # Verifica conjunto de extrações
+    # ------------------------------------------------------------------
+
+    # Se tem algum erro na seção de extração, não tem como prosseguir.
+    #if len(erros) > 0:
+    #    return (False, dados, erros, avisos)
+
+    # Verifica quantidade de extrações e emite avisos para situações incomuns
+    if (qtd_extracao_aparelho == 0):
+        mensagem = ("Não foi encontrada nenhuma extração com nome contendo a palavra 'Aparelho'." +
+                    " O material não tem aparelho? Assegure-se que está correto.")
+        avisos += [mensagem]
+        if_print_ok(explicar, mensagem)
+
+    if (qtd_extracao_sim == 0):
+        mensagem = ("Não foi encontrada nenhuma extração com nome contendo a palavra 'SIM'." +
+                    "Realmente não tem SIM Card?. Assegure-se que isto está correto.")
+        avisos += [mensagem]
+        if_print_ok(explicar, mensagem)
+
+    if (qtd_extracao_sd > 0):
+        mensagem = ("Sistema ainda não preparado para tratar cartão SD. Consulte desenvolvedor.")
+        avisos += [mensagem]
+        if_print_ok(explicar, mensagem)
+
+    if (qtd_extracao_backup > 0):
+        mensagem = (
+            "Sistema ainda não preparado para tratar relatório de processamento de Backup. Consulte desenvolvedor.")
+        avisos += [mensagem]
+        if_print_ok(explicar, mensagem)
+
+
+
+    die('ponto583')
+
     # ------------------------------------------------------------------
     # Informações sobre os dispositivos
     # Na realidade, também tem relação com as extração
@@ -556,49 +617,78 @@ def validar_arquivo_xml(arquivo, item, explicar=True):
             dext[source_extraction][name] = valor
 
     # ------------------------------------------------------------------
-    # Prepara propriedades para laudo
+    # Recupera dados ds Seção ModelType SIMDATA
+    # <modelType type = "SIMData">
+    #  <model
+    #     type = "SIMData"
+    #     id = "fe5bdfe1-2e9c-47de-a9b5-3ec3d418446e"
+    #     deleted_state = "Intact"
+    #     decoding_confidence = "High"
+    #     isrelated = "False"
+    #     extractionId = "1">
+    #
+    #     <field name = "Name" type = "String">
+    #     <value type = "String" > <![CDATA[MSISDN 1]] > </value>
+    #     </field >
+    #     <field name = "Value" type = "String" >
+    #     < value type = "String" > <![CDATA[99192334]] > </value>
+    #     </field>
+    #     <field name = "Category" type = "String" >
+    #     <value type = "String" > <![CDATA[SIM / USIM MSISDN]] > </value>
+    #     </field >
+    # </model>
+    #
     # ------------------------------------------------------------------
 
-    dlaudo = {}
+    # Localiza a seção <metadata section="Extraction Data">
+    p = ns + 'modelType' + '[@type="SIMData"]'
+    model_type = root.find(p)
+    # var_dump(model_type)
+    # die('ponto642')
+    # <model type="SIMData" id="fe5bdfe1-2e9c-47de-a9b5-3ec3d418446e" deleted_state="Intact"
+    # decoding_confidence="High" isrelated="False" extractionId="1">
+    for model in model_type:
+        # var_dump(model)
+        # die('ponto645')
 
-    '''
-    'extractionInfo_name', 				# Nome da extração escolhida pelo PCF (Ex: 'Aparelho - Lógica')
+        # Armazena todos os valores
+        extraction_id = model.get('extractionId', None)
+        if (extraction_id is None):
+            # Tem que ser associado a alguma extração
+            continue
 
-    # Com influência do PCF
-    # Para efetuar o exame, o PCF escolhe manualmente o fabricante/modelo,
-    # que nem sempre é exatamente o mesmo do aparelho a ser examinado
-    # Iremos armazenar isto para 'Base de conhecimento'.
-    # Se alguém quiser saber como fazer o exame de um certo dispositivo,
-    # basta consultar estes dados
-    'DeviceInfoSelectedManufacturer', 	#Fabricante selecionado pelo PCF
-    'DeviceInfoSelectedDeviceName', 	#Modelo selecionado pelo PCF
+        m = dict()
+        # Existe três fields. Utilizamos aqui apenas o Name e o Value
+        # Cada um tem o seu valor na seção subordinada value
+        # <field name="Name" type="String">
+        # <field name="Value" type="String">
+        # <field name="Category" type="String">
+        for field in model:
+            # var_dump(field)
+            nome = field.get('name', None)
+
+            # <value type="String"><![CDATA[MSISDN 1]]></value>
+            # <value type="String"><![CDATA[99192334]]></value>
+            for value in field:
+                valor = value.text
+                m[nome] = valor
+
+                # print("nome=", nome)
+                # print("valor=", valor)
+                # die('ponto643')
+
+        # Se for MSIDN, e contiver algo válido, armazena
+        if 'MSISDN' in m['Name'] and m['Value'] != 'N/A':
+            dext[extraction_id]['MSISDN'] = m['Value']
+
+    # var_dump(dext)
+    # die('ponto660')
 
 
-    # Dados gerais
-    'DeviceInfoDetectedManufacturer', 	# Fabricante do aparelho detectado durante exame
-    'DeviceInfoDetectedModel', 			# Modelo do aparelho detectado durante exame
-    #'DeviceInfoReportType', 			# Tipo de relatório: 'Telefone', 'SIM' => Não tem para todas os tipos de extração....
-    'DeviceInfoRevision', 				# Versão do sistema operacional '5.1.1 LMY48B G531BTVJU0AOL1',
-    #'DeviceInfoTimeZone', 				# No formato 'America/Sao_Paulo'. Uso Futuro?
-    #'DeviceInfoUnitVersion', 			# Versão da unidade (Ex: '5.2.0.689'), provavelmente do hardware de touch
-    'ExtractionType', 					# Descrição do método de extração (ex: 'Lógico [ Android Backup ]')
-    #'extractionInfo_IsPartialData', 	# O que são dados parciais? Extração parcial? Relatório parcial? Uso futuro!?
-    #'extractionInfo_type', 				# Tipo de extração (Ex: 'Logical') => ExtractionType está em português
-    #'ufedExtractionApkDowngradeTitle',  # Uma explicação do próprio UFED sobre o download de APK. => bonitinho...
-
-
-    # Exclusivos de aparelhos
-    'IMEI', 							# IMEI do aparelho (Ex: '351972070993501')
-
-    # Exclusivos de SIM Card
-    'ACC',								# Algo como o tipo de cartão SIM. Uso Futuro!?
-    'ICCID', 							# Ex: '89550317001039126416'
-    'IMSI', 							# Ex: '724044440381414'
-    'SPN' 								# Operadora. (Ex: 'TIM')
-    '''
-
-    # Revisar a incluir novamente propriedades, a medida que for
-    # examinando novos modelos
+    # ------------------------------------------------------------------
+    # Prepara propriedades para laudo
+    # Todo: Revisar a incluir novamente propriedades, a medida que for examinando novos modelos
+    # ------------------------------------------------------------------
 
     proplaudo_aparelho = {
         # Dados gerais
@@ -613,6 +703,10 @@ def validar_arquivo_xml(arquivo, item, explicar=True):
         'ExtractionType': 'sem uso...sera agrupado',
         # IMEI do aparelho (Ex: '351972070993501')
         'IMEI': 'sapiAparelhoIMEI'
+        # A princípio vamos pegar apenas o dado do SimCard...será que precisar o que está no seção do aparelho?
+        # ,
+        # Número telefonico associado ao aparelho (deve valer para quando tem apenas um SimCard?)
+        # 'MSISDN': 'sapiMSISDN'
     }
 
     proplaudo_sim = {
@@ -623,8 +717,13 @@ def validar_arquivo_xml(arquivo, item, explicar=True):
         # Operadora. (Ex: 'TIM')
         'SPN': 'sapiSimOperadora',
         # Descrição do método de extração do SIM
-        'ExtractionType': 'sapiExtracoes'
+        'ExtractionType': 'sapiExtracoes',
+        # Número telefonico associado ao SimCard
+        'MSISDN': 'sapiSimMSISDN'
     }
+
+    # Dicionário para armazenamento de dados para laudo
+    dlaudo = {}
 
     # Processa as extrações do aparelho, separando o que é relevante para laudo
     # -------------------------------------------------------------------------
@@ -710,60 +809,9 @@ def validar_arquivo_xml(arquivo, item, explicar=True):
     # Ok, validado, mas pode conter avisos
     return (True, dados, erros, avisos)
 
-    '''
-    # Este teste vai ser feito apenas no momento de geração do laudo
-    # Não há necessidade de se preocupar com isto agora
 
-            # Se propriedade não é conhecida, avisa...pode ter algo útil
-            if (name not in prop_conhecidas):
-                msg=("Propriedade desconhecida("+name+") "+
-                     "pode eventualmente conter dados relevante para laudo. "+
-                     "Na extração '"+dext[sourceExtraction]["extractionInfo_name"]+"' "+
-                     name+"="+dext[sourceExtraction][name])
-                if_print_ok(explicar,msg)
-
-
-    # ------------------------------------------------------------------
-    # Se surgir alguma nova propriedade, aponta para a possível
-    # utilidade da mesma
-    # Isto é importante, pois a tendência é que os relatórios do
-    # Cellebrite fiquem cada vez mais completos
-    # ------------------------------------------------------------------
-
-    prop_conhecidas=[
-        'ACC',
-        'Client Used for Extraction',
-        'DeviceInfoAndroidID',
-        'DeviceInfoConnectionType',
-        'DeviceInfoDetectedManufacturer',
-        'DeviceInfoDetectedModel',
-        'DeviceInfoExtractionEndDateTime',
-        'DeviceInfoExtractionStartDateTime',
-        'DeviceInfoInternalVersion',
-        'DeviceInfoPhoneDateTime',
-        'DeviceInfoReportType',
-        'DeviceInfoRevision',
-        'DeviceInfoSelectedDeviceName',
-        'DeviceInfoSelectedManufacturer',
-        'DeviceInfoTimeZone',
-        'DeviceInfoUnitIdentifier',
-        'DeviceInfoUnitVersion',
-        'ExtractionType',
-        'ICCID',
-        'IMEI',
-        'IMSI',
-        'ProjectStateExtractionId',
-        'SPN',
-        'extractionInfo_IsPartialData',
-        'extractionInfo_name',
-        'extractionInfo_type',
-        'ufedExtractionApkDowngradeTitle'
-        ]
-
-
-    '''
-
-
+# Exibe dados para laudo, com uma pequena formatação para facilitar a visualização
+# --------------------------------------------------------------------------------
 def exibir_dados_laudo(d):
     print_centralizado(" Dados para laudo ")
 
@@ -851,7 +899,7 @@ def copia_cellebrite_ok():
         return
 
 
-def print_centralizado(texto, tamanho=129, preenchimento='-'):
+def print_centralizado(texto='', tamanho=129, preenchimento='-'):
     direita = (tamanho - len(texto)) // 2
     esquerda = tamanho - len(texto) - direita
     print(preenchimento * direita + texto + preenchimento * esquerda)
@@ -917,6 +965,7 @@ def copia_cellebrite():
               tarefa['descricao_situacao_tarefa'] + " => Não pode ser processada")
         print("Apenas tarefas com situação 'Aguardando ação PCF' ou 'Abortada' podem ser processadas")
         print("Em caso de divergência, efetue em Refresh na lista de tarefas (*SG)")
+        print("Para modificar manualmente a situação da tarefa, consulte tarefa no SETEC3")
         return
 
     # var_dump(tarefa)
@@ -975,7 +1024,6 @@ def copia_cellebrite():
               "cancele a cópia (responda N na próxima pergunta) e em seguida utilize o comando *si para validar a pasta. ",
               "Após a validação com sucesso, o sistema atualizará a situação da tarefa para 'concluído'")
 
-        # xxx
         print()
         prosseguir = pergunta_sim_nao(
             "< Você realmente deseja excluir a pasta de destino (assegure-se de estar tratando do item correto)?",
@@ -1047,7 +1095,8 @@ def copia_cellebrite():
     # Verifica se o arquivo XML contido na pasta de origem está ok
     print("- Iniciando validação de XML. Isto pode demorar, dependendo do tamanho do arquivo. Aguarde...")
     arquivo_xml = caminho_origem + "/Relatório.xml"
-    (resultado, dados_relevantes, erros, avisos) = validar_arquivo_xml(arquivo_xml, item=item["item"], explicar=False)
+    (resultado, dados_relevantes, erros, avisos) = processar_arquivo_xml(arquivo_xml, numero_item=item["item"],
+                                                                         explicar=False)
     if (not resultado):
         # A mensagem de erro já foi exibida pela própria função de validação
         for mensagem in erros:
@@ -1075,7 +1124,6 @@ def copia_cellebrite():
         return
     #
     copia_background = pergunta_sim_nao("< Efetuar cópia em background? ", default="n")
-    #copia_background = False
     if copia_background:
         proc = multiprocessing.Process(
             target=efetuar_copia,
@@ -1103,7 +1151,6 @@ def copia_cellebrite():
 # Efetua a cópia de uma pasta
 def efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevantes, limpar_pasta_destino_antes_copiar,
                   copia_background):
-
     # Define qual o tipo de saída das mensagens de processamento
     somente_log = 'log'
     tela_log = 'tela log'
@@ -1159,10 +1206,11 @@ def efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevant
                                                    args=(tipo_print, codigo_tarefa, caminho_destino))
             p_acompanhar.start()
             print_var(tipo_print, "Iniciando processo background para acompanhamento de copia")
+            print_var(tipo_print, "Para acompanhar a situação, utilize o comando *SG")
 
         # 2) Efetuar a cópia
         # ------------------------------------------------------------------
-        texto_status="Iniciando cópia de '"+ caminho_origem + "' para '" + caminho_destino + "'"
+        texto_status = "Iniciando cópia de '" + caminho_origem + "' para '" + caminho_destino + "'"
         atualizar_status_tarefa_andamento(codigo_tarefa, texto_status)
         shutil.copytree(caminho_origem, caminho_destino)
         texto_status = "Comando de cópia concluído"
@@ -1245,7 +1293,8 @@ def efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevant
     if (not ok):
         print()
         print_var(tela_log, "Não foi possível atualizar status de finalização da tarefa: ", msg_erro)
-        print_var(tela_log, "Após diagnosticar e resolver a causa do problema,  utilize comando *SI para atualizar situação da tarefa")
+        print_var(tela_log,
+                  "Após diagnosticar e resolver a causa do problema,  utilize comando *SI para atualizar situação da tarefa")
         print()
         return
 
@@ -1260,7 +1309,6 @@ def efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevant
 
 # Efetua a cópia de uma pasta
 def acompanhar_copia(tipo_print, codigo_tarefa, caminho_destino):
-
     print_var(tipo_print, "Processo de acompanhamento de tarefa: Vivo")
 
     # Um delay inicial, para dar tempo da cópia começar
@@ -1380,8 +1428,8 @@ def determinar_situacao_item_cellebrite(explicar=False):
     if_print_ok(explicar,
                 "- Iniciando validação de XML. Isto pode demorar, dependendo do tamanho do arquivo. Aguarde...")
     arquivo_xml = caminho_destino + "/Relatório.xml"
-    (resultado, dados_relevantes, erros, avisos) = validar_arquivo_xml(arquivo_xml, item=item["item"],
-                                                                       explicar=explicar)
+    (resultado, dados_relevantes, erros, avisos) = processar_arquivo_xml(arquivo_xml, numero_item=item["item"],
+                                                                         explicar=explicar)
     if (not resultado):
         status = "Arquivo XML inconsistente"
         codigo_status = GAbortou
@@ -1581,7 +1629,7 @@ def exibir_situacao():
 
     # Exibe cabecalho (Memorando/protocolo)
     print(GdadosGerais["identificacaoSolicitacao"])
-    print('-' * 129)
+    print_centralizado()
 
     # Lista de tarefas
     q = 0
@@ -1595,19 +1643,25 @@ def exibir_situacao():
         if (q == Gicor):
             corrente = '=>'
 
+        # Situacao
+        situacao = t["estado_descricao"]
+        # Se está em andamento, mostra o último status, se houver
+        if int(t['codigo_situacao_tarefa']) == int(GEmAndamento) and t['status_ultimo'] is not None:
+            situacao = t['status_ultimo']
+
         # var_dump(i)
         # cabecalho
         if (q == 1):
             print('%2s %2s %6s %-30.30s %15s %-69.69s' % (
                 " ", "Sq", "tarefa", "Situação", "Material", "Item : Descrição"))
-            print('-' * 129)
+            print_centralizado()
         # Tarefa
         item_descricao = t["item"] + " : " + i["descricao"]
         print('%2s %2s %6s %-30.30s %15s %-69.69s' % (
-            corrente, q, t["codigo_tarefa"], t["estado_descricao"], i["material"], item_descricao))
+            corrente, q, t["codigo_tarefa"], situacao, i["material"], item_descricao))
 
         if (q == Gicor):
-            print('-' * 129)
+            print_centralizado()
 
     return
 
@@ -1866,13 +1920,29 @@ def posicionar_item(n):
 
 if __name__ == '__main__':
 
+    # Desvia para um certo ponto, para teste
+    # --------------------------------------
+
+    # Sintetizar arquivo
+    #sintetizar_arquivo_xml("Relatório.xml", "parcial.xml")
+    #die('ponto1908')
+
+    # Desvia para um certo ponto, para teste
+    # Chama validacao de xml
+    (resultado_teste, dados_teste, erros_teste, avisos_teste) = validar_arquivo_xml("parcial.xml", numero_item="12",
+                                                                                      explicar=True)
+    print(resultado_teste)
+    exibir_dados_laudo(dados_teste['laudo'])
+    die('ponto1936')
+
     # Iniciando
     # ---------
     print()
     print("SAPI - Cellebrite (Versao " + Gversao + ")")
     print("=========================================")
     print()
-    print("- Dica: Para uma visualização adequada, configure o buffer de tela e tamanho de janela com largura de 130 caracteres")
+    print(
+        "- Dica: Para uma visualização adequada, configure o buffer de tela e tamanho de janela com largura de 130 caracteres")
     print()
     print()
     print_log('Iniciando sapi_cellebrite - ', Gversao)
@@ -1904,26 +1974,20 @@ if __name__ == '__main__':
     while (True):
         (comando, argumento) = receber_comando_ok()
         if (comando == '*qq'):
-            print("Finalizado por comando do usuario")
-
-            exibiu_mensagem = False
-            while True:
-                # Enquanto existir processo rodando, não encerra
-                lista = multiprocessing.active_children()
-                if len(lista) == 0:
-                    break
+            # Verifica se tem processos filho rodando
+            lista = multiprocessing.active_children()
+            if len(lista) != 0:
+                #
                 print("Existem ", len(lista), " processos filho (em background) rodando. ")
-                if not exibiu_mensagem:
-                    print("CTR-C para abortar, contudo isto irá interromper os processo filho,  ")
-                    print("podendo cancelar cópias em andamento.")
-                    print("Em caso de dúvida, aguarde término normal")
-                    exibiu_mensagem = True
+                print(
+                    "Caso estes processos filhos estejam realizando cópia de dados, as operações de cópia serão interrompidas e as tarefas deverão ser reiniciadas.")
+                prosseguir_finalizar = pergunta_sim_nao("Deseja realmente finalizar? ", default="n")
+                if not prosseguir_finalizar:
+                    continue
 
-                time.sleep(5)
-
-            if exibiu_mensagem:
-                print("Todos os filhos encerraram, encerrando processo principal")
-
+            # Finaliza
+            print()
+            print("Programa finalizado por solicitação do usuário")
             break
 
         # Executa os comandos
