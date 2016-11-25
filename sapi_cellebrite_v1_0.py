@@ -430,11 +430,6 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
 
     # Valida cada extração
     # ------------------------------------------------------------------
-    qtd_extracao_aparelho = 0
-    qtd_extracao_sim = 0
-    qtd_extracao_sd = 0
-    qtd_extracao_backup = 0
-    qtd_extracao_total = 0
     for extractionInfo in root.iter(tag=ns + 'extractionInfo'):
         id_extracao = extractionInfo.get('id', None)
         dext[id_extracao] = {}
@@ -444,42 +439,43 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
         dext[id_extracao]['extractionInfo_type'] = extractionInfo.get('type', None)
         dext[id_extracao]['extractionInfo_IsPartialData'] = extractionInfo.get('IsPartialData', None)
 
+
+        # Troquei isto por inferência
         # Verifica se extração contém uma das palavras chaves
-        termos_nome_extracao = ['aparelho', 'sim', 'sd', 'backup']
-        achou = False
-        for t in termos_nome_extracao:
-            if (t not in nome_extracao.lower()):
-                continue
-
-            # Achou um dos termos
-            achou = True
-            qtd_extracao_total += 1
-
-            # Aparelho
-            if (t == 'aparelho'):
-                qtd_extracao_aparelho += 1
-                dext[id_extracao]['sapiAparelho'] = True
-            # SIM
-            if (t == 'sim'):
-                qtd_extracao_sim += 1
-                dext[id_extracao]['sapiSIM'] = True
-            # Cartão de memória SD
-            if (t == 'sd'):
-                qtd_extracao_sd += 1
-                dext[id_extracao]['sapiSD'] = True
-            # Backup
-            if (t == 'backup'):
-                qtd_extracao_backup += 1
-                dext[id_extracao]['sapiBackup'] = True
-
-        # Extração com nome fora do padrão
-        if (not achou):
-            mensagem = ("Extração '" + nome_extracao +
-                        "' com nome fora do padrão, pois não contém nenhum dos termos esperados (" +
-                        ",".join(termos_nome_extracao) +
-                        ")")
-            avisos += [mensagem]
-            if_print_ok(explicar, mensagem)
+        # termos_nome_extracao = ['aparelho', 'sim', 'sd', 'backup']
+        # achou = False
+        # for t in termos_nome_extracao:
+        #     if (t not in nome_extracao.lower()):
+        #         continue
+        #
+        #     # Achou um dos termos
+        #     achou = True
+        #
+        #     # Aparelho
+        #     if (t == 'aparelho'):
+        #         qtd_extracao_aparelho += 1
+        #         dext[id_extracao]['sapiAparelho'] = True
+        #     # SIM
+        #     if (t == 'sim'):
+        #         qtd_extracao_sim += 1
+        #         dext[id_extracao]['sapiSIM'] = True
+        #     # Cartão de memória SD
+        #     if (t == 'sd'):
+        #         qtd_extracao_sd += 1
+        #         dext[id_extracao]['sapiSD'] = True
+        #     # Backup
+        #     if (t == 'backup'):
+        #         qtd_extracao_backup += 1
+        #         dext[id_extracao]['sapiBackup'] = True
+        #
+        # # Extração com nome fora do padrão
+        # if (not achou):
+        #     mensagem = ("Extração '" + nome_extracao +
+        #                 "' com nome fora do padrão, pois não contém nenhum dos termos esperados (" +
+        #                 ",".join(termos_nome_extracao) +
+        #                 ")")
+        #     avisos += [mensagem]
+        #     if_print_ok(explicar, mensagem)
 
     # Acho que não vai precisar disto...pode contar pelo tipo
     # d_aquis_geral['qtd_extracao_aparelho']=qtd_extracao_aparelho
@@ -538,23 +534,42 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
                 dext[source_extraction] = {}
             dext[source_extraction][name] = valor
 
-
     # Infere o tipo de componente baseado no fabricante DeviceInfoSelectedManufacturer
+    # Todo: Melhorar esta inferência de componente. Tem que ver o backup...mais alguma coisa que o cellebrite processa?
     # SIM Card => Sim Card
-    # Mass Storage Device => SD
-    # ?? Como fica para Backup...tem que aguardar ter um para ver
-    # * (o restante) => Aparelho
-    for i in dext:
-        for n in dext[i]:
-            die('ponto579')
+    # Por enquantoMass Storage Device => SD
+    # ??backup??
+    # Qualquer outra coisa => Aparelho
+    qtd_extracao_aparelho = 0
+    qtd_extracao_sim = 0
+    qtd_extracao_sd = 0
+    qtd_extracao_backup = 0
 
+    for id_extracao in dext:
+        tipo = None
+        for n in dext[id_extracao]:
+            if n == 'DeviceInfoSelectedManufacturer':
+                v = dext[id_extracao][n]
+                if v == 'SIM Card':
+                    qtd_extracao_sim += 1
+                    tipo = 'sapiSIM'
+                elif v == 'Mass Storage Device':
+                    qtd_extracao_sd += 1
+                    tipo = 'sapiSD'
+                elif v == 'backup????':  # Todo: Como identificar o backup
+                    qtd_extracao_backup += 1
+                    tipo = 'sapiBackup'
+                else:
+                    qtd_extracao_aparelho += 1
+                    tipo = 'sapiAparelho'
 
+        dext[id_extracao][tipo] = True
 
     # Verifica conjunto de extrações
     # ------------------------------------------------------------------
 
     # Se tem algum erro na seção de extração, não tem como prosseguir.
-    #if len(erros) > 0:
+    # if len(erros) > 0:
     #    return (False, dados, erros, avisos)
 
     # Verifica quantidade de extrações e emite avisos para situações incomuns
@@ -571,7 +586,7 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
         if_print_ok(explicar, mensagem)
 
     if (qtd_extracao_sd > 0):
-        mensagem = ("Sistema ainda não preparado para tratar cartão SD. Consulte desenvolvedor.")
+        mensagem = ("Sistema ainda não é capaz de inserir dados do cartão automaticamente no laudo.")
         avisos += [mensagem]
         if_print_ok(explicar, mensagem)
 
@@ -580,10 +595,6 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
             "Sistema ainda não preparado para tratar relatório de processamento de Backup. Consulte desenvolvedor.")
         avisos += [mensagem]
         if_print_ok(explicar, mensagem)
-
-
-
-    die('ponto583')
 
     # ------------------------------------------------------------------
     # Informações sobre os dispositivos
@@ -640,7 +651,6 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
     #
     # ------------------------------------------------------------------
 
-    # Localiza a seção <metadata section="Extraction Data">
     p = ns + 'modelType' + '[@type="SIMData"]'
     model_type = root.find(p)
     # var_dump(model_type)
@@ -681,9 +691,81 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
         if 'MSISDN' in m['Name'] and m['Value'] != 'N/A':
             dext[extraction_id]['MSISDN'] = m['Value']
 
-    # var_dump(dext)
-    # die('ponto660')
+    # Recupera dados da seção "UserAccount"
+    # -----------------------------------------------------------------------------------------------------------------
+    # <modelType type="UserAccount">
+    #  <model type="UserAccount" id="0d350d00-e2a7-42f4-9bfb-e964f1dd3a9c" deleted_state="Intact"
+    #          decoding_confidence="High" isrelated="False" extractionId="4">
+    #    <field name="Name" type="String">
+    #      <value type="String"><![CDATA[luizca1992]]></value>
+    #    </field>
+    #    <field name="Username" type="String">
+    #      <value type="String"><![CDATA[554599192334@s.whatsapp.net]]></value>
+    #    </field>
+    #    <field name="Password" type="String">
+    #      <empty />
+    #    </field>
+    #    <field name="ServiceType" type="String">
+    #      <value type="String"><![CDATA[WhatsApp]]></value>
+    #    </field>
+    #    <field name="ServerAddress" type="String">
+    #      <empty />
+    #    </field>
+    # -----------------------------------------------------------------------------------------------------------------
+    p = ns + 'modelType' + '[@type="UserAccount"]'
+    model_type = root.find(p)
+    var_dump(model_type)
+    for model in model_type:
+        # var_dump(model)
+        if model.get('type', None) != 'UserAccount':
+            # Despreza, se não for userAccount...tem fotos e outras coisas aqui também....
+            # Quem sabe no futuro, colocar a foto associada ao perfil.
+            continue
 
+        # Armazena todos os valores
+        extraction_id = model.get('extractionId', None)
+        if (extraction_id is None):
+            # Tem que ser associado a alguma extração
+            continue
+
+        # Recupera os valores
+        m = dict()
+        for field in model:
+            if '}field' not in field.tag:
+                # Tem outros tags aqui, como <multiModelField
+                continue
+            nome = field.get('name', None)
+
+            for value in field:
+                valor = value.text
+                m[nome] = valor
+
+        # Exemplo de dados extraídos
+        # 'Name': 'luizca1992',
+        # 'Password': None,
+        # 'ServerAddress': None,
+        # 'ServiceType': 'WhatsApp',
+        # 'TimeCreated': None,
+        # 'Username': '554599192334@s.whatsapp.net'}
+
+        # Se for MSIDN, e contiver algo válido, armazena
+        # Campos relevantes
+        lista_relevantes = ['Name', 'Username', 'ServiceType']
+        lista_partes_conta = list()
+        for campo in lista_relevantes:
+            if m.get(campo, None) is not None:
+                lista_partes_conta.append(m[campo])
+
+        conta_formatada = "/".join(lista_partes_conta)
+        # var_dump(conta_formatada)
+        # var_dump(lista)
+        # die('ponto766')
+        # var_dump(m)
+        # die('ponto750')
+        user_account = 'UserAccount'
+        if dext[extraction_id].get(user_account, None) is None:
+            dext[extraction_id][user_account] = list()
+        dext[extraction_id][user_account].append(conta_formatada)
 
     # ------------------------------------------------------------------
     # Prepara propriedades para laudo
@@ -702,7 +784,9 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
         # Descrição do método de extração (ex: 'Lógico [ Android Backup ]')
         'ExtractionType': 'sem uso...sera agrupado',
         # IMEI do aparelho (Ex: '351972070993501')
-        'IMEI': 'sapiAparelhoIMEI'
+        'IMEI': 'sapiAparelhoIMEI',
+        # Foi extraído de <modelType type="UserAccount">
+        'UserAccount': 'sapiUserAccount'
         # A princípio vamos pegar apenas o dado do SimCard...será que precisar o que está no seção do aparelho?
         # ,
         # Número telefonico associado ao aparelho (deve valer para quando tem apenas um SimCard?)
@@ -718,7 +802,7 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
         'SPN': 'sapiSimOperadora',
         # Descrição do método de extração do SIM
         'ExtractionType': 'sapiExtracoes',
-        # Número telefonico associado ao SimCard
+        # Número telefonico associado ao SimCard, extraído de <model type="SIMData">
         'MSISDN': 'sapiSimMSISDN'
     }
 
@@ -1924,13 +2008,13 @@ if __name__ == '__main__':
     # --------------------------------------
 
     # Sintetizar arquivo
-    #sintetizar_arquivo_xml("Relatório.xml", "parcial.xml")
-    #die('ponto1908')
+    # sintetizar_arquivo_xml("Relatório.xml", "parcial.xml")
+    # die('ponto1908')
 
     # Desvia para um certo ponto, para teste
     # Chama validacao de xml
     (resultado_teste, dados_teste, erros_teste, avisos_teste) = validar_arquivo_xml("parcial.xml", numero_item="12",
-                                                                                      explicar=True)
+                                                                                    explicar=True)
     print(resultado_teste)
     exibir_dados_laudo(dados_teste['laudo'])
     die('ponto1936')
