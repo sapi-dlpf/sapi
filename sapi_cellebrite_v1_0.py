@@ -25,7 +25,6 @@
 # TODO: Quando agente atualizar status, reportar o nome do programa e versão (ajustar servidor antes para armazenar)
 # ======================================================================================================================
 
-
 # Módulos utilizados
 # ====================================================================================================
 # Baseado no PEP8, os imports tem que estar todos no ínicio do arquivo
