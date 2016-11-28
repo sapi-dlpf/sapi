@@ -16,7 +16,7 @@
 #  - v1.0 : Inicial
 # =======================================================================
 # TODO: 
-# - 
+# - configurações do cliente ficarem no servidor, com cadastro de clientes e as ferramentas habilitadas
 # =======================================================================
 '''
 @created: 25/06/2016
@@ -27,25 +27,17 @@
 import configparser  # pip install -U configparser
 import glob
 import hashlib
-import os
-import pprint
 import shutil
 import socket
-import subprocess
-import sys
 import time
 
 import autoit  # pip install -U pyautoit
-from sapilib_0_5_4 import assegura_comunicacao_servidor_sapi
-from sapilib_0_5_4 import atualizar_status_tarefa
-from sapilib_0_5_4 import estaRodandoLinux
-from sapilib_0_5_4 import print_log_dual
-from sapilib_0_5_4 import sapisrv_obter_iniciar_tarefa
-from sapilib_0_5_4 import var_dump
 from selenium import webdriver  # pip install -U selenium
 from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import Select
+
+from sapilib_0_5_4 import *
 
 # =======================================================================
 # GLOBAIS
@@ -134,7 +126,7 @@ def verifica_ferramentas():
             pasta_ferramenta = config.get(lista_ferramentas[x], "pasta")
             pasta_origem = config.get(lista_ferramentas[x], "origem")
             tipo_ferramenta = config.get(lista_ferramentas[x], "tipo")  # PASTA / EXECUTÁVEL
-            if tipo_ferramenta == 'Pasta':
+            if tipo_ferramenta == 'Pasta': # Basta copiar a pasta, sem instalação
                 print_log_dual("Verificando se a pasta da ferramenta " + lista_ferramentas[x] + " existe.")
                 if not os.path.exists(pasta_ferramenta):  # PASTA DE DESTINO DA FERRAMENTA NÃO EXISTE
                     print_log_dual("A pasta " + pasta_ferramenta + " não existe. Copiando...")
@@ -145,7 +137,7 @@ def verifica_ferramentas():
                     else:  # PASTA DE ORIGEM NÃO EXISTE
                         print_log_dual("A pasta de origem " + pasta_origem + " não existe. Não dá para copiar. Saindo.")
                         sys.exit(1)
-            elif tipo_ferramenta == 'Executavel':
+            elif tipo_ferramenta == 'Executavel': # Necessita de instalação, não basta copiar a pasta
                 print_log_dual("Verificando se o programa " + lista_ferramentas[x] + " está instalado.")
                 arquivo_ferramenta = pasta_ferramenta + "/" + config.get(lista_ferramentas[x], "executavel")
                 # verifica se a pasta existe OU se o hash do executável é igual ao estipulado no arquivo de configuração
@@ -1142,6 +1134,47 @@ elif resposta_ferramenta['args']['ferramenta'] == 'TABLEAU_TD3':
     print("Usando Tableau TD3")
     tableautd3()
 return
+
+
+# Cria arquivo VHDX
+def vhdx_cria(pasta, criptografado=False):
+    # Inicialmente deve-se identificar se o cliente possui a ferramenta "STORAGE" habilitada
+    config = configparser.ConfigParser()
+    config.read("CLIENTE.ini")
+    if not config.get("FERRAMENTAS", "storage"):
+        print_log_dual("A ferramenta STORAGE não está habilitada neste computador.")
+        sys.exit(1)
+    if not os.path.exists(pasta):
+        print_log_dual("A pasta de destino [" + pasta + "] não foi encontrada.")
+        sys.exit(1)
+    # Para saber qual a pasta onde estão os arquivos VHDX, deve ser consultado o CLIENTE.INI
+    origem_vhdx = config.get("STORAGE", "pasta")
+    if criptografado:
+        origem_vhdx += "/SAPI_BITLOCKER.vhdx"
+    elif:
+        origem_vhdx += "/SAPI.vhdx"
+    # agora pode copiar da origem para o destino
+    if os.path.exists(origem_vhdx):
+        shutil.copy(origem_vhdx, pasta)
+
+    return
+
+
+# Monta arquivo VHDX e compartilha via rede
+def vhdx_monta(pasta, criptografado=False):
+    if criptografado:
+        pasta += "/SAPI_BITLOCKER.vhdx"
+    elif:
+        pasta += "/SAPI.vhdx"
+    if os.path.exists(pasta):
+
+    return
+
+
+# Desmonta arquivo VHDX
+def vhdx_desmonta(endereco_ip, pasta_servidor, nome_compartilhamento):
+    return
+
 
 if __name__ == "__main__":
     hora_inicio = time.time()
