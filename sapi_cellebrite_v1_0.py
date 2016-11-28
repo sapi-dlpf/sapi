@@ -14,8 +14,6 @@
 #  - Validação dos dados do Cellebrite
 #  - Cópia para pasta do storage
 #  - Atualização do servidor da situação da tarefa
-#
-#
 # Histórico:
 #  - v1.0 : Inicial
 # ======================================================================================================================
