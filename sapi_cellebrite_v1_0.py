@@ -18,11 +18,14 @@
 #
 # Histórico:
 #  - v1.0 : Inicial
-# =======================================================================
+# ======================================================================================================================
 # TODO: Como garantir que a cópia foi efetuada com sucesso? Hashes?
 # TODO: XML está quase do tamanho do PDF (em alguns casos, fica bem grande).
 #       Criar opção para excluir do destino? Excluir sempre?
-# =======================================================================
+# TODO: Reportar ao servidor a versão do programa quando for solicitar tarefas. Se a versão não for mais suportada,
+#       servidor deve negar fornecer tarefas para o agente
+# TODO: Quando agente atualizar status, reportar o nome do programa e versão (ajustar servidor antes para armazenar)
+# ======================================================================================================================
 
 
 # Módulos utilizados
@@ -44,7 +47,7 @@ import multiprocessing
 # Verifica se está rodando versão correta de Python
 # ====================================================================================================
 if sys.version_info <= (3, 0):
-    sys.stdout.write("Versao do intepretador python (" + str(platform.python_version()) + ") incorreta.\n")
+    sys.stdout.write("Versao do intepretador python (" + str(platform.python_version()) + ") inadequada.\n")
     sys.stdout.write("Este programa requer Python 3 (preferencialmente Python 3.5.2).\n")
     sys.exit(1)
 
@@ -52,7 +55,11 @@ if sys.version_info <= (3, 0):
 # GLOBAIS
 # =======================================================================
 
-Gversao = "1.0"
+Gprograma = "sapi_cellebrite"
+Gversao = "1_0"
+
+# Para gravação de estado
+Garquivo_estado = Gprograma + "v" + Gversao + ".sapi"
 
 Gdesenvolvimento = True  # Ambiente de desenvolvimento
 # Gdesenvolvimento=False #Ambiente de producao
@@ -60,15 +67,15 @@ Gdesenvolvimento = True  # Ambiente de desenvolvimento
 Gdebug = False
 
 # Base de dados (globais)
-GdadosGerais = {}  # Dicionário com dados gerais
-Gtarefas = []  # Lista de tarefas
+GdadosGerais = dict()  # Dicionário com dados gerais
+Gtarefas = list()  # Lista de tarefas
 
 # Diversos sem persistência
 Gicor = 1
 
 # Controle de frequencia de atualizacao
-# GtempoEntreAtualizacoesStatus = 180 # Tempo normal de produção
-GtempoEntreAtualizacoesStatus = 10  # Debug: Gerar bastante log
+GtempoEntreAtualizacoesStatus = 180  # Tempo normal de produção
+# GtempoEntreAtualizacoesStatus = 10  # Debug: Gerar bastante log
 
 # **********************************************************************
 # PRODUCAO DEPLOYMENT AJUSTAR
@@ -190,7 +197,7 @@ def storage_montado(ponto_montagem):
 def atualizar_status_tarefa(codigo_tarefa, codigo_situacao_tarefa, status, dados_relevantes=None):
     # Define nome do agente
     # xxxx@yyyy, onde xxx é o nome do programa e yyyy é o hostname
-    nome_agente = os.path.basename(sys.argv[0]) + "@" + socket.gethostbyaddr(socket.gethostname())[0]
+    nome_agente = socket.gethostbyaddr(socket.gethostname())[0]
 
     # Parâmetros
     param = {'codigo_tarefa': codigo_tarefa,
@@ -439,51 +446,6 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
         dext[id_extracao]['extractionInfo_type'] = extractionInfo.get('type', None)
         dext[id_extracao]['extractionInfo_IsPartialData'] = extractionInfo.get('IsPartialData', None)
 
-
-        # Troquei isto por inferência
-        # Verifica se extração contém uma das palavras chaves
-        # termos_nome_extracao = ['aparelho', 'sim', 'sd', 'backup']
-        # achou = False
-        # for t in termos_nome_extracao:
-        #     if (t not in nome_extracao.lower()):
-        #         continue
-        #
-        #     # Achou um dos termos
-        #     achou = True
-        #
-        #     # Aparelho
-        #     if (t == 'aparelho'):
-        #         qtd_extracao_aparelho += 1
-        #         dext[id_extracao]['sapiAparelho'] = True
-        #     # SIM
-        #     if (t == 'sim'):
-        #         qtd_extracao_sim += 1
-        #         dext[id_extracao]['sapiSIM'] = True
-        #     # Cartão de memória SD
-        #     if (t == 'sd'):
-        #         qtd_extracao_sd += 1
-        #         dext[id_extracao]['sapiSD'] = True
-        #     # Backup
-        #     if (t == 'backup'):
-        #         qtd_extracao_backup += 1
-        #         dext[id_extracao]['sapiBackup'] = True
-        #
-        # # Extração com nome fora do padrão
-        # if (not achou):
-        #     mensagem = ("Extração '" + nome_extracao +
-        #                 "' com nome fora do padrão, pois não contém nenhum dos termos esperados (" +
-        #                 ",".join(termos_nome_extracao) +
-        #                 ")")
-        #     avisos += [mensagem]
-        #     if_print_ok(explicar, mensagem)
-
-    # Acho que não vai precisar disto...pode contar pelo tipo
-    # d_aquis_geral['qtd_extracao_aparelho']=qtd_extracao_aparelho
-    # d_aquis_geral['qtd_extracao_sim']=qtd_extracao_sim
-    # d_aquis_geral['qtd_extracao_sd']=qtd_extracao_sd
-    # d_aquis_geral['qtd_extracao_backup']=qtd_extracao_backup
-
-
     # ------------------------------------------------------------------
     # Informações adicionais
     # ------------------------------------------------------------------
@@ -496,10 +458,10 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
 
     # Busca versão do physical Analyzer
     # Por enquanto, não está utilizando isto
-    # p = ns + "metadata/" + ns + "item" + "[@name='UFED_PA_Version']"
-    # ufed_pa_version = None
-    # if (root.find(p) is not None):
-    #     ufed_pa_version = root.find(p).text
+    p = ns + "metadata/" + ns + "item" + "[@name='UFED_PA_Version']"
+    ufed_pa_version = None
+    if (root.find(p) is not None):
+        ufed_pa_version = root.find(p).text
 
     # ------------------------------------------------------------------
     # Dados das extrações
@@ -651,45 +613,45 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
     #
     # ------------------------------------------------------------------
 
-    p = ns + 'modelType' + '[@type="SIMData"]'
-    model_type = root.find(p)
-    # var_dump(model_type)
-    # die('ponto642')
     # <model type="SIMData" id="fe5bdfe1-2e9c-47de-a9b5-3ec3d418446e" deleted_state="Intact"
     # decoding_confidence="High" isrelated="False" extractionId="1">
-    for model in model_type:
-        # var_dump(model)
-        # die('ponto645')
+    p = ns + 'modelType' + '[@type="SIMData"]'
+    model_type = root.find(p)
+    if model_type is not None:
+        # Processa dados de tags localizados
+        for model in model_type:
+            # var_dump(model)
+            # die('ponto645')
 
-        # Armazena todos os valores
-        extraction_id = model.get('extractionId', None)
-        if (extraction_id is None):
-            # Tem que ser associado a alguma extração
-            continue
+            # Armazena todos os valores
+            extraction_id = model.get('extractionId', None)
+            if (extraction_id is None):
+                # Tem que ser associado a alguma extração
+                continue
 
-        m = dict()
-        # Existe três fields. Utilizamos aqui apenas o Name e o Value
-        # Cada um tem o seu valor na seção subordinada value
-        # <field name="Name" type="String">
-        # <field name="Value" type="String">
-        # <field name="Category" type="String">
-        for field in model:
-            # var_dump(field)
-            nome = field.get('name', None)
+            m = dict()
+            # Existe três fields. Utilizamos aqui apenas o Name e o Value
+            # Cada um tem o seu valor na seção subordinada value
+            # <field name="Name" type="String">
+            # <field name="Value" type="String">
+            # <field name="Category" type="String">
+            for field in model:
+                # var_dump(field)
+                nome = field.get('name', None)
 
-            # <value type="String"><![CDATA[MSISDN 1]]></value>
-            # <value type="String"><![CDATA[99192334]]></value>
-            for value in field:
-                valor = value.text
-                m[nome] = valor
+                # <value type="String"><![CDATA[MSISDN 1]]></value>
+                # <value type="String"><![CDATA[99192334]]></value>
+                for value in field:
+                    valor = value.text
+                    m[nome] = valor
 
-                # print("nome=", nome)
-                # print("valor=", valor)
-                # die('ponto643')
+                    # print("nome=", nome)
+                    # print("valor=", valor)
+                    # die('ponto643')
 
-        # Se for MSIDN, e contiver algo válido, armazena
-        if 'MSISDN' in m['Name'] and m['Value'] != 'N/A':
-            dext[extraction_id]['MSISDN'] = m['Value']
+            # Se for MSIDN, e contiver algo válido, armazena
+            if 'MSISDN' in m['Name'] and m['Value'] != 'N/A':
+                dext[extraction_id]['MSISDN'] = m['Value']
 
     # Recupera dados da seção "UserAccount"
     # -----------------------------------------------------------------------------------------------------------------
@@ -714,58 +676,86 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
     # -----------------------------------------------------------------------------------------------------------------
     p = ns + 'modelType' + '[@type="UserAccount"]'
     model_type = root.find(p)
-    var_dump(model_type)
-    for model in model_type:
-        # var_dump(model)
-        if model.get('type', None) != 'UserAccount':
-            # Despreza, se não for userAccount...tem fotos e outras coisas aqui também....
-            # Quem sabe no futuro, colocar a foto associada ao perfil.
-            continue
-
-        # Armazena todos os valores
-        extraction_id = model.get('extractionId', None)
-        if (extraction_id is None):
-            # Tem que ser associado a alguma extração
-            continue
-
-        # Recupera os valores
-        m = dict()
-        for field in model:
-            if '}field' not in field.tag:
-                # Tem outros tags aqui, como <multiModelField
+    usernames_conhecidos = list()
+    if model_type is not None:
+        # Processa informações de conta
+        for model in model_type:
+            # var_dump(model)
+            if model.get('type', None) != 'UserAccount':
+                # Despreza, se não for userAccount...tem fotos e outras coisas aqui também....
+                # Quem sabe no futuro, colocar a foto associada ao perfil.
                 continue
-            nome = field.get('name', None)
 
-            for value in field:
-                valor = value.text
-                m[nome] = valor
+            # Armazena todos os valores
+            extraction_id = model.get('extractionId', None)
+            if (extraction_id is None):
+                # Tem que ser associado a alguma extração
+                continue
 
-        # Exemplo de dados extraídos
-        # 'Name': 'luizca1992',
-        # 'Password': None,
-        # 'ServerAddress': None,
-        # 'ServiceType': 'WhatsApp',
-        # 'TimeCreated': None,
-        # 'Username': '554599192334@s.whatsapp.net'}
+            # Recupera os valores
+            m = dict()
+            for field in model:
+                if '}field' not in field.tag:
+                    # Tem outros tags aqui, como <multiModelField
+                    continue
+                nome = field.get('name', None)
 
-        # Se for MSIDN, e contiver algo válido, armazena
-        # Campos relevantes
-        lista_relevantes = ['Name', 'Username', 'ServiceType']
-        lista_partes_conta = list()
-        for campo in lista_relevantes:
-            if m.get(campo, None) is not None:
-                lista_partes_conta.append(m[campo])
+                for value in field:
+                    valor = value.text
+                    m[nome] = valor
 
-        conta_formatada = "/".join(lista_partes_conta)
-        # var_dump(conta_formatada)
-        # var_dump(lista)
-        # die('ponto766')
-        # var_dump(m)
-        # die('ponto750')
-        user_account = 'UserAccount'
-        if dext[extraction_id].get(user_account, None) is None:
-            dext[extraction_id][user_account] = list()
-        dext[extraction_id][user_account].append(conta_formatada)
+            # Exemplo de dados extraídos
+            # 'Name': 'luizca1992',
+            # 'Password': None,
+            # 'ServerAddress': None,
+            # 'ServiceType': 'WhatsApp',
+            # 'TimeCreated': None,
+            # 'Username': '554599192334@s.whatsapp.net'}
+
+            # Se for MSIDN, e contiver algo válido, armazena
+            # Campos relevantes
+            lista_relevantes = ['Name', 'Username', 'ServiceType']
+            lista_partes_conta = list()
+            for campo in lista_relevantes:
+                if m.get(campo, None) is not None:
+                    lista_partes_conta.append(m[campo])
+
+            conta_formatada = "/".join(lista_partes_conta)
+
+            # Despreza algumas contas inúteis
+            desprezar_conta = False
+            lista_inuteis = ["primary.sim", "vnd.sec.contact", "recarga.tim"]
+            for inutil in lista_inuteis:
+                if inutil in conta_formatada:
+                    desprezar_conta = True
+            if desprezar_conta:
+                continue
+
+            # Se o username for repetido (mesma conta de email), ignora
+            # Normalmente ocorre de diversos serviços do google compartilharem a mesma conta
+            # Isto gera uma lista muito extensa e sem utilidade
+            # TODO: O melhor seria apresentar a conta com todos os serviços associados...se for necessário
+            user_name = m.get('Username', None)
+            if user_name is not None:
+                if user_name in usernames_conhecidos:
+                    continue
+                usernames_conhecidos.append(user_name)
+
+            # var_dump(conta_formatada)
+            # var_dump(lista)
+            # die('ponto766')
+            # var_dump(m)
+            # die('ponto750')
+
+            # Insere contas na lista de contas da respectiva extração
+            user_account = 'UserAccount'
+            # Se campo entrada no dicionário, não existe, cria
+            if dext[extraction_id].get(user_account, None) is None:
+                dext[extraction_id][user_account] = list()
+            dext[extraction_id][user_account].append(conta_formatada)
+            # var_dump(dext[extraction_id][user_account])
+
+            # die('ponto783')
 
     # ------------------------------------------------------------------
     # Prepara propriedades para laudo
@@ -812,8 +802,9 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
     # Processa as extrações do aparelho, separando o que é relevante para laudo
     # -------------------------------------------------------------------------
     if (qtd_extracao_aparelho > 0):
-        dcomp = {}
-        lista_extracoes = []
+        dcomp = dict()
+        lista_extracoes = list()
+        lista_contas = list()
         for i in dext:
             if not dext[i].get("sapiAparelho", False):
                 continue
@@ -824,6 +815,9 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
                 if (j == 'ExtractionType'):
                     # Como pode haver vária extrações, colocamos em uma lista
                     lista_extracoes.append(dext[i][j])
+                elif j == 'UserAccount':
+                    # Fazer um lista com a junção de todas as listas de contas
+                    lista_contas += dext[i][j]
                 else:
                     # Armazena valor da propriedade
                     dcomp[proplaudo_aparelho[j]] = dext[i][j]
@@ -839,6 +833,8 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
         dcomp['sapiTipoComponente'] = 'aparelho'
         dcomp['sapiNomeComponente'] = 'Aparelho'
         dcomp['sapiExtracoes'] = ', '.join(lista_extracoes)
+        lista_contas.sort()
+        dcomp['sapiUserAccount'] = ', '.join(lista_contas)
 
         # Inclui componente
         quantidade_componentes += 1
@@ -876,8 +872,8 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
     # Finaliza dados para laudo
     # -----------------------------------------------------------------
     dlaudo['sapiQuantidadeComponentes'] = quantidade_componentes
-    dlaudo["sapiTipoComponenteAquisicao"] = "extracao"
-    dlaudo["sapiSoftwareVersao"] = "UFED/cellebrite"
+    dlaudo["sapiTipoAquisicao"] = "extracao"
+    dlaudo["sapiSoftwareVersao"] = "UFED/cellebrite " + ufed_pa_version
 
     dados['laudo'] = dlaudo
 
@@ -1024,6 +1020,8 @@ def copia_cellebrite():
     # ------------------------------------------------------------------
     print()
     print("-" * 129)
+    print("Tarefa: ", tarefa["codigo_tarefa"])
+    print("Situação: ", tarefa['descricao_situacao_tarefa'])
     print("Item: ", tarefa["dados_item"]["item_apreensao"])
     print("Material: ", tarefa["dados_item"]["material"])
     print("Descrição: ", tarefa["dados_item"]["descricao"])
@@ -1089,8 +1087,8 @@ def copia_cellebrite():
 
     caminho_destino = ponto_montagem + tarefa["caminho_destino"]
 
-    print("- Este comando irá efetuar validação e cópia da pasta de relatórios do Cellebrite/UFED para o storage.")
-    print()
+    print("- A pasta de origem contendo os dados de relatório do Cellebrite será inicialmente validada.")
+    print("- Estando tudo ok, será efetuada a cópia da pasta de origem para a pasta de destino indica abaixo.")
     print("- Pasta de destino: ", caminho_destino)
 
     # Verifica se pasta de destino já existe
@@ -1102,12 +1100,11 @@ def copia_cellebrite():
         print("- IMPORTANTE: A pasta de destino JÁ EXISTE")
         print()
         print("- Não é possível iniciar cópia de relatório nesta situação.")
-        print("- Se o conteúdo atual da pasta de destino não tem utilidade, ",
+        print("- Se o conteúdo atual da pasta de destino não tem utilidade,",
               "autorize a limpeza da pasta (opção abaixo).")
-        print("- Caso contrário, ou seja, se os dados na pasta de destino estão ok (foram copiados anteriormente), ",
-              "cancele a cópia (responda N na próxima pergunta) e em seguida utilize o comando *si para validar a pasta. ",
-              "Após a validação com sucesso, o sistema atualizará a situação da tarefa para 'concluído'")
-
+        print("- Se você entende que os dados na pasta de destino já estão ok,")
+        print("  cancele este comando e simplesmente utilize o comando *si para validar a pasta.")
+        print("  Após a validação com sucesso, o sistema atualizará a situação da tarefa para 'concluído'")
         print()
         prosseguir = pergunta_sim_nao(
             "< Você realmente deseja excluir a pasta de destino (assegure-se de estar tratando do item correto)?",
@@ -1154,7 +1151,6 @@ def copia_cellebrite():
         print("- Pasta de origem selecionada: ", caminho_origem)
 
         # Verificação básica da pasta, para ver se contém os arquivos típicos
-        print()
         (erros, avisos) = valida_pasta_relatorio_cellebrite(pasta=caminho_origem, explicar=True)
         if len(erros) == 0 and len(avisos) == 0:
             # Nenhum erro ou aviso
@@ -1171,14 +1167,15 @@ def copia_cellebrite():
             if not prosseguir:
                 # Encerra, pois possivelmente será necessário algum ajuste na pasta
                 return
-            print("- Prosseguindo, após confirmação de avisos")
+            print("- Prosseguindo após confirmação de avisos")
 
         # Ok, prossegue
         break
 
     # Verifica se o arquivo XML contido na pasta de origem está ok
-    print("- Iniciando validação de XML. Isto pode demorar, dependendo do tamanho do arquivo. Aguarde...")
     arquivo_xml = caminho_origem + "/Relatório.xml"
+    print("- Validando arquivo XML: ", arquivo_xml)
+    print("- Isto pode demorar alguns minutos, dependendo do tamanho do arquivo. Aguarde...")
     (resultado, dados_relevantes, erros, avisos) = processar_arquivo_xml(arquivo_xml, numero_item=item["item"],
                                                                          explicar=False)
     if (not resultado):
@@ -1202,7 +1199,7 @@ def copia_cellebrite():
         print_centralizado('')
 
     print()
-    print("- Verifique os dados acima, e se estiver tudo certo confirme para iniciar a cópia")
+    print("- Verifique os dados acima. Se estiver tudo certo, confirme para iniciar a cópia")
     prosseguir = pergunta_sim_nao("< Dados acima correspondem ao exame efetuado? ", default="n")
     if not prosseguir:
         return
@@ -1269,10 +1266,12 @@ def efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevant
         # 0) Limpara pasta de destino antes de iniciar
         # ------------------------------------------------------------------
         if limpar_pasta_destino_antes_copiar:
+            texto_status = "Excluindo pasta de destino '" + caminho_destino + "'"
+            atualizar_status_tarefa_andamento(codigo_tarefa, texto_status)
             print_var(tipo_print,
                       "Exclusão de conteúdo atual da pasta de destino '" + caminho_destino + "' em andamento.")
             shutil.rmtree(caminho_destino, ignore_errors=True)
-            texto_status = "Pasta de destino excluída '" + caminho_destino + "'"
+            texto_status = "Pasta de destino excluída"
             atualizar_status_tarefa_andamento(codigo_tarefa, texto_status)
 
         # 1) Renomear o arquivo XML na pasta de origem (nome temporário)
@@ -1378,7 +1377,7 @@ def efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevant
         print()
         print_var(tela_log, "Não foi possível atualizar status de finalização da tarefa: ", msg_erro)
         print_var(tela_log,
-                  "Após diagnosticar e resolver a causa do problema,  utilize comando *SI para atualizar situação da tarefa")
+                  "Após diagnosticar e resolver a causa do problema, utilize comando *SI para atualizar situação da tarefa")
         print()
         return
 
@@ -1395,8 +1394,8 @@ def efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevant
 def acompanhar_copia(tipo_print, codigo_tarefa, caminho_destino):
     print_var(tipo_print, "Processo de acompanhamento de tarefa: Vivo")
 
-    # Um delay inicial, para dar tempo da cópia começar
-    time.sleep(GtempoEntreAtualizacoesStatus)
+    # Um pequeno delay inicial, para dar tempo da cópia começar
+    time.sleep(30)
 
     # Fica em loop inifito. Será encerrado pelo pai (com terminate)
     while True:
@@ -1631,8 +1630,7 @@ def receber_comando_ok():
         # Se não tiver, finaliza normalmente
         # Caso contrário, não permitie
         # Por enquanto, simplesmente ignora o CTR-C
-        print("Para encerrar, utilize comando *qq")
-        return ("", "")
+        return ("*qq", "")
 
 
 # Recebe e confere a validade de um comando de usuário
@@ -1651,8 +1649,7 @@ def receber_comando():
         '*du': 'Dump: Mostra todas as propriedades de uma tarefa (utilizado para Debug)',
 
         # Comandos gerais
-        '*sg': 'Exibe situação atual das tarefas. ' +
-               'Será feita uma recuperação da situação atual das tarefas do servidor (refresh).',
+        '*sg': 'Efetua Refresh da situação das tarefas. ',
         '*tm': 'Troca memorando',
         '*qq': 'Finaliza'
 
@@ -1687,21 +1684,29 @@ def receber_comando():
             # Exibe ajuda para comando
             print()
             print("Navegacao:")
+            print("----------")
+            print('<ENTER> : Exibe lista de tarefas atuais (sem Refresh no servidor)')
             for key in cmd_navegacao:
                 print(key, " : ", comandos[key])
             print()
+
             print("Processamento da tarefa corrente (marcada com =>):")
+            print("--------------------------------------------------")
             for key in cmd_item:
                 print(key, " : ", comandos[key])
             print()
+
             print("Comandos gerais:")
+            print("----------------")
             for key in cmd_geral:
                 print(key, " : ", comandos[key])
         elif (comando_recebido == ""):
-            print("Para ajuda, digitar comando 'h' ou '?'")
+            # print("Para ajuda, digitar comando 'h' ou '?'")
+            return ("", "")
         else:
             if (comando_recebido != ""):
                 print("Comando (" + comando_recebido + ") inválido")
+                print("Para ajuda, digitar comando 'h' ou '?'")
 
     return (comando_recebido, argumento_recebido)
 
@@ -1712,7 +1717,9 @@ def exibir_situacao():
     cls()
 
     # Exibe cabecalho (Memorando/protocolo)
-    print(GdadosGerais["identificacaoSolicitacao"])
+    print(GdadosGerais.get("identificacaoSolicitacao", None), " | ",
+          GdadosGerais.get("data_hora_ultima_atualizacao_status", None), " | ",
+          "(Sapi Cellebrite:" + str(Gversao) + ")")
     print_centralizado()
 
     # Lista de tarefas
@@ -1747,6 +1754,9 @@ def exibir_situacao():
         if (q == Gicor):
             print_centralizado()
 
+    print()
+    print("Dica: Para recuperar a situação atualizada do servidor (Refresh), utilize comando *SG")
+
     return
 
 
@@ -1759,7 +1769,7 @@ def salvar_estado():
     estado["GdadosGerais"] = GdadosGerais
 
     # Abre arquivo de estado para gravação
-    nome_arquivo = "estado.sapi"
+    nome_arquivo = Garquivo_estado
     arquivo_estado = open(nome_arquivo, "w")
 
     # Grava e encerra
@@ -1775,11 +1785,11 @@ def carregar_estado():
     global GdadosGerais
 
     # Não tem arquivo de estado
-    if (not os.path.isfile("estado.sapi")):
+    if (not os.path.isfile(Garquivo_estado)):
         return
 
     # Le dados do arquivo e fecha
-    arq_estado = open("estado.sapi", "r")
+    arq_estado = open(Garquivo_estado, "r")
     estado = json.load(arq_estado)
     arq_estado.close()
 
@@ -1793,17 +1803,36 @@ def carregar_estado():
 # sprint("Isto so deve acontecer em ambiente de desenvolvimento")
 
 
+# Recupera memorando, tratando CTR-C
+# ----------------------------------------------------------------------
+def obter_memorando_tarefas_ok():
+    try:
+        return obter_memorando_tarefas()
+    except KeyboardInterrupt:
+        print("Operação interrompida pelo usuário")
+        return None
+
+
 # Carrega situação de arquivo
 # ----------------------------------------------------------------------
 def obter_memorando_tarefas():
     print()
 
+    print("Seleção de Memorando")
+    print_centralizado("-")
+    print("")
+
     # Solicita que o usuário se identifique através da matricula
     # ----------------------------------------------------------
     lista_solicitacoes = None
     while True:
-        matricula = input("Entre com sua matricula: ")
+
+        matricula = input("Entre com sua matrícula: ")
+        matricula = matricula.replace(".", "")
         matricula = matricula.lower().strip()
+
+        if not matricula.isdigit():
+            continue
 
         (sucesso, msg_erro, lista_solicitacoes) = sapisrv_chamar_programa(
             "sapisrv_obter_pendencias_pcf.php",
@@ -1832,10 +1861,12 @@ def obter_memorando_tarefas():
         q += 1
         if (q == 1):
             # Cabecalho
-            print('%2s  %10s  %s' % ("N.", "Protocolo", "Documento"))
+            print('%2s  %10s  %s' % ("Sq", "Protocolo", "Documento"))
         protocolo_ano = d["numero_protocolo"] + "/" + d["ano_protocolo"]
         print('%2d  %10s  %s' % (q, protocolo_ano, d["identificacao"]))
 
+    print()
+    print("Estas são as solicitações de exames desta matrícula com tarefas SAPI. Em caso de dúvida, consulte SETEC3")
     # print("type(lista_solicitacoes)=",type(lista_solicitacoes))
 
     # Usuário escolhe a solicitação de exame de interesse
@@ -1845,7 +1876,7 @@ def obter_memorando_tarefas():
         #
         print()
         num_solicitacao = input(
-            "Selecione a solicitação de exame, indicando o número de sequencia (N.) na lista acima: ")
+            "Selecione a solicitação de exame, indicando o número de sequencia (Sq) na lista acima: ")
         num_solicitacao = num_solicitacao.strip()
         if not num_solicitacao.isdigit():
             print("Entre com o numero da solicitacao")
@@ -1868,7 +1899,7 @@ def obter_memorando_tarefas():
             " Protocolo: " +
             solicitacao["numero_protocolo"] + "/" + solicitacao["ano_protocolo"])
         # print("Selecionado:",solicitacao["identificacao"])
-        sys.stdout.write("Buscando tarefas de imagem para " + GdadosGerais["identificacaoSolicitacao"] + "...")
+        print("Buscando tarefas de para ", GdadosGerais["identificacaoSolicitacao"], ". Aguarde...")
 
         # Carrega as tarefas de extração da solicitação selecionada
         # --------------------------------------------------------
@@ -1887,10 +1918,10 @@ def obter_memorando_tarefas():
             print()
             print("Esta solicitação de exame NÃO TEM NENHUMA TAREFA DE EXTRAÇÃO. Verifique no SETEC3.")
             print()
-        else:
-            # Ok, tudo certo
-            sys.stdout.write("OK")
-            break
+            continue
+
+        # Tudo certo, interrompe loop
+        break
 
     # Retorna tarefas do memorando selecionado
     return tarefas
@@ -1900,7 +1931,7 @@ def refresh_tarefas():
     # Irá atualizar a variáel global de tarefas
     global Gtarefas
 
-    print("Buscando situação atualizada no servidor (SETEC3). Aguarde...")
+    print("Buscando situação atualizada no servidor do memorando atual (SETEC3). Aguarde...")
 
     codigo_solicitacao_exame_siscrim = GdadosGerais["codigo_solicitacao_exame_siscrim"]
 
@@ -1914,6 +1945,9 @@ def refresh_tarefas():
 
     # Guarda na global de tarefas
     Gtarefas = tarefas
+
+    # Guarda data hora da última atualização de status
+    GdadosGerais["data_hora_ultima_atualizacao_status"] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 
 # Exibir informações sobre tarefa
@@ -2004,6 +2038,10 @@ def posicionar_item(n):
 
 if __name__ == '__main__':
 
+    # GdadosGerais["data_hora_ultima_atualizacao_status"] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    # var_dump(GdadosGerais["data_hora_ultima_atualizacao_status"])
+    # die('ponto2061')
+
     # Desvia para um certo ponto, para teste
     # --------------------------------------
 
@@ -2013,21 +2051,24 @@ if __name__ == '__main__':
 
     # Desvia para um certo ponto, para teste
     # Chama validacao de xml
-    (resultado_teste, dados_teste, erros_teste, avisos_teste) = validar_arquivo_xml("parcial.xml", numero_item="12",
-                                                                                    explicar=True)
-    print(resultado_teste)
-    exibir_dados_laudo(dados_teste['laudo'])
-    die('ponto1936')
+    # (resultado_teste, dados_teste, erros_teste, avisos_teste) = validar_arquivo_xml("parcial.xml", numero_item="12",
+    #                                                                                 explicar=True)
+    # print(resultado_teste)
+    # exibir_dados_laudo(dados_teste['laudo'])
+    # die('ponto1936')
 
     # Iniciando
     # ---------
     print()
+    cls()
     print("SAPI - Cellebrite (Versao " + Gversao + ")")
-    print("=========================================")
+    print_centralizado("-")
     print()
+    print("Dicas:")
     print(
-        "- Dica: Para uma visualização adequada, configure o buffer de tela e tamanho de janela com largura de 130 caracteres")
-    print()
+        "- Se a linha de separador ---- está sendo quebrada, configure o buffer de tela e tamanho de janela com largura de 130 caracteres")
+    print("  para ter uma visualização perfeita.")
+    print("- Para interromper entrada de dados, utilize CTR-C")
     print()
     print_log('Iniciando sapi_cellebrite - ', Gversao)
 
@@ -2041,22 +2082,31 @@ if __name__ == '__main__':
     # ------------------------------------------
 
     # Para desenvolvimento...recupera tarefas de arquivo
-    # Para versão produtiva, ajustar valor da global
-    if Gdesenvolvimento:
-        carregar_estado()
-    if (len(Gtarefas) == 0):
-        Gtarefas = obter_memorando_tarefas()
-    if Gdesenvolvimento:
-        salvar_estado()
+    # Carrega o estado
+    carregar_estado()
+    if len(Gtarefas) > 0:
+        refresh_tarefas()
+    else:
+        # Não tem tarefas
+        obter_memorando_tarefas_ok()
+        if len(Gtarefas) == 0:
+            print("- Nenhuma tarefa selecionada. Interrompendo")
+            sys.exit()
+    # Salva estado atual
+    salvar_estado()
 
     # Processamento das tarefas
     # ---------------------------
-    refresh_tarefas()
     exibir_situacao()
 
     # Recebe comandos
     while (True):
         (comando, argumento) = receber_comando_ok()
+        if comando == '':
+            # Se usuário simplemeste der um <ENTER>, exibe a situação
+            exibir_situacao()
+            continue
+
         if (comando == '*qq'):
             # Verifica se tem processos filho rodando
             lista = multiprocessing.active_children()
@@ -2106,8 +2156,9 @@ if __name__ == '__main__':
             exibir_situacao()
             continue
         elif (comando == '*tm'):
-            Gtarefas = obter_memorando_tarefas()
-            if (len(Gtarefas) > 0):
+            novas_tarefas = obter_memorando_tarefas_ok()
+            if novas_tarefas is not None:
+                Gtarefas = novas_tarefas
                 Gicor = 1  # Inicializa indice da tarefa corrente
                 exibir_situacao()
             continue
