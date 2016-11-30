@@ -1,0 +1,7 @@
+# Utilizado por sapilib
+
+# Este arquivo tem como finalidade auto configurar o sapi para rodar no ambiente de desenvolvimento
+# Quando este arquivo existe, os programas python que utilizam sapilib se conectam no servidor de desenvolvimento.
+
+# Evidentemente, em ambiente produtivo este arquivo NÃO PODE EXISTIR
+
