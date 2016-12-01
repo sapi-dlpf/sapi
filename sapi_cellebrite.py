@@ -34,7 +34,6 @@
 from __future__ import print_function
 import platform
 import sys
-import socket
 import time
 import xml.etree.ElementTree as ElementTree
 import shutil
@@ -53,15 +52,10 @@ if sys.version_info <= (3, 0):
 # =======================================================================
 
 Gprograma = "sapi_cellebrite"
-Gversao = "1_0"
+Gversao = "1.0"
 
 # Para gravação de estado
-Garquivo_estado = Gprograma + "v" + Gversao + ".sapi"
-
-Gdesenvolvimento = True  # Ambiente de desenvolvimento
-# Gdesenvolvimento=False #Ambiente de producao
-
-Gdebug = False
+Garquivo_estado = Gprograma + "v" + Gversao.replace('.', '_') + ".sapi"
 
 # Base de dados (globais)
 GdadosGerais = dict()  # Dicionário com dados gerais
@@ -80,7 +74,7 @@ GtempoEntreAtualizacoesStatus = 180  # Tempo normal de produção
 
 # Para código produtivo, o comando abaixo deve ser substituído pelo
 # código integral de sapi_lib_xxx.py, para evitar dependência
-from sapilib_0_5_4 import *
+from sapilib_0_6 import *
 
 # **********************************************************************
 # PRODUCAO 
@@ -191,30 +185,30 @@ def storage_montado(ponto_montagem):
 
 
 # Atualiza status da tarefa do sapisrv
-def atualizar_status_tarefa(codigo_tarefa, codigo_situacao_tarefa, status, dados_relevantes=None):
-    # Define nome do agente
-    # xxxx@yyyy, onde xxx é o nome do programa e yyyy é o hostname
-    nome_agente = socket.gethostbyaddr(socket.gethostname())[0]
-
-    # Parâmetros
-    param = {'codigo_tarefa': codigo_tarefa,
-             'codigo_situacao_tarefa': codigo_situacao_tarefa,
-             'status': status,
-             'execucao_nome_agente': nome_agente
-             }
-    if (dados_relevantes is not None):
-        dados_relevantes_json = json.dumps(dados_relevantes, sort_keys=True)
-        param['dados_relevantes_json'] = dados_relevantes_json
-
-    # Invoca sapi_srv
-    (sucesso, msg_erro, resultado) = sapisrv_chamar_programa(
-        "sapisrv_atualizar_tarefa.php", param)
-
-    # Retorna resultado
-    if (sucesso):
-        return (True, '')
-    else:
-        return (False, msg_erro)
+# def atualizar_status_tarefa_deprecated(codigo_tarefa, codigo_situacao_tarefa, status, dados_relevantes=None):
+#     # Define nome do agente
+#     # xxxx@yyyy, onde xxx é o nome do programa e yyyy é o hostname
+#     nome_agente = socket.gethostbyaddr(socket.gethostname())[0]
+#
+#     # Parâmetros
+#     param = {'codigo_tarefa': codigo_tarefa,
+#              'codigo_situacao_tarefa': codigo_situacao_tarefa,
+#              'status': status,
+#              'execucao_nome_agente': nome_agente
+#              }
+#     if (dados_relevantes is not None):
+#         dados_relevantes_json = json.dumps(dados_relevantes, sort_keys=True)
+#         param['dados_relevantes_json'] = dados_relevantes_json
+#
+#     # Invoca sapi_srv
+#     (sucesso, msg_erro, resultado) = sapisrv_chamar_programa(
+#         "sapisrv_atualizar_tarefa.php", param)
+#
+#     # Retorna resultado
+#     if (sucesso):
+#         return (True, '')
+#     else:
+#         return (False, msg_erro)
 
 
 # Atualiza status da tarefa em andamento
@@ -222,7 +216,7 @@ def atualizar_status_tarefa(codigo_tarefa, codigo_situacao_tarefa, status, dados
 def atualizar_status_tarefa_andamento(codigo_tarefa, texto_status):
     codigo_situacao_tarefa = GEmAndamento
     print_log("Atualizando tarefa ", codigo_tarefa, "em andamento com status: ", texto_status)
-    (ok, msg_erro) = atualizar_status_tarefa(
+    (ok, msg_erro) = sapisrv_atualizar_status_tarefa(
         codigo_tarefa=codigo_tarefa,
         codigo_situacao_tarefa=codigo_situacao_tarefa,
         status=texto_status
@@ -875,10 +869,10 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
     dados['laudo'] = dlaudo
 
     # Estamos guardando os dados gerais da extração para algum uso futuro....
-    # ...talvez uma base de conhecimento, estatíticas, buscas técnicas
+    # ...talvez uma base de conhecimento, estatísticas, buscas técnicas
     # No momento, nem precisaria
-    dados['tecnicos'] = {}
-    dados['tecnicos']['extracoes'] = dext
+    # Tirei isto...não tem muita utilidade, e pode dar confusão
+    # dados['tecnicos']['extracoes'] = dext
 
     # var_dump(dados)
     # die('ponto1044')
@@ -887,15 +881,65 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
     return (True, dados, erros, avisos)
 
 
+# Sanitiza strings em UTF8, substituindo caracteres não suportados pela codepage da console do Windows por '?'
+# Noramalemente a codepage é a cp850 (Western Latin)
+# Retorna a string sanitizada e a quantidade de elementos que forma recodificados
+def sanitiza_utf8_console(dado):
+    #
+    codepage = sys.stdout.encoding
+
+    # String => ajusta, trocando caracteres não suportados por '?'
+    if isinstance(dado, str):
+        # Isto aqui é um truque sujo, para resolver o problema de exibir caracteres UTF8 em console do Windows
+        # com configuração cp850
+        saida = dado.encode(codepage, 'replace').decode(codepage)
+        # Verifica se a recodificação introduziu alguma diferença
+        qtd = 0
+        if saida != dado:
+            qtd = 1
+        return (saida, qtd)
+
+    # Dicionário,
+    if isinstance(dado, dict):
+        saida = dict()
+        qtd = 0
+        for k in dado:
+            (saida[k], q) = sanitiza_utf8_console(dado[k])
+            qtd += q
+        return (saida, qtd)
+
+    # Lista
+    if isinstance(dado, list):
+        saida = list()
+        qtd = 0
+        for v in dado:
+            (novo_valor, q) = sanitiza_utf8_console(v)
+            saida.append(q)
+            qtd += q
+        return (saida, qtd)
+
+    # Qualquer outro tipo de dado (numérico por exemplo), retorna o próprio valor
+    # Todo: Acho que tem outros tipos de dados aqui...
+    saida = dado
+    return (saida, 0)
+
+
 # Exibe dados para laudo, com uma pequena formatação para facilitar a visualização
 # --------------------------------------------------------------------------------
 def exibir_dados_laudo(d):
     print_centralizado(" Dados para laudo ")
 
-    pp = pprint.PrettyPrinter(indent=4)
-    pp.pprint(d)
+    # Sanitiza, para exibição na console
+    (d_sanitizado, qtd_alteracoes) = sanitiza_utf8_console(d)
 
+    # Exibe formatado
+    pp = pprint.PrettyPrinter(indent=4)
+    pp.pprint(d_sanitizado)
     print_centralizado("")
+
+    if qtd_alteracoes > 0:
+        print("#Aviso: Em", qtd_alteracoes,
+              "strings foi necessário substituir caracteres especiais que não podem ser exibidos na console por '?'.")
 
     return
 
@@ -1000,7 +1044,9 @@ def copia_cellebrite():
     codigo_tarefa = tarefa["codigo_tarefa"]
     (sucesso, msg_erro, tarefa) = sapisrv_chamar_programa(
         "sapisrv_consultar_tarefa.php",
-        {'codigo_tarefa': codigo_tarefa})
+        {'codigo_tarefa': codigo_tarefa},
+        abortar_insucesso=True
+    )
 
     # Insucesso. Provavelmente a tarefa não foi encontrada
     if (not sucesso):
@@ -1011,6 +1057,7 @@ def copia_cellebrite():
 
     # var_dump(item["item"])
 
+    # xxx
     # ------------------------------------------------------------------
     # Exibe dados do item para usuário confirmar
     # se escolheu o item correto
@@ -1330,7 +1377,7 @@ def efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevant
         texto_status = "Cópia não foi concluída com sucesso"
         # Atualiza o status da tarefa com o resultado
         print_var(tipo_print, "Atualizando tarefa com: ", codigo_situacao_tarefa, "-", texto_status)
-        (ok, msg_erro) = atualizar_status_tarefa(
+        (ok, msg_erro) = sapisrv_atualizar_status_tarefa(
             codigo_tarefa=codigo_tarefa,
             codigo_situacao_tarefa=codigo_situacao_tarefa,
             status=texto_status
@@ -1363,7 +1410,7 @@ def efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevant
     texto_status = "Dados copiados com sucesso para pasta de destino"
     # Atualiza o status da tarefa com o resultado
     print_var(tipo_print, "Atualizando tarefa com: ", codigo_situacao_tarefa, "-", texto_status)
-    (ok, msg_erro) = atualizar_status_tarefa(
+    (ok, msg_erro) = sapisrv_atualizar_status_tarefa(
         codigo_tarefa=codigo_tarefa,
         codigo_situacao_tarefa=codigo_situacao_tarefa,
         status=texto_status,
@@ -1408,7 +1455,7 @@ def acompanhar_copia(tipo_print, codigo_tarefa, caminho_destino):
         time.sleep(GtempoEntreAtualizacoesStatus)
 
 
-# Explicar=True: Faz com que seja exibida (print) a explicação
+# Explicar=True: Faz com que seja exibida (print) a explicação imediatamente
 # Retorna tupla:
 #   1) codigo_situacao_tarefa: Retorna o código da situação.
 #      Se operação falhou, retorna -1 ou nulo
@@ -1436,7 +1483,9 @@ def determinar_situacao_item_cellebrite(explicar=False):
     codigo_tarefa = tarefa["codigo_tarefa"]
     (sucesso, msg_erro, tarefa) = sapisrv_chamar_programa(
         "sapisrv_consultar_tarefa.php",
-        {'codigo_tarefa': codigo_tarefa})
+        {'codigo_tarefa': codigo_tarefa},
+        abortar_insucesso=True
+    )
 
     # Insucesso. Provavelmente a tarefa não foi encontrada
     if (not sucesso):
@@ -1447,15 +1496,20 @@ def determinar_situacao_item_cellebrite(explicar=False):
 
     # var_dump(item["item"])
 
+    # xxx
     # ------------------------------------------------------------------
-    # Exibe dados do item para usuário
+    # Exibe dados do item para usuário confirmar
+    # se escolheu o item correto
     # ------------------------------------------------------------------
     print()
     print("-" * 129)
+    print("Tarefa: ", tarefa["codigo_tarefa"])
+    print("Situação: ", tarefa['descricao_situacao_tarefa'])
     print("Item: ", tarefa["dados_item"]["item_apreensao"])
     print("Material: ", tarefa["dados_item"]["material"])
     print("Descrição: ", tarefa["dados_item"]["descricao"])
     print("-" * 129)
+    print()
 
     # ------------------------------------------------------------------
     # Verifica se tarefa tem o tipo certo
@@ -1509,7 +1563,7 @@ def determinar_situacao_item_cellebrite(explicar=False):
                 "- Iniciando validação de XML. Isto pode demorar, dependendo do tamanho do arquivo. Aguarde...")
     arquivo_xml = caminho_destino + "/Relatório.xml"
     (resultado, dados_relevantes, erros, avisos) = processar_arquivo_xml(arquivo_xml, numero_item=item["item"],
-                                                                         explicar=explicar)
+                                                                         explicar=True)
     if (not resultado):
         status = "Arquivo XML inconsistente"
         codigo_status = GAbortou
@@ -1551,7 +1605,9 @@ def exibir_situacao_item():
     codigo_tarefa = tarefa["codigo_tarefa"]
     (sucesso, msg_erro, tarefa_servidor) = sapisrv_chamar_programa(
         "sapisrv_consultar_tarefa.php",
-        {'codigo_tarefa': codigo_tarefa})
+        {'codigo_tarefa': codigo_tarefa},
+        abortar_insucesso=True
+    )
 
     # Insucesso
     if (not sucesso):
@@ -1580,31 +1636,32 @@ def exibir_situacao_item():
 
     # Se houver divergência entre situação atual e situação no servidor
     # pergunta se deve atualizar
-    mensagem = ('\n'
-                'ATENÇÃO: A situação da tarefa no servidor não está coerente com a situação '
-                'observada na pasta de destino.\n'
-                'Isto ocorre quando o usuário faz uma cópia manual dos dados diretamente para o servidor, '
-                'sem utilizar o agente sapi_cellebrite.\n'
-                'Também pode ocorrer esta situação caso tenha havido alguma falha no procedimento '
-                'de atualização automática após a cópia no sapi_cellebrite '
-                '(Em caso de dúvida, consulte o log local, e alerte o desenvolvedor).\n'
-                'No caso desta tarefa em particular, para sanar o problema basta efetuar a atualização manual '
-                '(respondendo S na próxima pergunta)\n'
-                )
     print()
-    print(mensagem)
+    print('ATENÇÃO: A situação da tarefa no servidor não está coerente com a situação observada na pasta de destino.')
+    print('Isto ocorre quando o usuário faz uma cópia manual dos dados diretamente para o servidor',
+          'sem utilizar o agente sapi_cellebrite.')
+    print('Também pode ocorrer esta situação caso tenha havido alguma falha no procedimento')
+    print('de atualização da situação após a cópia no sapi_cellebrite.')
+    print('Em caso de dúvida, consulte o log sapi_log.txt.')
+    print()
+    print('No caso desta tarefa em particular, para sanar o problema basta efetuar a atualização manual',
+          '(respondendo S na próxima pergunta)')
     print()
     atualizar = pergunta_sim_nao("< Atualizar servidor com o status observado? ", default="n")
     if (not atualizar):
         return
 
+    # var_dump(dados_relevantes)
+    # die('ponto1597')
+
     # Atualiza situação observada no servidor
-    (ok, msg_erro) = atualizar_status_tarefa(
+    (ok, msg_erro) = sapisrv_atualizar_status_tarefa(
         codigo_tarefa=codigo_tarefa,
         codigo_situacao_tarefa=codigo_situacao_tarefa,
         status=texto_status,
         dados_relevantes=dados_relevantes
     )
+
     if (not ok):
         print()
         print("ATENÇÃO: Não foi possível atualizar a situação no servidor: ", msg_erro)
@@ -1713,10 +1770,17 @@ def receber_comando():
 def exibir_situacao():
     cls()
 
+    ambiente = obter_ambiente()
+    if ambiente == 'PRODUCAO':
+        ambiente = ''
+    else:
+        ambiente = "** " + ambiente + "**"
+
     # Exibe cabecalho (Memorando/protocolo)
     print(GdadosGerais.get("identificacaoSolicitacao", None), " | ",
           GdadosGerais.get("data_hora_ultima_atualizacao_status", None), " | ",
-          "(Sapi Cellebrite:" + str(Gversao) + ")")
+          "Sapi Cellebrite:" + str(Gversao),
+          ambiente)
     print_centralizado()
 
     # Lista de tarefas
@@ -1833,7 +1897,9 @@ def obter_memorando_tarefas():
 
         (sucesso, msg_erro, lista_solicitacoes) = sapisrv_chamar_programa(
             "sapisrv_obter_pendencias_pcf.php",
-            {'matricula': matricula})
+            {'matricula': matricula},
+            abortar_insucesso=True,
+        )
 
         # Insucesso....normalmente matricula incorreta
         if (not sucesso):
@@ -1896,7 +1962,7 @@ def obter_memorando_tarefas():
             " Protocolo: " +
             solicitacao["numero_protocolo"] + "/" + solicitacao["ano_protocolo"])
         # print("Selecionado:",solicitacao["identificacao"])
-        print("Buscando tarefas de para ", GdadosGerais["identificacaoSolicitacao"], ". Aguarde...")
+        print("Buscando tarefas para", GdadosGerais["identificacaoSolicitacao"], ". Aguarde...")
 
         # Carrega as tarefas de extração da solicitação selecionada
         # --------------------------------------------------------
@@ -1920,6 +1986,9 @@ def obter_memorando_tarefas():
         # Tudo certo, interrompe loop
         break
 
+    # Guarda data hora do último refresh de tarefas
+    GdadosGerais["data_hora_ultima_atualizacao_status"] = datetime.datetime.now().strftime('%H:%M:%S')
+
     # Retorna tarefas do memorando selecionado
     return tarefas
 
@@ -1928,7 +1997,7 @@ def refresh_tarefas():
     # Irá atualizar a variáel global de tarefas
     global Gtarefas
 
-    print("Buscando situação atualizada no servidor do memorando atual (SETEC3). Aguarde...")
+    print("Buscando situação atualizada das tarefas do memorando em andamento no servidor (SETEC3). Aguarde...")
 
     codigo_solicitacao_exame_siscrim = GdadosGerais["codigo_solicitacao_exame_siscrim"]
 
@@ -1943,8 +2012,8 @@ def refresh_tarefas():
     # Guarda na global de tarefas
     Gtarefas = tarefas
 
-    # Guarda data hora da última atualização de status
-    GdadosGerais["data_hora_ultima_atualizacao_status"] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    # Guarda data hora do último refresh de tarefas
+    GdadosGerais["data_hora_ultima_atualizacao_status"] = datetime.datetime.now().strftime('%H:%M:%S')
 
 
 # Exibir informações sobre tarefa
@@ -2035,6 +2104,25 @@ def posicionar_item(n):
 
 if __name__ == '__main__':
 
+    # # Teste de problema de codificação para console
+    # # Não remova isto aqui, pois não tenho certeza se este assunto foi definitivamente resolvido
+    # outro=dict()
+    # outro["1"]=["primeiro string", "segundo string", 123]
+    # outro["2"]="qualquer coisa com acentuação"
+    #
+    # d=dict()
+    # d['comp1']='xyz'
+    # d['comp2']='Tania 😉😘' #Não tem suporte para cp850
+    # d['comp3']=outro
+    #
+    # (sanitizado, qtd_alteracoes) = sanitiza_utf8_console(d)
+    # var_dump(sanitizado)
+    # print(qtd_alteracoes)
+    # print(exibir_dados_laudo(d))
+    #
+    # die('ponto2068')
+
+
     # GdadosGerais["data_hora_ultima_atualizacao_status"] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     # var_dump(GdadosGerais["data_hora_ultima_atualizacao_status"])
     # die('ponto2061')
@@ -2068,16 +2156,10 @@ if __name__ == '__main__':
     print("- Para interromper entrada de dados, utilize CTR-C")
     print()
     print_log('Iniciando sapi_cellebrite - ', Gversao)
-
-    # Testa comunicação com servidor SAPI
-    # -----------------------------------
-    # Em desenvolvimento não executa, para ganhar tempo
-    if not Gdesenvolvimento:
-        assegura_comunicacao_servidor_sapi()
+    sapisrv_inicializar(Gprograma, Gversao)
 
     # Obtem lista de tarefas a serem processadas
     # ------------------------------------------
-
     # Para desenvolvimento...recupera tarefas de arquivo
     # Carrega o estado
     carregar_estado()
@@ -2085,7 +2167,7 @@ if __name__ == '__main__':
         refresh_tarefas()
     else:
         # Não tem tarefas
-        obter_memorando_tarefas_ok()
+        Gtarefas = obter_memorando_tarefas_ok()
         if len(Gtarefas) == 0:
             print("- Nenhuma tarefa selecionada. Interrompendo")
             sys.exit()
