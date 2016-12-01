@@ -30,6 +30,8 @@ import hashlib
 import shutil
 import socket
 import time
+import subprocess
+import sys
 
 import autoit  # pip install -U pyautoit
 from selenium import webdriver  # pip install -U selenium
@@ -37,7 +39,7 @@ from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import Select
 
-from sapilib_0_5_4 import *
+from sapilib_0_6 import *
 
 # =======================================================================
 # GLOBAIS
@@ -1080,99 +1082,84 @@ def executa_tarefas(qual_tarefa):
         codigo_situacao_tarefa=codigo_situacao_tarefa,
         status=texto_status
     )
-    # Uma pequena pausa, e continua para a próxima simulação de andamento
-    # Cada simulação deve demorar entre 90 e 100 segundos
-    time.sleep(100 - r)
-    continue
 
-    # Simula sucesso, 90% de probabilidade no demo
+    apagar_mapeamento(letra)
+    # Finaliza
 
-
-if r >= 90:
-
-    # Simulação de sucesso, 90% de probabilidade no demo (90 a 99)
-    if r <= 99:
-        texto_status = "Finalizado com sucesso"
-        codigo_situacao_tarefa = GFinalizadoComSucesso
-    else:  # (r==100), Simula falha, 10% de probabilidade
-        texto_status = "Falhou - abortou (simulado)"
-        codigo_situacao_tarefa = GAbortou
-
-        # Se a atualização falhar, fica tentando até conseguir
-    # Se for problema transiente, vai resolver
-    # Caso contrário, algum humano irá mais cedo ou mais tarde intervir
-    while not atualizar_status_tarefa(
-            codigo_tarefa=codigo_tarefa,
-            codigo_situacao_tarefa=codigo_situacao_tarefa,
-            status=texto_status
-    ):
-        print_log_dual("Falhou atualização de status de sucesso. Tentando novamente")
-        time.sleep(60)  # Tenta novamente em 1 minuto
-
-    terminou = True  # Abandona loop de verificação de situação
-    print_log_dual("Dormindo após concluir...para dar chance a outros de pegar tarefas...apenas teste")
-    time.sleep(30)  # Uma pausa apenas para teste..poder consultar sem nenhum agente trabalhando
-    continue
-
-# Fim do while
-
-apagar_mapeamento(letra)
-# Finaliza
-
-resposta_origem = 'R:/Dropbox/DPF/____ PERICIA_JATO ____/TESTE/Item02_ItemArrecadacao03/Item02_ItemArrecadacao03.E01'
-resposta_pasta_destino = 'R:/Dropbox/DPF/____ PERICIA_JATO ____/TESTE/'
-resposta_ferramenta = pedidos.json()
-if resposta_ferramenta['args']['ferramenta'] in ['IPED_SEM_OCR', 'IPED']:
-    arquivo_ferramenta = config.get(lista_ferramentas[x], "pasta") + "/" + config.get(lista_ferramentas[x],
-                                                                                      "executavel")
-    iped(resposta_origem, resposta_pasta_destino, arquivo_ferramenta)
-elif resposta_ferramenta['args']['ferramenta'] == 'IEF':
-    resposta_pasta_destino += "ief"
-    if not os.path.exists(resposta_pasta_destino):
-        ief(resposta_origem, resposta_pasta_destino, arquivo_ferramenta, 'cli')
-elif resposta_ferramenta['args']['ferramenta'] == 'TABLEAU_TD3':
-    print("Usando Tableau TD3")
-    tableautd3()
-return
+    resposta_origem = 'R:/Dropbox/DPF/____ PERICIA_JATO ____/TESTE/Item02_ItemArrecadacao03/Item02_ItemArrecadacao03.E01'
+    resposta_pasta_destino = 'R:/Dropbox/DPF/____ PERICIA_JATO ____/TESTE/'
+    resposta_ferramenta = pedidos.json()
+    if resposta_ferramenta['args']['ferramenta'] in ['IPED_SEM_OCR', 'IPED']:
+        arquivo_ferramenta = config.get(lista_ferramentas[x], "pasta") + "/" + config.get(lista_ferramentas[x],
+                                                                                          "executavel")
+        iped(resposta_origem, resposta_pasta_destino, arquivo_ferramenta)
+    elif resposta_ferramenta['args']['ferramenta'] == 'IEF':
+        resposta_pasta_destino += "ief"
+        if not os.path.exists(resposta_pasta_destino):
+            ief(resposta_origem, resposta_pasta_destino, arquivo_ferramenta, 'cli')
+    elif resposta_ferramenta['args']['ferramenta'] == 'TABLEAU_TD3':
+        print("Usando Tableau TD3")
+        tableautd3()
+    return
 
 
 # Cria arquivo VHDX
-def vhdx_cria(pasta, criptografado=False):
+# Memorando = identificação do memorando, com a equipe e o item, se for o caso
+# Pasta = local no servidor em que são criados os compartilhamentos (padrão = S:\STORAGE)
+# Criptografado = se vai usar o bitlocker ou não
+# Ex: vhdx_cria("Memo.1234-15-LJ37", "S:/STORAGE", False)
+def vhdx_cria(memorando, pasta, criptografado=False):
     # Inicialmente deve-se identificar se o cliente possui a ferramenta "STORAGE" habilitada
     config = configparser.ConfigParser()
     config.read("CLIENTE.ini")
     if not config.get("FERRAMENTAS", "storage"):
-        print_log_dual("A ferramenta STORAGE não está habilitada neste computador.")
-        sys.exit(1)
+        erro_fatal("A ferramenta STORAGE não está habilitada neste computador.")
     if not os.path.exists(pasta):
-        print_log_dual("A pasta de destino [" + pasta + "] não foi encontrada.")
-        sys.exit(1)
+        erro_fatal("A pasta de destino [" + pasta + "] não foi encontrada.")
     # Para saber qual a pasta onde estão os arquivos VHDX, deve ser consultado o CLIENTE.INI
     origem_vhdx = config.get("STORAGE", "pasta")
+    # Se for criptografado, usa o arquivo SAPI_BITLOCKER.vhdx, se não for, usa o arquivo SAPI.vhdx
     if criptografado:
-        origem_vhdx += "/SAPI_BITLOCKER.vhdx"
+        arquivo_vhdx = "/SAPI_BITLOCKER.vhdx"
     elif:
-        origem_vhdx += "/SAPI.vhdx"
-    # agora pode copiar da origem para o destino
-    if os.path.exists(origem_vhdx):
-        shutil.copy(origem_vhdx, pasta)
-
+        arquivo_vhdx = "/SAPI.vhdx"
+    # concatena o nome da pasta, o memorando e a extensão VHDX
+    pasta += "/" + memorando + ".vhdx"
+    # verifica se já existe o nome do arquivo VHDX na pasta designada
+    if os.path.exists(origem_vhdx + arquivo_vhdx):
+        # agora pode copiar da origem para o destino
+        shutil.copy(origem_vhdx + arquivo_vhdx, pasta)
     return
 
 
 # Monta arquivo VHDX e compartilha via rede
-def vhdx_monta(pasta, criptografado=False):
-    if criptografado:
-        pasta += "/SAPI_BITLOCKER.vhdx"
+# Memorando = identificação do memorando, com a equipe e o item, se for o caso
+# Pasta = local no servidor em que são criados os compartilhamentos (padrão = S:\STORAGE)
+# Criptografado = se vai usar o bitlocker ou não
+# Ex: vhdx_monta("Memo.1234-15-LJ37", "S:/STORAGE", True)
+# Comando do PowerShell: Mount-VHD -Path "C:\Users\Brink\Desktop\Non-Insider W10.vhdx"
+def vhdx_monta(memorando, pasta, criptografado=False):
+    # Cria a pasta se ela não existir
+    if not os.path.exists(pasta):
+        cria_pasta_se_nao_existe(pasta)
     elif:
-        pasta += "/SAPI.vhdx"
-    if os.path.exists(pasta):
+        # Se a pasta existir, verifica se existem arquivos dentro dela. Para usar ponto de montagem a pasta deve estar vazia
+        if os.listdir(pasta) != []:
+            erro_fatal("A pasta [" + pasta + "] não está vazia.")
+
+
+    p = subprocess.Popen(["powershell.exe",
+                          ""],
+                         stdout=sys.stdout)
+    p.communicate()
+
 
     return
 
 
 # Desmonta arquivo VHDX
-def vhdx_desmonta(endereco_ip, pasta_servidor, nome_compartilhamento):
+# Comando do PowerShell: Dismount-VHD -Path "C:\Users\Brink\Desktop\Non-Insider W10.vhdx"
+def vhdx_desmonta(pasta):
     return
 
 
