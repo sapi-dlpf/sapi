@@ -108,7 +108,7 @@ Gparini = dict()  # Parâmetros de inicialização
 
 
 # =====================================================================================================================
-# Funções de ALTO NÍVEL (sapisrv_*)
+# Funções de ALTO NÍVEL relacionadas com acesso ao servidor (sapisrv_*)
 #
 # Todas as funções de alto nível possuem prefixo 'sapisrv'
 #
@@ -918,7 +918,7 @@ def decompoe_caminho(caminho):
     partes = caminho.split("/")
 
     nome_arquivo = partes.pop()
-    pasta = "/".join(partes)
+    pasta = "/".join(partes) + "/"
 
     return (pasta, nome_arquivo)
 
@@ -1114,6 +1114,84 @@ def acesso_storage_windows(conf_storage, utilizar_ip=False):
 
     # Sucesso: Montado e confirmado ok
     return True, ponto_montagem, ""
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Funções relacinadas com a interface em linha de comando (console)
+# ---------------------------------------------------------------------------------------------------------------------
+
+# Chama função de menu e intercepta CTR-C
+# =============================================================
+def interface_receber_comando_ok(menu_comando):
+    try:
+        return interface_receber_comando(menu_comando)
+    except KeyboardInterrupt:
+        # TODO: Verificar se tem algum processo filho rodando
+        # Se não tiver, finaliza normalmente
+        # Caso contrário, não permitie
+        # Por enquanto, simplesmente ignora o CTR-C
+        return ("*qq", "")
+
+
+# Recebe e confere a validade de um comando de usuário
+# =============================================================
+def interface_receber_comando(menu_comando):
+
+    comandos = menu_comando['comandos']
+    cmd_navegacao = menu_comando['cmd_navegacao']
+    cmd_item = menu_comando['cmd_item']
+    cmd_geral = menu_comando['cmd_geral']
+
+    comando_ok = False
+    comando_recebido = ""
+    argumento_recebido = ""
+    while not comando_ok:
+        print()
+        entrada = input("Comando (?=ajuda): ")
+        entrada = entrada.lower().strip()
+        lista_partes_comando = entrada.split(" ", 2)
+        comando_recebido = ""
+        if (len(lista_partes_comando) >= 1):
+            comando_recebido = lista_partes_comando[0]
+        argumento_recebido = ""
+        if (len(lista_partes_comando) >= 2):
+            argumento_recebido = lista_partes_comando[1]
+
+        if comando_recebido in comandos:
+            # Se está na lista de comandos, ok
+            comando_ok = True
+        elif comando_recebido.isdigit():
+            # um número é um comando válido
+            comando_ok = True
+        elif (comando_recebido == "H" or comando_recebido == "?"):
+            # Exibe ajuda para comando
+            print()
+            print("Navegacao:")
+            print("----------")
+            print('<ENTER> : Exibe lista de tarefas atuais (sem Refresh no servidor)')
+            for key in cmd_navegacao:
+                print(key.upper(), " : ", comandos[key])
+            print()
+
+            print("Processamento da tarefa corrente (marcada com =>):")
+            print("--------------------------------------------------")
+            for key in cmd_item:
+                print(key.upper(), " : ", comandos[key])
+            print()
+
+            print("Comandos gerais:")
+            print("----------------")
+            for key in cmd_geral:
+                print(key.upper(), " : ", comandos[key])
+        elif (comando_recebido == ""):
+            # print("Para ajuda, digitar comando 'h' ou '?'")
+            return ("", "")
+        else:
+            if (comando_recebido != ""):
+                print("Comando (" + comando_recebido + ") inválido")
+                print("Para ajuda, digitar comando 'h' ou '?'")
+
+    return (comando_recebido, argumento_recebido)
+
 
 # *********************************************************************************************************************
 # *********************************************************************************************************************
