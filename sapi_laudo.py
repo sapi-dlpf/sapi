@@ -68,14 +68,15 @@ Gmenu_comandos['comandos'] = {
     '*du': 'Dump: Mostra todas as propriedades de uma tarefa (utilizado para Debug)',
 
     # Comandos gerais
-    '*sg': 'Situação geral',
+    '*sg': 'Situação geral (faz consulta no servidor, recuperando dados atualizados)',
     '*gl': 'Gera laudo',
+    '*tt': 'Troca laudo',
     '*qq': 'Finaliza'
 }
 
 Gmenu_comandos['cmd_navegacao'] = ["+", "-", "*ir"]
 Gmenu_comandos['cmd_item'] = ["*si"]
-Gmenu_comandos['cmd_geral'] = ["*sg", "*gl", "*qq"]
+Gmenu_comandos['cmd_geral'] = ["*sg", "*gl", "*tt", "*qq"]
 
 # Constantes para localização de seções do laudo
 GsapiQuesitos = 'sapiQuesitos'
@@ -100,45 +101,6 @@ from sapilib_0_6 import *
 # Funções Auxiliares específicas deste programa
 # ======================================================================
 
-# ======================================================================
-# Funções Auxiliares com janelas (Tkinter) - Para  W I N D O W S
-# Posteriormente jogar isto aqui para um módulo também
-# Como foi feito para o sapi
-# ======================================================================
-
-# Interface gráfica (tk)
-# from tkinter import Tk
-import tkinter
-from tkinter import filedialog
-
-
-class Janela(tkinter.Frame):
-    def __init__(self, master=None):
-        super().__init__(master)
-        self.pack()
-
-    def selecionar_arquivo(self):
-        self.file_name = tkinter.filedialog.askopenfilename(filetypes=([('All files', '*.*'),
-                                                                        ('ODT files', '*.odt'),
-                                                                        ('CSV files', '*.csv')]))
-        return self.file_name
-
-    def selecionar_pasta(self):
-        self.directory = tkinter.filedialog.askdirectory()
-        return self.directory
-
-
-def get_clipboard():
-    try:
-        root = tkinter.Tk()
-        root.withdraw()
-        clip = root.clipboard_get()
-    except BaseException as e:
-        print("Nao foi possivel recuperado dados do clipboard: ", e)
-        clip = ""
-
-    return clip
-
 
 def print_centralizado(texto='', tamanho=Glargura_tela, preenchimento='-'):
     direita = (tamanho - len(texto)) // 2
@@ -147,44 +109,10 @@ def print_centralizado(texto='', tamanho=Glargura_tela, preenchimento='-'):
     return
 
 
-def exibir_secao_laudo(d):
-    print("-" * 40, " Dados para laudo ", "-" * 40)
+def exibir_dados_laudo(dados_laudo, tarefa):
+    print_centralizado(" Dados para da tarefa laudo ")
 
-    lista_prop_descartar = ['nome', 'tipo']
-
-    # Os dados para laudo estão estruturados em três níveis
-    q = 0
-    # Nível 1: categoria de dados (ex: 10-identificacao, 20-aquisicao)
-    for categoria in sorted(d):
-        q += 1
-        # Pula linha
-        if (q > 1):
-            print()
-        # print(str(q)+")",categoria)
-        print(categoria)
-        # Nível 2: Número sequencial que indica a qual componente diz
-        # respeito os dados.
-        for seq in sorted(d[categoria]):
-
-            # O sequencial=0 contém dados gerais para a categoria
-            # Por enquanto vamos desprezá-lo
-            if (seq == '0'):
-                continue
-
-            # Imprime o nome do componente e tipo do componente
-            print("  ", d[categoria][seq].get("nome", "*** nome indefinido ***"),
-                  "(" + d[categoria][seq].get("tipo", "*** tipo indefinido ***") + ")")
-
-            # Nível 3: Propriedades do componente
-            for prop in sorted(d[categoria][seq]):
-
-                # Descarta propriedades internas, que não servem
-                # para conferência
-                if (prop in lista_prop_descartar):
-                    continue
-
-                # Exibe campo para usuário
-                print('    %12s : %s' % (prop, d[categoria][seq][prop]))
+    console_dump_formatado(dados_laudo, Glargura_tela)
 
     print("-" * 100)
 
@@ -194,24 +122,22 @@ def exibir_secao_laudo(d):
 
 
 # Exibe dados de laudo para um item
-def exibir_dados_laudo_item(item):
+def exibir_situacao_item(item):
+    # Cabeçalho
     print()
-    print("Exibição de dados de laudo para o item corrente")
+    print_centralizado(" Exibindo situação do item corrente ")
     print("- Recuperando dados do servidor. Aguarde...")
 
-    # Recupera as tarefas finalizadas de um item
+    # Recupera as tarefas de um item
     # ------------------------------------------------------------------
-    (sucesso, msg_erro, tarefas) = sapisrv_chamar_programa(
-        "sapisrv_obter_tarefas.php",
-        {'codigo_solicitacao_exame_siscrim': GdadosGerais["codigo_solicitacao_exame_siscrim"],
-         'item': item,
-         'tipo': 'todos',
-         'situacao': 'finalizada'
-         })
-    if (not sucesso):
-        # Continua no loop
-        print("Falha na busca de tarefas no servidor: ", msg_erro)
-        return
+    item_tarefas = sapisrv_chamar_programa_sucesso_ok(
+        programa="sapisrv_obter_tarefas.php",
+        parametros={
+            'codigo_solicitacao_exame_siscrim': GdadosGerais["codigo_solicitacao_exame_siscrim"],
+            'item': item,
+            'tipo': 'todos'
+            # , 'situacao': 'finalizada'
+        })
 
     # ------------------------------------------------------------------
     # Exibe dados do item para usuário
@@ -225,22 +151,31 @@ def exibir_dados_laudo_item(item):
     print_centralizado("")
 
     # Exibe dados para laudo armazenados nas tarefas
-    for t in tarefas:
-        # var_dump(t["tarefa"]["dados_relevantes_json"])
-        dados_relevantes_json = json.loads(t["tarefa"]["dados_relevantes_json"])
-        dados_laudo = dados_relevantes_json["laudo"]
-        # var_dump(dados_laudo)
-        exibir_secao_laudo(dados_laudo)
+    # ------------------------------------------------------------------
+    for it in item_tarefas:
+        t = it["tarefa"]
+
+        print()
+        print_centralizado(" Tarefa" + t["codigo_tarefa"] + " ")
+        print("Tipo de tarefa:", t["tipo"])
+        print("Situação:", t["codigo_situacao_tarefa"], "-", t["descricao_situacao_tarefa"])
+
+        if t["dados_relevantes_json"] is not None:
+            dados_relevantes_json = json.loads(t["dados_relevantes_json"])
+            print()
+            print("Dados para laudo:")
+            print("=================")
+            print()
+            console_dump_formatado(dados_relevantes_json["laudo"], Glargura_tela)
+            print()
 
     return
 
 
 # Exibe dados de laudo para o item corrente
-def exibir_dados_laudo_item_corrente():
+def exibir_situacao_item_corrente():
     item = Gitens[obter_item_corrente()]["item"]
-    # var_dump(item)
-    # die('ponto609')
-    exibir_dados_laudo_item(item)
+    exibir_situacao_item(item)
 
 
 def indent(elem, level=0):
@@ -995,7 +930,6 @@ def carrega_blocos(base):
 
 
 def recupera_dados_para_laudo_das_tarefas_item(dados_item, fase=None):
-
     lista_dados_laudo = []
 
     # Para teste....
@@ -1032,28 +966,25 @@ def recupera_dados_para_laudo_das_tarefas_item(dados_item, fase=None):
     # var_dump(dadosItem)
     # die('ponto1099')
 
-    print_tela_log("- Recuperando dados para laudo das tarefas do item ", item)
+    print_log("- Recuperando dados para laudo das tarefas do item ", item)
     param = {'codigo_solicitacao_exame_siscrim': GdadosGerais["codigo_solicitacao_exame_siscrim"],
              'item': item,
              'tipo': 'todos',
              'situacao': 'finalizada'}
     if fase is not None:
         param['fase'] = fase
-    (sucesso, msg_erro, tarefas) = sapisrv_chamar_programa(
-        "sapisrv_obter_tarefas.php", param, registrar_log=Gverbose)
-    if (not sucesso):
-        print_tela_log("ERRO: Falha na busca de tarefas no servidor: ", msg_erro)
-        return
 
-    # Exibe dados para laudo armazenados nas tarefas
+    tarefas = sapisrv_chamar_programa_sucesso_ok(
+        programa="sapisrv_obter_tarefas.php",
+        parametros=param
+    )
+
+    # Monta resposta
     for t in tarefas:
         # var_dump(t["tarefa"]["dados_relevantes_json"])
         dados_relevantes_json = json.loads(t["tarefa"]["dados_relevantes_json"])
         dados_laudo = dados_relevantes_json["laudo"]
         lista_dados_laudo.append(dados_laudo)
-    # var_dump(dados_laudo)
-    # var_dump(dados_laudo)
-    # die('ponto1292')
 
     return lista_dados_laudo
 
@@ -1152,19 +1083,11 @@ def criar_linha_para_item(tr_modelo, dados_item, dblocos):
                 if (len(lista_cv) == 0):
                     # Se não tem nenhum campo variável, não tem mais o que fazer
                     continue
-                # odt_dump(novo_paragrafo)
-                # var_dump(lista_cv)
-                # die('ponto1358')
 
                 # Substitui campos variáveis no parágrafo
                 for substituir in dados_componente:
                     valor = dados_componente[substituir]
-                    # var_dump(substituir)
-                    # var_dump(valor)
-                    # die('ponto1370')
                     odt_substitui_campo_variavel_texto(lista_cv, substituir, valor)
-                    # odt_dump(novo_paragrafo)
-                    # die('ponto1375')
 
             # E os dados relativos aos exames....
             # tem que processar também...
@@ -1247,9 +1170,6 @@ def criar_linhas_hash_para_item(tr_modelo, dados_item):
     # Recupera dados de laudo das tarefas do item
     lista_dados_laudo = recupera_dados_para_laudo_das_tarefas_item(dados_item)
 
-    # var_dump(listaDadosLaudo)
-    # die('ponto1486')
-
     for dados_tarefa in lista_dados_laudo:
 
         sapi_hashes = dados_tarefa.get('sapiHashes', None)
@@ -1260,17 +1180,8 @@ def criar_linhas_hash_para_item(tr_modelo, dados_item):
         # Processa a lista de hashes, gerando uma linha para cada hash
         for h in sapi_hashes:
 
-            # var_dump(h)
-            # die('ponto1498')
-
             # Duplica modelo para criar nova linha
             tr_nova_linha_item = copy.deepcopy(tr_modelo)
-
-            # Mapeamento filho para pai na nova linha
-            # Precisa disto???
-            # filho_para_pai_tr_nova_linha_item_map = {
-            #     c:p for p in tr_nova_linha_item.iter() for c in p
-            #     }
 
             # Procura por campos de substiuição na nova linha
             (sucesso, lista_cv_tr_nova_linha_item) = odt_recupera_lista_campos_variaveis_sapi(tr_nova_linha_item)
@@ -1377,7 +1288,9 @@ def parse_quesitos_respostas(dblocos):
             # Ajusta string
             texto = odt_obtem_texto_total_paragrafo(p)
             # Ajusta e sintetiza
-            texto = filtra_apenas_ascii(texto)
+            # texto = filtra_apenas_ascii(texto)
+            (texto, qtd_alteracoes) = console_sanitiza_utf8(texto)
+
             # print(texto)
             parte_inicial = texto[0:32].strip(' .')
             parte_inicial = parte_inicial + '.' * (34 - len(parte_inicial)) + " "
@@ -1434,6 +1347,7 @@ def formata_frases(texto, tamanho_max):
 # Retorna o nome do bloco de quesitos e de respostas
 # -nome_bloco_quesitos
 # -nome_bloco_respostas
+# ---------------------------------------------------------------------------------------------------------------------
 def usuario_escolhe_quesitacao(quesitos_respostas):
     # Isto não deveria acontecer
     if (len(quesitos_respostas) == 0):
@@ -1464,21 +1378,16 @@ def usuario_escolhe_quesitacao(quesitos_respostas):
 
     # Exibe lista de quesitos para seleção
     # ------------------------------------
-    print("-" * 110)
-    aviso1 = '''
-Observe na lista abaixo o resumo dos modelos de quesitos e selecione o mais adequado.
-Em função de problemas de acentuação, é possível que alguns caracteres acentuados tenham sido substituídos por '.' no resumo abaixo.
-Contudo, no laudo gerado (.odt) os caracteres acentuados serão exibidos corretamente.
-'''
-    aviso2 = '''
-Caso a quesitação do memorando não seja idêntica a nenhuma das quesitações padrões,
-selecione a que possuir maior semelhança, efetue os ajustes no seu laudo,
-e por fim notique o gestor do GTPI (informando o número do laudo), para que este avalie a necessidade de ampliação dos modelos de quesitação.
-'''
-
-    print(formata_frases(aviso1, 105))
     print()
-    print(formata_frases(aviso2, 105))
+    print("Passo 3: Escolha a quesitação")
+    print("-----------------------------")
+    print('- Observe na lista abaixo o resumo dos quesitações padrões disponíveis no modelo selecionado.')
+    print('- Caso a quesitação da solicitação de exame não seja idêntica a nenhuma das quesitações padrões,')
+    print('  selecione a que possuir maior semelhança, efetue os ajustes diretamente no seu laudo')
+    print('  e posteriormente notique o gestor do GTPI (informando o número do laudo), para que este avalie')
+    print('  a necessidade de ampliação dos modelos de quesitação.')
+    print('- Em função de limitações da console,  é possível que alguns caracteres acentuados tenham ')
+    print('  sido substituídos por "?" no resumo abaixo. Não se preocupe, no laudo gerado, ficará ok.')
 
     qtd_opcoes = 0
     for qtd_nome in lista:
@@ -1493,7 +1402,7 @@ e por fim notique o gestor do GTPI (informando o número do laudo), para que est
         quantidade_quesitos = quesitacao["quantidade_quesitos"]
 
         print_centralizado("")
-        print(qtd_opcoes, ":", int(quantidade_quesitos), "quesitos (nome do bloco: ", nome_quesito, ")")
+        print(qtd_opcoes, "=> ", "Quesitos: ", int(quantidade_quesitos), "Nome da quesitação: ", nome_quesito, ")")
         print_centralizado("")
         # Imprime o resumo de três quesitos por linha
         tam_linha = 105
@@ -1502,7 +1411,8 @@ e por fim notique o gestor do GTPI (informando o número do laudo), para que est
 
     # Solicita o número de sequencia da quesitação
     while True:
-        pergunta = "Digite o número de sequencia da quesitação escolhida (1 a " + str(qtd_opcoes) + "): "
+        pergunta = "< Escolha a quesitação, entrando com o número de sequencia da lista acima (1 a " + str(
+            qtd_opcoes) + "): "
         print()
         seq = input(pergunta)
         seq = seq.strip()
@@ -1519,6 +1429,7 @@ e por fim notique o gestor do GTPI (informando o número do laudo), para que est
         return quesitacao_selecionada
 
 
+# ----------------------------------------------------------------------------------------------------------------------
 def determina_quesitacao(quesitos_respostas, dblocos):
     # Usuário escolhe quesitação, em modo interativo
     quesitacao_selecionada = usuario_escolhe_quesitacao(quesitos_respostas)
@@ -1533,14 +1444,11 @@ def determina_quesitacao(quesitos_respostas, dblocos):
     return lista_par_quesitos, lista_par_respostas
 
 
-# Recebe o arquivo de entrada, sendo este um arquivo
-# odt gerado a partir de um modelo SAPI no sisCrim.
-#
-# Gera um novo arquivo odt, substituindo os elementos sapi
-# por dados coletados durante as tarefas sapi executadas.
-#
+# ----------------------------------------------------------------------------------------------------------------------
+# Recebe o arquivo de entrada (modelo), sendo este um arquivo odt gerado a partir de um modelo SAPI no sisCrim.
+# Gera um novo arquivo odt, substituindo os elementos sapi por dados coletados durante as tarefas sapi executadas.
 # Retorna o caminho para o arquivo de saída
-# ----------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------
 def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     print_log("- ajustar_laudo_odt para arquivo [", caminho_arquivo_entrada_odt, "]")
 
@@ -1569,20 +1477,30 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     nome_arquivo_saida = nome_arquivo_entrada.replace(".odt", "_sapi.odt")
     caminho_arquivo_saida_odt = pasta_saida + nome_arquivo_saida
 
-    print_tela_log("- Copiando arquivo para: " + caminho_arquivo_saida_odt)
-
+    # xxx
+    print_tela_log("- Copiando para arquivo de saída: " + caminho_arquivo_saida_odt)
+    if os.path.isfile(caminho_arquivo_saida_odt):
+        if not pergunta_sim_nao("< Arquivo de saída já existe. Será substituido. Prosseguir?", default="n"):
+            print("- Operação cancelada pelo usuário.")
+            return
     try:
         # Tenta duplicar arquivo, para equivalente com extensão SAPI
         shutil.copyfile(caminho_arquivo_entrada_odt, caminho_arquivo_saida_odt)
     except BaseException as e:
-        print_tela_log("- ERRO: Criação do arquivo de destino '" + caminho_arquivo_saida_odt + "'")
+        print_tela_log("- ERRO na criação do arquivo de saída '" + caminho_arquivo_saida_odt + "'")
         print_tela_log("- ERRO: ", e)
         print_tela_log(
             "- Verifique se arquivo não está aberto, ou se existe alguma outra condição que possa estar impedindo a sua criação")
         return None
 
     shutil.copyfile(caminho_arquivo_entrada_odt, caminho_arquivo_saida_odt)
-    print_tela_log("- Todos os ajustes serão feitos no arquivo de saída. O arquivo de entrada não será alterado")
+    print_tela_log("- Todos os ajustes serão feitos no arquivo de saída. O arquivo de entrada não será alterado.")
+
+    # Valida arquivo de modelo
+    # ------------------------------------------------------------------------------------------------------------------
+    print()
+    print("Passo 2: Validação e ajuste de dados gerais do laudo")
+    print("----------------------------------------------------")
 
     # -------------------------------------------------------------------
     # Extrai arquivo de conteúdo (content.xml) do odt
@@ -1590,7 +1508,7 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
 
     # Um arquivo ODT é um ZIP contendo arquivos XML
     # Logo, primeiriamente é necessário abrir o zip
-    print_tela_log("- Unzipando arquivo de saída")
+    print_log("- Unzipando arquivo de saída")
     zf = zipfile.ZipFile(caminho_arquivo_saida_odt, 'r')
     # listarArquivos(zf)
     # exibirInfo(zf)
@@ -1601,8 +1519,11 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     # O conteúdo propriamente dito do arquivo ODT
     # está armazenado no arquivo content.xml
     arq_content_xml = "content.xml"
-    if (arq_content_xml in zf.namelist()):
-        print_tela_log("- OK, arquivo contém " + arq_content_xml)
+    if not arq_content_xml in zf.namelist():
+        print_tela_log("- ERRO: Não foi encontrado arquivo: " + arq_content_xml)
+        return
+
+    # Extrai e converte arquivo content.xml para um string xml
     try:
         # Extração de content.xml para arquivo em pasta temporária
         zf.extract(arq_content_xml, pasta_tmp)
@@ -1618,7 +1539,7 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
 
     # Verifica se arquivo foi criado com sucesso
     if (os.path.isfile(caminho_arq_content_xml)):
-        print_tela_log("- Extraído arquivo de conteúdo (content.xml) com sucesso para [", caminho_arq_content_xml, "]")
+        print_log("- Extraído arquivo de conteúdo (content.xml) com sucesso para [", caminho_arq_content_xml, "]")
     else:
         print_tela_log("- Extração de arquivo de conteúdo (content.xml) para [", caminho_arq_content_xml,
                        "] FALHOU. Arquivo não foi encontrado.")
@@ -1636,7 +1557,7 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     if (Gxml_ns.get("text", None) is None):
         # Se não existe a seção text, tem algo esquisito...
         print_tela_log(
-            "Falhou no parse dos namespaces. Não encontrado seção 'text'. Assegure-se que o arquivo informado é um ODT bem formado")
+            "- ERRO: Falhou no parse dos namespaces. Não encontrado seção 'text'. Assegure-se que o arquivo informado é um ODT bem formado")
         return
 
     # Faz parse geral do arquivo, que já foi lido e armazenado em string
@@ -1663,7 +1584,7 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     # Recupera e valida lista de campos váriaveis
     # -------------------------------------------------------------------
 
-    print_tela_log("- Recuperando e validando referência a campos variáveis")
+    print_log("- Recuperando e validando referência a campos variáveis")
     (sucesso, lista_cv_office_text) = odt_recupera_lista_campos_variaveis_sapi(office_text)
     if (not sucesso):
         print_tela_log(
@@ -1699,18 +1620,14 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     # Substitui textos gerais do corpo do laudo
     # ------------------------------------------------------------------
 
-    print_tela_log("Substituindo campos gerais do Laudo")
+    print("- Consultando dados da solicitação de exame no servidor.")
 
     # Recupera dados gerais da solicitação de exame
     # ------------------------------------------------------------------
-    (sucesso, msg_erro, solicitacao) = sapisrv_chamar_programa(
-        "sapisrv_consultar_solicitacao_exame.php",
-        {'codigo_solicitacao_exame_siscrim': GdadosGerais["codigo_solicitacao_exame_siscrim"]
-         })
-    if (not sucesso):
-        # Continua no loop
-        print("Falha na busca de dados da solicitação de exame no servidor: ", msg_erro)
-        return
+    solicitacao = sapisrv_chamar_programa_sucesso_ok(
+        programa="sapisrv_consultar_solicitacao_exame.php",
+        parametros={'codigo_solicitacao_exame_siscrim': GdadosGerais["codigo_solicitacao_exame_siscrim"]}
+    )
 
     # Monta dicionário de substituição
     dsub = dict()
@@ -1776,9 +1693,20 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
 
     odt_substituir_paragrafo_por_lista(paragrafo_substituir_sapi_respostas, odt_raiz, lista_par_respostas)
 
+
+    # ------------------------------------------------------------------------------------------------------------------
+    # Montagem de tabelas
+    # ------------------------------------------------------------------------------------------------------------------
+    print()
+    print("Passo 4 : Montagem de tabelas de materiais, hashes, e outras")
+    print("------------------------------------------------------------")
+
+    # ------------------------------------------------------------------------------------------------------------------
     # ------------------------------------------------------------------------------------------------------------------
     # Geração de tabela de hash
     # ------------------------------------------------------------------------------------------------------------------
+    # ------------------------------------------------------------------------------------------------------------------
+    print("- Montando tabela de hashes")
 
     # Procura tabela de hashes
     # ---------------------------
@@ -1786,7 +1714,7 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     for table in office_text.findall('table:table', Gxml_ns):
         nome_tabela = obtem_atributo_xml(table, 'table:name')
         if (nome_tabela == 'tabela_hashes'):
-            print_tela_log("- Localizada tabela de hashes")
+            print_log("- Localizada tabela de hashes")
             tabela_hashes = table
 
     if (tabela_hashes is None):
@@ -1814,7 +1742,7 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     # Valida linha da tabela de hashes.
     # Tem que ter pelo menos uma variável (ex: {sapiHashValor})
     # ------------------------------------------------------------------
-    print_tela_log("- Recuperando campos variáveis da tabela de hashes")
+    print_log("- Recuperando campos variáveis da tabela de hashes")
     (sucesso, lista_cv_tabela_hashes) = odt_recupera_lista_campos_variaveis_sapi(tr_modelo_linha_hash)
     if (len(lista_cv_tabela_hashes) == 0):
         print_tela_log(
@@ -1834,7 +1762,7 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
 
         item = dadosItem['item']
 
-        print_tela_log("- Tabela de hashes. Processando item ", item)
+        print_tela_log("- Tabela de hashes, processando item ", item)
 
         # Processa item, gerando uma ou mais linhas de hash
         linhas_hash = criar_linhas_hash_para_item(tr_modelo_linha_hash, dadosItem)
@@ -1848,9 +1776,12 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     # Remove linha de modelo da tabela
     tabela_hashes.remove(tr_modelo_linha_hash)
 
-    # -------------------------------------------------------------------
+    # ------------------------------------------------------------------------------------------------------------------
+    # ------------------------------------------------------------------------------------------------------------------
     # Geração de tabela de materiais examinados
-    # -------------------------------------------------------------------
+    # ------------------------------------------------------------------------------------------------------------------
+    # ------------------------------------------------------------------------------------------------------------------
+    print("- Montando tabela de materiais")
 
     # Procura tabela de materiais
     # ---------------------------
@@ -1870,9 +1801,6 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
         print_tela_log("A tabela de materiais é caracterizada através da propriedade nome=tabela_materiais.")
         print_tela_log("Verifique se o arquivo de modelo a partir do qual foir gerado o laudo atende este requisito.")
         return None
-
-    # print(tabela_materiais)
-    # die('ponto1223')
 
     # Isola linha de modelo da tabela de materiais
     # ------------------------------------------------------------------
@@ -1897,21 +1825,19 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
 
     # Recupera campos variáveis da linha de modelo da tabela de materiais
     # ------------------------------------------------------------------
-    print_tela_log("- Recuperando campos variáveis da tabela de materiais")
+    print_log("- Recuperando campos variáveis da tabela de materiais")
     (sucesso, lista_cv_tabela_materiais) = odt_recupera_lista_campos_variaveis_sapi(tr_modelo)
     if (len(lista_cv_tabela_materiais) == 0):
         print_tela_log(
             "ERRO: Não foi detectado nenhum campo variável na tabela de materiais. Assegure-se de utilizar um modelo de ODT sapi para a geração do laudo")
         return
 
-        # ------------------------------------------------------------------
-        # Gera linhas na tabela de materiais para cada um dos itens
-        # ------------------------------------------------------------------
-
-        # Monta lista de itens ordenados
-        # Por enquanto não vamos precisar disto, pois o servidor está
-        # retornando os itens ordenados por item...
-        # Mas talvez mais tarde precise deste código.
+    # ------------------------------------------------------------------
+    # Ordena lista de itens
+    # ------------------------------------------------------------------
+    # Por enquanto não vamos precisar disto, pois o servidor está
+    # retornando os itens ordenados por item...
+    # Mas talvez mais tarde precise deste código.
     # dicItem={}
     # ix=0
     # for dadosItem in Gitens:
@@ -1924,12 +1850,18 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     # #var_dump(keys(dicItem))
     # die('ponto1565')
 
+
+    # ------------------------------------------------------------------
+    # Gera linhas na tabela de materiais para cada um dos itens
+    # ------------------------------------------------------------------
     q = 0
     for dadosItem in Gitens:
         q += 1
 
         item = dadosItem['item']
-        print_tela_log("- Processando item ", item)
+        #var_dump(dadosItem)
+        #die('ponto1863')
+        print_tela_log("- Tabela de materiais, processando item ", item)
 
         # Processa item, criando nova linha na tabela de materiais
         tr_nova_linha_item = criar_linha_para_item(tr_modelo, dadosItem, dblocos)
@@ -1942,8 +1874,16 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     # Remove linha de modelo da tabela de materiais
     tab_materiais.remove(tr_modelo)
 
+    # ------------------------------------------------------------------------------------------------------------------
+    # ------------------------------------------------------------------------------------------------------------------
+    # Procedimentos finais
+    # ------------------------------------------------------------------------------------------------------------------
+    # ------------------------------------------------------------------------------------------------------------------
+
     # Gera novo documento e encerra
     gera_novo_odt(odt_raiz, caminho_arquivo_saida_odt)
+
+    return
 
 
 def odt_remove_comentarios(base):
@@ -1981,7 +1921,8 @@ def gera_novo_odt(odt_raiz, caminho_arquivo_saida_odt):
     with zipfile.ZipFile(caminho_arquivo_saida_odt, mode='a', compression=zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(componente_trocar, xml_string_alterado)
 
-    print("Novo arquivo gravado em: ", caminho_arquivo_saida_odt)
+    print()
+    print("Laudo SAPI ajustado gravado em: ", caminho_arquivo_saida_odt)
     return
 
 
@@ -2052,58 +1993,90 @@ def gera_novo_odt(odt_raiz, caminho_arquivo_saida_odt):
 # Gera laudo
 # ----------------------------------------------------------------------------------------------------------------------
 def gerar_laudo():
-    # Fazendo teste...com modelo de laudo fixo
-    print("Em modo de desenvolvimento...desviando para teste1()")
-    caminho_laudo = "D:/Exames_andamento/memorando 1086_16 celulares/Laudo_2122_2016_SETEC_SR_PF_PR (23).odt"
-    ajustar_laudo_odt(caminho_laudo)
-    return
+    console_executar_tratar_ctrc(funcao=_gerar_laudo)
+
+
+def _gerar_laudo():
+    # # Fazendo teste...com modelo de laudo fixo
+    # print("Em modo de desenvolvimento...desviando para teste1()")
+    # caminho_laudo = "D:/Exames_andamento/memorando 1086_16 celulares/Laudo_2122_2016_SETEC_SR_PF_PR (23).odt"
+    # ajustar_laudo_odt(caminho_laudo)
+    # return
+
+    print()
+    print_centralizado(" Gera laudo ")
+
+    # ------------------------------------------------------------------------------------------------------------------
+    # Verifica se laudo pode ser gerado
+    # ------------------------------------------------------------------------------------------------------------------
+    refresh_itens()
+
+    # Conta quantidade de itens que não estão prontos para laudo
+    qtd_nao_pronto = 0
+    for i in Gitens:
+        if not i["pronto_para_laudo"] == 't':
+            qtd_nao_pronto += 1
+
+    if qtd_nao_pronto > 0:
+        print("Existem ", qtd_nao_pronto, "itens que NÃO ESTÃO PRONTOS para laudo.")
+        print("Conclua as tarefas destes itens antes de executar a geração do laudo.")
+        return
 
     # ------------------------------------------------------------------------------------------------------------------
     # Seleciona o modelo do laudo
     # ------------------------------------------------------------------------------------------------------------------
-    while True:
 
-        # Loop para selecionar arquivo
-        selecionada_pasta = False
-        while not selecionada_pasta:
-            print()
-            print("2) Modelo do Laudo")
-            print("- Entre no SisCrim e gere para o laudo informado um modelo SAPI.")
-            print("- Na janela gráfica que foi aberta, informe o arquivo .ODT do modelo do laudo.")
+    print()
+    print("Passo1: Selecione arquivo de laudo (modelo)")
+    print("-------------------------------------------")
+    print("- Caso ainda não tenha feito, entre no SisCrim e gere para o laudo um modelo de padrão SAPI.")
+    print("- Na janela gráfica que foi aberta, selecione o arquivo .ODT correspodente")
 
-            # Cria janela para seleção de laudo
-            root = tkinter.Tk()
-            j = Janela(master=root)
-            caminho_laudo = j.selecionar_arquivo()
-            root.destroy()
+    # Cria janela para seleção de laudo
+    root = tkinter.Tk()
+    j = JanelaTk(master=root)
+    caminho_laudo = j.selecionar_arquivo([('ODT files', '*.odt')])
+    root.destroy()
 
-            # Exibe a pasta obtida do clipboard, para usuário conferir
-            print("- Arquivo do modelo do laudo: ", caminho_laudo)
-            print()
-            selecionada_pasta = pergunta_sim_nao("Prosseguir? ", default="n")
+    # Exibe arquivo selecionado
+    print("- Arquivo de entrada selecionado:", caminho_laudo)
+    if (caminho_laudo == ""):
+        print("- Nenhum arquivo de laudo foi selecionado.")
+        return
 
-        # Verificação básica do arquivo
-        # if not validaModeloLaudo(pasta=caminho_laudo, explicar=True):
-        #     Pede novamente a pasta
-        #     continue
-
-        # Ok, tudo certo
-        print()
-        print("Pasta de origem contém arquivos típicos de uma extração do Cellebrite.")
-        break
+    # Tudo certo
+    ajustar_laudo_odt(caminho_laudo)
 
 
 # Exibe lista de tarefas
 # ----------------------------------------------------------------------------------------------------------------------
 def exibir_situacao():
+    # Cabeçalho da lista de elementos
+    # --------------------------------------------------------------------------------
     cls()
+    # ambiente de execução
+    ambiente = obter_ambiente()
+    if ambiente == 'PRODUCAO':
+        ambiente = ''
+    else:
+        ambiente = "@" + ambiente
+    # Dados identificadores
+    print(GdadosGerais.get("identificacaoObjeto", None), " | ",
+          GdadosGerais.get("data_hora_ultima_atualizacao_status", None), " | ",
+          Gprograma + str(Gversao),
+          ambiente)
+    print_centralizado()
 
-    # Exibe cabecalho (Memorando/protocolo)
-    print(GdadosGerais["identificacaoLaudo"])
-    print('-' * 129)
+    # Calcula largura da última coluna, que é variável (item : Descrição)
+    # A constante na subtração é a soma de todos os campos e espaços antes da última coluna
+    lid = Glargura_tela - 34
+    lid_formatado = "%-" + str(lid) + "." + str(lid) + "s"
+
+    string_formatacao = '%2s %2s %15s %6s ' + lid_formatado
 
     # Lista de itens
     q = 0
+    qtd_nao_pronto = 0
     for i in Gitens:
         q += 1
 
@@ -2115,24 +2088,37 @@ def exibir_situacao():
         # var_dump(i)
         # cabecalho
         if (q == 1):
-            print('%2s %2s %15s %-101.101s' % (" ", "Sq", "Material", "Item : Descrição"))
-            print('-' * 129)
+            print(string_formatacao % (" ", "Sq", "Material", "Pronto", "Item : Descrição"))
+            print_centralizado("")
         # Tarefa
         item_descricao = i["item"] + " : " + i["descricao"]
-        print('%2s %2s %15s %-101.101s' % (corrente, q, i["material"], item_descricao))
+
+        # Pronto para laudo
+        if i["pronto_para_laudo"] == 't':
+            pronto_para_laudo = "Sim"
+        else:
+            pronto_para_laudo = "NÃO"
+            qtd_nao_pronto += 1
+
+        # var_dump(i)
+        # die('ponto2142')
+        print(string_formatacao % (corrente, q, i["material"], pronto_para_laudo, item_descricao))
 
         if (q == Gicor):
-            print('-' * 129)
+            print_centralizado("")
 
     print()
     if (q == 0):
-        print("Não existe nenhum item pronto para laudo nesta solicitação de exame.")
+        print("- Não existe nenhum material vinculado ao laudo. Corrija Laudo no SisCrim.")
     else:
-        print("A lista acima apresenta apenas os itens da solicitação de exame que estão prontos para laudo.")
-    print(
-        "Um item está pronto para laudo quando todas as tarefas programadas para o mesmo foram concluídas com êxito.")
-    print("Em caso de dúvida, consulte o setec3")
-    print()
+        print("- A lista acima apresenta apenas os materiais vinculados ao laudo.")
+
+    if (qtd_nao_pronto > 0):
+        print("- ATENÇÃO: Existem ", qtd_nao_pronto,
+              "materiais que não estão prontos para laudo (coluna 'Pronto'), pois ainda possuem tarefas pendentes")
+        print("  Enquanto esta condição persistir, não será possível efetuar a geração de laudo (*gl)")
+        print("- Em caso de dúvida, consulte o setec3")
+
     return
 
 
@@ -2179,9 +2165,26 @@ def carregar_estado():
 # sprint("Isto so deve acontecer em ambiente de desenvolvimento")
 
 
+# Inicia procedimento de obtenção de laudo, cancelando com CTR-C
+# Retorna: Verdadeiro se foi selecionado um laudo
+# ----------------------------------------------------------------------------------------------------------------------
+def obter_itens_ok():
+    try:
+        return obter_itens()
+    except KeyboardInterrupt:
+        return False
+
+
 # Seleciona laudo
-# ----------------------------------------------------------------------
-def obter_laudo_itens():
+# Retorna: Verdadeiro se foi selecionado um laudo
+# ----------------------------------------------------------------------------------------------------------------------
+def obter_itens():
+    # Irá atualizar a variável global de itens
+    global Gitens
+
+    print()
+    print_centralizado(" Seleção de Laudo ")
+    print("Dica: CTR-C para cancelar seleção")
     print()
 
     # Solicita que o usuário se identifique através da matricula
@@ -2211,7 +2214,12 @@ def obter_laudo_itens():
 
         # Matricula ok, vamos ver se tem solicitacoes de exame
         if (len(lista_laudos) == 0):
-            print("Não existe nenhum laudo para exame SAPI na carga da matrícula indicada. Verifique no SisCrim")
+            print()
+            print("Não existe nenhum laudo de exame SAPI para esta matrícula. Utilize o seguinte procedimento:")
+            print("1) Gere o laudo no SisCrim, associando ao mesmo os materiais examinados")
+            print("2) Gere um modelo de usuário padrão SAPI, conforme instrução do gestor do GTPI")
+            print("3) Retorne a este programa, o qual fará a substituição dos dados das tarefas no laudo gerado")
+            print()
             continue
 
         # Tudo certo, encerra loop
@@ -2225,12 +2233,10 @@ def obter_laudo_itens():
         q += 1
         if (q == 1):
             # Cabecalho
-            print('%2s  %10s %10s  %s' % ("N.", "Laudo", "Protocolo", "Solicitação de exame"))
-            print('-' * 129)
+            print('%2s  %10s %10s  %s' % ("Sq", "Laudo", "Protocolo", "Solicitação de exame"))
+            print_centralizado("")
         protocolo_ano = d["numero_protocolo"] + "/" + d["ano_protocolo"]
         laudo_ano = d["numero_documento"] + "/" + d["ano_documento"]
-        # var_dump(d)
-        # die('ponto1961')
         print('%2d  %10s %10s  %s' % (q, laudo_ano, protocolo_ano, d["identificacao"]))
 
     # Usuário escolhe a solicitação de exame de interesse
@@ -2239,7 +2245,7 @@ def obter_laudo_itens():
     while True:
         #
         print()
-        num_solicitacao = input("Selecione o laudo (pelo número de sequencia): ")
+        num_solicitacao = input("Selecione o laudo (pelo número de sequencia Sq): ")
         num_solicitacao = num_solicitacao.strip()
         if not num_solicitacao.isdigit():
             print("Entre com o numero do laudo")
@@ -2257,76 +2263,82 @@ def obter_laudo_itens():
         # Ok, selecionado
         print()
         laudo = lista_laudos[ix_solicitacao]
+
+        GdadosGerais["codigo_laudo"] = laudo['codigo_documento_interno']
+
         GdadosGerais["identificacaoLaudo"] = (
             "Laudo: " +
             laudo["numero_documento"] + "/" + laudo["ano_documento"] +
-            " Solicitação: " +
+            " (" +
             laudo["identificacao"] +
-            " Protocolo: " +
-            laudo["numero_protocolo"] + "/" + laudo["ano_protocolo"])
-        # print("Laudo:",solicitacao["identificacao"])
-        # var_dump(GdadosGerais["identificacaoLaudo"])
-        # die('ponto2001')
+            " Prot: " +
+            laudo["numero_protocolo"] + "/" + laudo["ano_protocolo"] +
+            ")")
 
-        print("Buscando itens prontos para " + GdadosGerais["identificacaoLaudo"])
-        print("Aguarde...")
+        GdadosGerais["codigo_solicitacao_exame_siscrim"] = laudo['codigo_documento_externo']
+        GdadosGerais["identificacaoObjeto"] = GdadosGerais["identificacaoLaudo"]
 
-        # Carrega os itens que estão pronto para laudo
+        print("Laudo selecionado:", GdadosGerais["identificacaoLaudo"])
+        print()
+        print("Buscando itens associados ao laudo. Aguarde...")
+
+        # Carrega os materiais do exame
         # --------------------------------------------------------------
-        codigo_solicitacao_exame_siscrim = laudo["codigo_documento_externo"]
-        GdadosGerais["codigo_solicitacao_exame_siscrim"] = codigo_solicitacao_exame_siscrim
-
-        (sucesso, msg_erro, itens) = sapisrv_chamar_programa(
-            "sapisrv_obter_itens_laudo.php",
-            {'codigo_solicitacao_exame_siscrim': codigo_solicitacao_exame_siscrim},
-            abortar_insucesso=True
+        codigo_solicitacao_exame_siscrim = GdadosGerais["codigo_solicitacao_exame_siscrim"]
+        codigo_laudo = GdadosGerais["codigo_laudo"]
+        itens = sapisrv_chamar_programa_sucesso_ok(
+            programa="sapisrv_obter_itens_laudo.php",
+            parametros={'codigo_solicitacao_exame_siscrim': codigo_solicitacao_exame_siscrim,
+                        'codigo_laudo': codigo_laudo}
         )
 
-        # var_dump(sucesso)
-        # var_dump(msg_erro)
-        # var_dump(itens)
-        # die('ponto2022')
-
-        # Tem que ter ao menos um item pronto para laudo
+        # Tem que ter ao menos um item vinculado
         if (len(itens) == 0):
             print()
-            print("A solicitação de exame deste laudo NÃO TEM NENHUM ITEM PRONTO PARA LAUDO")
-            print("Verifique no SETEC3.")
+            print("ERRO: Este laudo NÃO tem nenhum material vinculado. Corrija no SisCrim.")
             print()
             continue
 
-        # Confirma se itens que estão disponíveis atende expectativa
-        # -----------------------------------------------
-        print()
-        print()
-        q = 0
-        for item in itens:
-            # var_dump(item)
-            # die('ponto2028')
-            q += 1
-            if (q == 1):
-                # Cabecalho
-                print('%10s %s' % ("item", "Descrição"))
-                print('-' * 129)
-            print('%10s %s' % (item["item"], item["descricao"]))
-
-        print()
-        print("Total de itens disponíveis para laudo: ", q)
-        print()
-        print()
-
-        # Confirma se lista está ok
-        print()
-        prosseguir = pergunta_sim_nao("Prosseguir? ", default="n")
-        if not prosseguir:
-            continue
-
-        # Tudo certo, encerra loop
-        sys.stdout.write("OK")
+        # Tudo certo, interrompe o loop
         break
 
+        # Desnecessário...irá mostrar estado do material na lista de itens
+        # # Confirma se itens que estão disponíveis atende expectativa
+        # # -----------------------------------------------
+        # print()
+        # print()
+        # q = 0
+        # for item in itens:
+        #     # var_dump(item)
+        #     # die('ponto2028')
+        #     q += 1
+        #     if (q == 1):
+        #         # Cabecalho
+        #         print('%10s %s' % ("item", "Descrição"))
+        #         print('-' * 129)
+        #     print('%10s %s' % (item["item"], item["descricao"]))
+        #
+        # print()
+        # print("Total de itens disponíveis para laudo: ", q)
+        # print()
+        # print()
+        #
+        # # Confirma se lista está ok
+        # print()
+        # prosseguir = pergunta_sim_nao("Prosseguir? ", default="n")
+        # if not prosseguir:
+        #     continue
+        #
+        # # Tudo certo, encerra loop
+        # sys.stdout.write("OK")
+        # break
+
     # Retorna itens para o memorando selecionado
-    return itens
+    Gitens = itens
+    GdadosGerais["data_hora_ultima_atualizacao_status"] = datetime.datetime.now().strftime('%H:%M:%S')
+
+    # Laudo selecionado
+    return True
 
 
 def refresh_itens():
@@ -2335,18 +2347,21 @@ def refresh_itens():
 
     print("Buscando situação atualizada do servidor. Aguarde...")
 
-    codigo_solicitacao_exame_siscrim = GdadosGerais["codigo_solicitacao_exame_siscrim"]
-
-    # Carrega os itens que estão pronto para laudo
+    # Carrega os materiais do exame
     # --------------------------------------------------------------
-    (sucesso, msg_erro, itens) = sapisrv_chamar_programa(
-        "sapisrv_obter_itens_laudo.php",
-        {'codigo_solicitacao_exame_siscrim': codigo_solicitacao_exame_siscrim},
-        abortar_insucesso=True
+    codigo_solicitacao_exame_siscrim = GdadosGerais["codigo_solicitacao_exame_siscrim"]
+    codigo_laudo = GdadosGerais["codigo_laudo"]
+    itens = sapisrv_chamar_programa_sucesso_ok(
+        programa="sapisrv_obter_itens_laudo.php",
+        parametros={'codigo_solicitacao_exame_siscrim': codigo_solicitacao_exame_siscrim,
+                    'codigo_laudo': codigo_laudo}
     )
 
     # Guarda na global
     Gitens = itens
+    GdadosGerais["data_hora_ultima_atualizacao_status"] = datetime.datetime.now().strftime('%H:%M:%S')
+
+    return True
 
 
 # Exibir informações sobre tarefa
@@ -2440,29 +2455,47 @@ die('ponto1174')
 
 if __name__ == '__main__':
 
-    # Iniciando
-    # ---------
+    # Cabeçalho inicial do programa
+    # ------------------------------------------------------------------------------------------------------------------
     print()
-    print(Gprograma, " (Versao " + Gversao + ")")
-    print_centralizado("")
+    cls()
+    print(Gprograma, "Versão", Gversao)
+    print_centralizado("-")
     print()
     print("Dicas:")
-    print(
-        "- Se a linha de separador ---- está sendo quebrada, configure o buffer de tela e tamanho de janela com largura de 130 caracteres")
-    print("  para ter uma visualização perfeita.")
-    print("- Para interromper entrada de dados, utilize CTR-C")
+    print("- Este programa foi projetado para utilizar uma janela com largura mínima de 130 caracteres.")
+    print("- Se a linha de separador ---- está sendo dívida/quebrada,")
+    print("  configure o buffer de tela e tamanho de janela com largura mínima de 130 caracteres.")
+    print("- Recomenda-se também trabalhar com a janela na altura máxima disponível do monitor.")
     print()
 
     # Inicialização de sapilib
+    # -----------------------------------------------------------------------------------------------------------------
     print_log('Iniciando ', Gprograma, ' - ', Gversao)
     sapisrv_inicializar(Gprograma, Gversao)
 
-    # Obtem lista de itens que irão para o laudo
-    # ------------------------------------------
+    # Carrega o estado anterior, se houver. Caso contrário, solicita dados para utilização do programa
+    # -----------------------------------------------------------------------------------------------------------------
+    carregar_estado()
+    if len(Gitens) > 0:
+        print("Retomando último laudo. Para trocar de laudo, utilize opção *tt")
+        refresh_itens()
+    else:
+        # Obtem lista de itens, solicitando o memorando
+        if not obter_itens_ok():
+            # Se usuário interromper seleção de itens
+            print("Execução finalizada.")
+            sys.exit()
+    # Salva estado atual
+    salvar_estado()
+
     carregar_estado()
     if (len(Gitens) == 0):
         # Se não carregou nada, solicita laudo
-        Gitens = obter_laudo_itens()
+        if not obter_itens_ok():
+            print()
+            print("Encerrado por solicitação do usuário")
+            sys.exit(0)
     # Salva estado atual
     salvar_estado()
 
@@ -2478,7 +2511,10 @@ if __name__ == '__main__':
 
     # Recebe comandos
     while (True):
-        (comando, argumento) = interface_receber_comando_ok(Gmenu_comandos)
+        (comando, argumento) = console_receber_comando(Gmenu_comandos)
+
+        if comando is None:
+            continue
 
         if comando == '':
             # Se usuário simplemeste der um <ENTER>, exibe a situação
@@ -2512,12 +2548,17 @@ if __name__ == '__main__':
             dump_item()
             continue
         elif (comando == '*si'):
-            exibir_dados_laudo_item_corrente()
+            exibir_situacao_item_corrente()
             continue
 
         # Comandos gerais
         if (comando == '*sg'):
             refresh_itens()
+            exibir_situacao()
+            continue
+        elif (comando == '*tt'):
+            obter_itens_ok()
+            salvar_estado()
             exibir_situacao()
             continue
         elif (comando == '*gl'):
