@@ -19,6 +19,9 @@
 # TODO: 
 # - 
 # =======================================================================
+#
+#
+# =======================================================================
 
 # Módulos utilizados
 # ====================================================================================================
@@ -963,8 +966,8 @@ def recupera_dados_para_laudo_das_tarefas_item(dados_item, fase=None):
     # Recupera as tarefas finalizadas de um item
     # --------------------------------------------------------------
     item = dados_item['item']
-    # var_dump(dadosItem)
-    # die('ponto1099')
+    #var_dump(dados_item)
+    #die('ponto1099')
 
     print_log("- Recuperando dados para laudo das tarefas do item ", item)
     param = {'codigo_solicitacao_exame_siscrim': GdadosGerais["codigo_solicitacao_exame_siscrim"],
@@ -1387,7 +1390,7 @@ def usuario_escolhe_quesitacao(quesitos_respostas):
     print('  e posteriormente notique o gestor do GTPI (informando o número do laudo), para que este avalie')
     print('  a necessidade de ampliação dos modelos de quesitação.')
     print('- Em função de limitações da console,  é possível que alguns caracteres acentuados tenham ')
-    print('  sido substituídos por "?" no resumo abaixo. Não se preocupe, no laudo gerado, ficará ok.')
+    print('  sido substituídos por "?" no resumo abaixo. Não se preocupe, no laudo gerado ficará ok.')
 
     qtd_opcoes = 0
     for qtd_nome in lista:
@@ -1402,7 +1405,7 @@ def usuario_escolhe_quesitacao(quesitos_respostas):
         quantidade_quesitos = quesitacao["quantidade_quesitos"]
 
         print_centralizado("")
-        print(qtd_opcoes, "=> ", "Quesitos: ", int(quantidade_quesitos), "Nome da quesitação: ", nome_quesito, ")")
+        print(qtd_opcoes, "=> ", "Qtd. quesitos:", int(quantidade_quesitos), "  Nome da quesitação:", nome_quesito)
         print_centralizado("")
         # Imprime o resumo de três quesitos por linha
         tam_linha = 105
@@ -1629,10 +1632,25 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
         parametros={'codigo_solicitacao_exame_siscrim': GdadosGerais["codigo_solicitacao_exame_siscrim"]}
     )
 
+    #var_dump(solicitacao)
+    #die('ponto1636')
+
+    # Processa auto
+    # xxx
+    auto_apreensao = solicitacao["auto_apreensao"]
+    partes_auto = auto_apreensao.split(' ')
+    tipo_auto = partes_auto[0]
+    numero_auto = partes_auto[1]
+    if partes_auto[0] == 'apreensao':
+        descricao_tipo_auto = "Auto de Apreensão"
+    if partes_auto[0] == 'arrecadacao':
+        descricao_tipo_auto = "Auto de Arrecadação"
+    descricao_auto = descricao_tipo_auto + " nº " + numero_auto
+
     # Monta dicionário de substituição
     dsub = dict()
     dsub['sapiAlvo'] = solicitacao["local_busca"]
-    dsub['sapiAlvo'] = solicitacao["local_busca"]
+    dsub['sapiAuto'] = descricao_auto
 
     # Substitui cada componente
     for substituir in dsub:
@@ -2029,7 +2047,7 @@ def _gerar_laudo():
     print()
     print("Passo1: Selecione arquivo de laudo (modelo)")
     print("-------------------------------------------")
-    print("- Caso ainda não tenha feito, entre no SisCrim e gere para o laudo um modelo de padrão SAPI.")
+    print("- Caso ainda não tenha feito, entre no SisCrim e gere um laudo (modelo) padrão SAPI.")
     print("- Na janela gráfica que foi aberta, selecione o arquivo .ODT correspodente")
 
     # Cria janela para seleção de laudo
