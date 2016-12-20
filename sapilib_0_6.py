@@ -355,9 +355,10 @@ def sapisrv_chamar_programa(programa, parametros, abortar_insucesso=False, regis
 # validados, ou seja houve alguma mudança na situação dos dados no servidor.
 # Utilize esta chamada apenas quando existe certeza que o resultado tem que SUCESSO
 # ----------------------------------------------------------------------------------------------------------------------
-def sapisrv_chamar_programa_sucesso_ok(programa, parametros, *args):
+def sapisrv_chamar_programa_sucesso_ok(programa, parametros, registrar_log=False):
 
-    (sucesso, msg_erro, dados) = sapisrv_chamar_programa(programa, parametros, abortar_insucesso=True, *args)
+    (sucesso, msg_erro, dados) = sapisrv_chamar_programa(
+        programa, parametros, abortar_insucesso=True, registrar_log=registrar_log)
     if (not sucesso):
         erro_fatal("Resposta inesperada para ", programa, " => ", msg_erro)
 

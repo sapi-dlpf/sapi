@@ -1060,6 +1060,9 @@ def criar_linha_para_item(tr_modelo, dados_item, dblocos):
             # Recupera dados do componente
             ix_comp = "comp" + str(q_comp)
             dados_componente = dados_tarefa[ix_comp]
+
+
+            # Tipo de componente
             tipo = dados_componente['sapiTipoComponente']
 
             # Recupera bloco de identificação específico
@@ -1207,6 +1210,67 @@ def criar_linhas_hash_para_item(tr_modelo, dados_item):
             # -- Fim do processamento de hashes
 
     return linhas
+
+
+
+# Cria uma linha para material devolvido
+def criar_linha_matdevol(tr_modelo_linha_matdevol, mat):
+
+    # Duplica modelo para criar nova linha
+    nova_linha = copy.deepcopy(tr_modelo_linha_matdevol)
+
+    # Procura por campos de substiuição na nova linha
+    (sucesso, lista_campos) = odt_recupera_lista_campos_variaveis_sapi(nova_linha)
+
+    # Adiciona item na descrição do hash
+    material    = mat['material']
+    descricao   = mat['descricao']
+    lacre       = mat['lacre']
+
+    # Campo composto (descricao_eou_lacre)
+    if mat['destino'] == False:
+        # === Material examinado ===
+        # Monta lista de itens
+        texto_itens = ", ".join(mat['itens'])
+        # Exibe apenas o número do lacre
+        descricao_ou_lacre = lacre
+    else:
+        # === Material de DESTINO ===
+        # Lista de itens é nula para material de destino
+        texto_itens="-"
+        # Exibe descrição e se existir o lacre
+        descricao_ou_lacre = descricao
+        if lacre is not None:
+            descricao_ou_lacre += ' Lacre: ' + lacre
+
+    # substituição de campos na nova linha
+    dcs = dict()
+    dcs['sapiMaterialSiscrim']          = material
+    dcs['sapiItensDoMaterial']          = texto_itens
+    if descricao_ou_lacre is not None:
+        dcs['sapiDescricaoEOULacreAtual']   = descricao_ou_lacre
+
+    for cs in dcs:
+        odt_substitui_campo_variavel_texto(lista_campos, cs, dcs[cs])
+
+    return nova_linha
+
+
+# Recupera dados gerais (que não ficaram em tabelas) das tarefas
+# Exemplo: Software utilizado por cada tarefa
+def recupera_dados_gerais_tarefas(dados_item, dict_software):
+
+    # Recupera dados de laudo das tarefas do item
+    lista_dados_laudo = recupera_dados_para_laudo_das_tarefas_item(dados_item)
+
+    for dados_tarefa in lista_dados_laudo:
+
+        # Armazena software utilizado na tarefa
+        software = dados_tarefa.get('sapiSoftwareVersao', None)
+        if software is not None:
+            dict_software[software] = 1
+
+    return
 
 
 def odt_clonar_bloco(nome_bloco, dblocos):
@@ -1381,9 +1445,6 @@ def usuario_escolhe_quesitacao(quesitos_respostas):
 
     # Exibe lista de quesitos para seleção
     # ------------------------------------
-    print()
-    print("Passo 3: Escolha a quesitação")
-    print("-----------------------------")
     print('- Observe na lista abaixo o resumo dos quesitações padrões disponíveis no modelo selecionado.')
     print('- Caso a quesitação da solicitação de exame não seja idêntica a nenhuma das quesitações padrões,')
     print('  selecione a que possuir maior semelhança, efetue os ajustes diretamente no seu laudo')
@@ -1502,8 +1563,8 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     # Valida arquivo de modelo
     # ------------------------------------------------------------------------------------------------------------------
     print()
-    print("Passo 2: Validação e ajuste de dados gerais do laudo")
-    print("----------------------------------------------------")
+    print("Passo 2: Validação de modelo do laudo")
+    print("-------------------------------------")
 
     # -------------------------------------------------------------------
     # Extrai arquivo de conteúdo (content.xml) do odt
@@ -1619,48 +1680,6 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     # 	var_dump(tarefas)
     # 	die('ponto1933')
 
-    # ------------------------------------------------------------------
-    # Substitui textos gerais do corpo do laudo
-    # ------------------------------------------------------------------
-
-    print("- Consultando dados da solicitação de exame no servidor.")
-
-    # Recupera dados gerais da solicitação de exame
-    # ------------------------------------------------------------------
-    solicitacao = sapisrv_chamar_programa_sucesso_ok(
-        programa="sapisrv_consultar_solicitacao_exame.php",
-        parametros={'codigo_solicitacao_exame_siscrim': GdadosGerais["codigo_solicitacao_exame_siscrim"]}
-    )
-
-    #var_dump(solicitacao)
-    #die('ponto1636')
-
-    # Processa auto
-    # xxx
-    auto_apreensao = solicitacao["auto_apreensao"]
-    partes_auto = auto_apreensao.split(' ')
-    tipo_auto = partes_auto[0]
-    numero_auto = partes_auto[1]
-    if partes_auto[0] == 'apreensao':
-        descricao_tipo_auto = "Auto de Apreensão"
-    if partes_auto[0] == 'arrecadacao':
-        descricao_tipo_auto = "Auto de Arrecadação"
-    descricao_auto = descricao_tipo_auto + " nº " + numero_auto
-
-    # Monta dicionário de substituição
-    dsub = dict()
-    dsub['sapiAlvo'] = solicitacao["local_busca"]
-    dsub['sapiAuto'] = descricao_auto
-
-    # Substitui cada componente
-    for substituir in dsub:
-
-        # Efetua substituição de texto
-        novo_valor = dsub[substituir]
-        qtd_substituicoes = odt_substitui_campo_variavel_texto(lista_cv_office_text, substituir, novo_valor)
-        if (qtd_substituicoes == 0):
-            print("Falhou na substituição de '" + substituir + "'")
-            return
 
     # -------------------------------------------------------------------
     # Verifica quesitação
@@ -1674,6 +1693,10 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     # ------------------------------------------------------------------------------------------------------------------
     # Solicita que usuário escolha a quesitação
     # ------------------------------------------------------------------------------------------------------------------
+    print()
+    print("Passo 3: Escolha da quesitação")
+    print("------------------------------")
+
     lista_par_quesitos, lista_par_respostas = determina_quesitacao(quesitos_respostas, dblocos)
 
     # ------------------------------------------------------------------------------------------------------------------
@@ -1711,20 +1734,196 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
 
     odt_substituir_paragrafo_por_lista(paragrafo_substituir_sapi_respostas, odt_raiz, lista_par_respostas)
 
+    # ------------------------------------------------------------------
+    # Substitui textos gerais do corpo do laudo
+    # ------------------------------------------------------------------
+    print()
+    print("Passo 5: Substituição de textos gerais do laudo")
+    print("-----------------------------------------------")
+
+    print("- Consultando dados da solicitação de exame no servidor.")
+
+    # Recupera dados gerais da solicitação de exame
+    # ------------------------------------------------------------------
+    solicitacao = sapisrv_chamar_programa_sucesso_ok(
+        programa="sapisrv_consultar_solicitacao_exame.php",
+        parametros={'codigo_solicitacao_exame_siscrim': GdadosGerais["codigo_solicitacao_exame_siscrim"]}
+    )
+
+    #var_dump(solicitacao)
+    #die('ponto1636')
+
+    # Processa auto
+    auto_apreensao = solicitacao["auto_apreensao"]
+    partes_auto = auto_apreensao.split(' ')
+    tipo_auto = partes_auto[0]
+    numero_auto = partes_auto[1]
+    if partes_auto[0] == 'apreensao':
+        descricao_tipo_auto = "Auto de Apreensão"
+    if partes_auto[0] == 'arrecadacao':
+        descricao_tipo_auto = "Auto de Arrecadação"
+    descricao_auto = descricao_tipo_auto + " nº " + numero_auto
+
+
+    # ------------------------------------------------------------------
+    # Recupera dados gerais que estão armazenados em tarefas
+    # ------------------------------------------------------------------
+    dict_software = dict()
+    for dados_item in Gitens:
+        item = dados_item['item']
+        print_tela_log("- Recuperando dados gerais de tarefas do item", item)
+        recupera_dados_gerais_tarefas(dados_item, dict_software)
+
+    # Ajuste em sapiSoftwareVersao
+    lista_software=list(dict_software.keys())
+    lista_software.sort()
+    texto_sofware=", ".join(lista_software)
+
+    # Monta dicionário de substituição
+    dsub = dict()
+    dsub['sapiAlvo'] = solicitacao["local_busca"]
+    dsub['sapiAuto'] = descricao_auto
+    dsub['sapiSoftwareVersao'] = texto_sofware
+
+    # Substitui cada componente
+    for substituir in dsub:
+
+        # Efetua substituição de texto
+        novo_valor = dsub[substituir]
+        qtd_substituicoes = odt_substitui_campo_variavel_texto(lista_cv_office_text, substituir, novo_valor)
+        if (qtd_substituicoes == 0):
+            print("Falhou na substituição de '" + substituir + "'")
+            return
+
 
     # ------------------------------------------------------------------------------------------------------------------
-    # Montagem de tabelas
+    # ------------------------------------------------------------------------------------------------------------------
+    # Geração de tabela de materiais devolvidos,
+    # que na realidade são os materiais que estão associados (vinculados) ao laudo
+    # ------------------------------------------------------------------------------------------------------------------
     # ------------------------------------------------------------------------------------------------------------------
     print()
-    print("Passo 4 : Montagem de tabelas de materiais, hashes, e outras")
-    print("------------------------------------------------------------")
+    print("Passo 8 : Montagem de tabelas de materiais devolvidos")
+    print("-----------------------------------------------------")
+
+    # Procura tabela de materiais devolvidos
+    # ---------------------------------------
+    tabela_matdevol = None
+    for table in office_text.findall('table:table', Gxml_ns):
+        nome_tabela = obtem_atributo_xml(table, 'table:name')
+        if (nome_tabela == 'tabela_materiais_devolvidos'):
+            print_log("- Localizada tabela de materiais devolvidos")
+            tabela_matdevol = table
+
+    if (tabela_matdevol is None):
+        print_tela_log("- ERRO: Não foi localizada a tabela de materiais devolvidos no modelo.")
+        print_tela_log("- Esta tabela é caracterizada através da propriedade nome=tabela_materiais_devolvidos.")
+        print_tela_log("- Verifique se o arquivo de modelo possui esta tabela.")
+        return None
+
+    # ------------------------------------------------------------------------------------------------------------------
+    # Isola linha de modelo da tabela de matdevol
+    # ------------------------------------------------------------------------------------------------------------------
+    # Parte-se do princípio que a tabela terá um cabeçalho,
+    # seguido da linha de modelo.
+    # A linha de modelo DEVE SER ÚNICA, e será sempre a última linha
+    # da tabela.
+    # ------------------------------------------------------------------------------------------------------------------
+    tr_linhas = tabela_matdevol.findall('table:table-row', Gxml_ns)
+    qtd_linhas = len(tr_linhas)
+    if (qtd_linhas != 2):
+        # Não é comum ter mais de duas linhas...então é melhor avisar
+        print_tela_log("- Tabela de materais devolvidos contém", qtd_linhas, " linhas, o que é incomum.")
+        print_tela_log("- Assumindo que a linha de modelo para substituição é a última linha da tabela")
+    tr_modelo_linha_matdevol = tabela_matdevol.findall('table:table-row', Gxml_ns)[qtd_linhas - 1]
+
+    # Valida linha da tabela
+    # Tem que ter pelo menos uma variável (ex: {sapiItem})
+    # ------------------------------------------------------------------
+    print_log("- Recuperando campos variáveis da tabela")
+    (sucesso, lista_cv_tabela_matdevol) = odt_recupera_lista_campos_variaveis_sapi(tr_modelo_linha_matdevol)
+    if (len(lista_cv_tabela_matdevol) == 0):
+        print_tela_log(
+            "ERRO: Não foi detectado nenhum campo variável nesta tabela. Assegure-se de utilizar um modelo sapi para a geração do laudo")
+        return
+
+    # ------------------------------------------------------------------
+    # Gera linhas na tabela de materiais devolvidos
+    # ------------------------------------------------------------------
+    # Determina posição aonde está a linha de modelo.
+    # Nesta posição serão inseridas as novas linhas da tabela.
+    posicao_inserir_tab_matdevol = odt_determina_posicao_pai_filho(tabela_matdevol, tr_modelo_linha_matdevol)
+
+    dic_mat=dict()
+    # Processa itens, agrupando dados por materiais
+    for dados_item in Gitens:
+
+        item = dados_item['item']
+        # yyy
+        #var_dump(dados_item)
+        #die('ponto1820')
+
+        material=dados_item['material']
+
+        # Se vier um sufixo (quando tem vários itens em um material), remove sufixo
+        # pois na tabela de materiais de devolução será agrupado
+        # exemplo: 3200/2016 (1) => 3200/2016
+        partes = material.split('(')
+        material = partes[0].strip()
+
+        # Coloca ano na frente do material, para ordenar corretamente
+        # exemplo: 3200/2016 => 2016_3200
+        partes = material.split('/')
+        material_ano_numero=partes[1] + "_" + partes[0]
+
+        #var_dump(material_ano_numero)
+
+        # Verifica se material já existe
+        if material_ano_numero in dic_mat:
+            # Se Material já existe, apenas adiciona o item na lista de itens do material e passa para próximo item
+            dic_mat[material_ano_numero]['itens'].append(item)
+            continue
+
+        # Material ainda não existe. Será incluído no dicionário
+        dic_mat[material_ano_numero]=dict()
+        dic_mat[material_ano_numero]['material'] = material
+        dic_mat[material_ano_numero]['lacre'] = dados_item.get('lacre')
+        dic_mat[material_ano_numero]['descricao'] = dados_item.get('descricao')
+        dic_mat[material_ano_numero]['destino'] = dados_item.get('destino')
+        # Cria lista de itens e adciona item atual
+        dic_mat[material_ano_numero]['itens'] = list()
+        dic_mat[material_ano_numero]['itens'].append(item)
+
+    #var_dump(dic_mat)
+
+    # Processa materias, gerando linhas na tabela
+    for ix_mat in sorted(list(dic_mat.keys())):
+
+        mat=dic_mat[ix_mat]
+
+        print_tela_log("- Tabela de materias devolvidos, processando material ", mat['material'])
+
+        # Processa item, gerando uma ou mais linhas de matdevol
+        linha = criar_linha_matdevol(tr_modelo_linha_matdevol, mat)
+
+        # Insere nova linha na tabela de matdevol
+        tabela_matdevol.insert(posicao_inserir_tab_matdevol, linha)
+        posicao_inserir_tab_matdevol += 1
+
+    # --- Fim do loop de processamento dos itens da tabela de matdevol
+    # Remove linha de modelo da tabela
+    tabela_matdevol.remove(tr_modelo_linha_matdevol)
+
+
 
     # ------------------------------------------------------------------------------------------------------------------
     # ------------------------------------------------------------------------------------------------------------------
     # Geração de tabela de hash
     # ------------------------------------------------------------------------------------------------------------------
     # ------------------------------------------------------------------------------------------------------------------
-    print("- Montando tabela de hashes")
+    print()
+    print("Passo 6 : Montagem de tabelas de hashes")
+    print("---------------------------------------")
 
     # Procura tabela de hashes
     # ---------------------------
@@ -1776,14 +1975,14 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     posicao_inserir_tab_hashes = odt_determina_posicao_pai_filho(tabela_hashes, tr_modelo_linha_hash)
 
     # Processa por item, para ficar organizado na tabela
-    for dadosItem in Gitens:
+    for dados_item in Gitens:
 
-        item = dadosItem['item']
+        item = dados_item['item']
 
         print_tela_log("- Tabela de hashes, processando item ", item)
 
         # Processa item, gerando uma ou mais linhas de hash
-        linhas_hash = criar_linhas_hash_para_item(tr_modelo_linha_hash, dadosItem)
+        linhas_hash = criar_linhas_hash_para_item(tr_modelo_linha_hash, dados_item)
 
         for linha in linhas_hash:
             # Insere nova linha na tabela de hashes
@@ -1799,7 +1998,9 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     # Geração de tabela de materiais examinados
     # ------------------------------------------------------------------------------------------------------------------
     # ------------------------------------------------------------------------------------------------------------------
-    print("- Montando tabela de materiais")
+    print()
+    print("Passo 5 : Montagem de tabelas de materiais")
+    print("------------------------------------------")
 
     # Procura tabela de materiais
     # ---------------------------
@@ -1873,16 +2074,16 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     # Gera linhas na tabela de materiais para cada um dos itens
     # ------------------------------------------------------------------
     q = 0
-    for dadosItem in Gitens:
+    for dados_item in Gitens:
         q += 1
 
-        item = dadosItem['item']
+        item = dados_item['item']
         #var_dump(dadosItem)
         #die('ponto1863')
         print_tela_log("- Tabela de materiais, processando item ", item)
 
         # Processa item, criando nova linha na tabela de materiais
-        tr_nova_linha_item = criar_linha_para_item(tr_modelo, dadosItem, dblocos)
+        tr_nova_linha_item = criar_linha_para_item(tr_modelo, dados_item, dblocos)
 
         # Insere nova linha na tabela de materiais
         tab_materiais.insert(posicao_inserir_tab_materiais, tr_nova_linha_item)
@@ -1897,6 +2098,9 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     # Procedimentos finais
     # ------------------------------------------------------------------------------------------------------------------
     # ------------------------------------------------------------------------------------------------------------------
+    print()
+    print("Passo 7 : Procedimentos finais")
+    print("------------------------------")
 
     # Gera novo documento e encerra
     gera_novo_odt(odt_raiz, caminho_arquivo_saida_odt)
@@ -1940,7 +2144,7 @@ def gera_novo_odt(odt_raiz, caminho_arquivo_saida_odt):
         zf.writestr(componente_trocar, xml_string_alterado)
 
     print()
-    print("Laudo SAPI ajustado gravado em: ", caminho_arquivo_saida_odt)
+    print("- Laudo SAPI ajustado gravado em: ", caminho_arquivo_saida_odt)
     return
 
 
@@ -2090,7 +2294,8 @@ def exibir_situacao():
     lid = Glargura_tela - 34
     lid_formatado = "%-" + str(lid) + "." + str(lid) + "s"
 
-    string_formatacao = '%2s %2s %15s %6s ' + lid_formatado
+    string_formatacao = '%2s %2s %-13s %-6s ' + lid_formatado
+
 
     # Lista de itens
     q = 0
@@ -2372,7 +2577,8 @@ def refresh_itens():
     itens = sapisrv_chamar_programa_sucesso_ok(
         programa="sapisrv_obter_itens_laudo.php",
         parametros={'codigo_solicitacao_exame_siscrim': codigo_solicitacao_exame_siscrim,
-                    'codigo_laudo': codigo_laudo}
+                    'codigo_laudo': codigo_laudo},
+        registrar_log=Gverbose
     )
 
     # Guarda na global

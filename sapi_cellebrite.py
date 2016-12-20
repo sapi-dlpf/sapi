@@ -235,7 +235,7 @@ def storage_montado(ponto_montagem):
 # Não efetua verificação de erro, afinal este status é apenas informativo
 def atualizar_status_tarefa_andamento(codigo_tarefa, texto_status):
     codigo_situacao_tarefa = GEmAndamento
-    print_log("Atualizando tarefa ", codigo_tarefa, "em andamento com status: ", texto_status)
+    print_log("Atualizando tarefa ", codigo_tarefa, " em andamento com status: ", texto_status)
     (ok, msg_erro) = sapisrv_atualizar_status_tarefa(
         codigo_tarefa=codigo_tarefa,
         codigo_situacao_tarefa=codigo_situacao_tarefa,
@@ -1296,6 +1296,10 @@ def copia_cellebrite():
 # Efetua a cópia de uma pasta
 def efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevantes, limpar_pasta_destino_antes_copiar,
                   copia_background):
+
+    # Inicializa sapilib, pois pode estar sendo executando em background (outro processo)
+    sapisrv_inicializar(Gprograma, Gversao)
+
     # Define qual o tipo de saída das mensagens de processamento
     somente_log = 'log'
     tela_log = 'tela log'
@@ -1456,6 +1460,10 @@ def efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevant
 
 # Efetua a cópia de uma pasta
 def acompanhar_copia(tipo_print, codigo_tarefa, caminho_destino):
+
+    # Inicializa sapilib, pois pode estar sendo executando em background (outro processo)
+    sapisrv_inicializar(Gprograma, Gversao)
+
     print_var(tipo_print, "Processo de acompanhamento de tarefa: Vivo")
 
     # Um pequeno delay inicial, para dar tempo da cópia começar
@@ -1520,7 +1528,7 @@ def determinar_situacao_item_cellebrite(explicar=False):
     print()
     print_centralizado("")
     print("Tarefa: ", tarefa["codigo_tarefa"])
-    print("Situação (no servidor): ", tarefa['descricao_situacao_tarefa'])
+    print("Situação no servidor: ", tarefa['descricao_situacao_tarefa'])
     print("Item: ", tarefa["dados_item"]["item_apreensao"])
     print("Material: ", tarefa["dados_item"]["material"])
     print("Descrição: ", tarefa["dados_item"]["descricao"])
@@ -1568,7 +1576,7 @@ def determinar_situacao_item_cellebrite(explicar=False):
         status = "Existem arquivos básicos faltando."
         codigo_status = GEmAndamento
         if_print_ok(explicar, status)
-        return (codigo_status, status, {})
+        return (codigo_status, status, {}, erros, avisos)
 
     # Ok, já tem todos os arquivos básicos
     status = "- Pasta contém todos os arquivos básicos."
@@ -1584,7 +1592,7 @@ def determinar_situacao_item_cellebrite(explicar=False):
         status = "Arquivo XML inconsistente"
         codigo_status = GAbortou
         if_print_ok(explicar, status)
-        return (codigo_status, status, {})
+        return (codigo_status, status, {}, erros, avisos)
 
     # Se está tudo certo, exibe o resultado dos dados coletados para laudo
     # se estiver no modo de explicação
@@ -1597,7 +1605,7 @@ def determinar_situacao_item_cellebrite(explicar=False):
     # Sucesso
     status = "Relatório Cellebrite armazenado com sucesso"
     codigo_status = GFinalizadoComSucesso
-    return (codigo_status, status, dados_relevantes)
+    return (codigo_status, status, dados_relevantes, erros, avisos)
 
 # Exibe situação do item
 # ----------------------------------------------------------------------------------------------------------------------
@@ -1610,7 +1618,7 @@ def _exibir_situacao_item():
     print()
     print_centralizado(" Verificando situação da tarefa corrente ")
 
-    (codigo_situacao_tarefa, texto_status, dados_relevantes) = determinar_situacao_item_cellebrite(explicar=True)
+    (codigo_situacao_tarefa, texto_status, dados_relevantes, erros, avisos) = determinar_situacao_item_cellebrite(explicar=True)
     print()
     print("- Situacao conforme pasta de destino: ", str(codigo_situacao_tarefa), "-", texto_status)
 
@@ -1741,10 +1749,10 @@ def exibir_situacao():
 
         # Calcula largura da última coluna, que é variável (item : Descrição)
         # Esta constantes de 60 é a soma de todos os campos e espaços antes do campo "Item : Descrição"
-        lid = Glargura_tela - 60
+        lid = Glargura_tela - 58
         lid_formatado = "%-" + str(lid) + "." + str(lid) + "s"
 
-        string_formatacao = '%2s %2s %6s %-30.30s %15s ' + lid_formatado
+        string_formatacao = '%2s %2s %6s %-30.30s %-13s ' + lid_formatado
         # var_dump(string_formatacao)
         # die('ponto1811')
 
