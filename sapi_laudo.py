@@ -81,9 +81,10 @@ Gmenu_comandos['cmd_navegacao'] = ["+", "-", "*ir"]
 Gmenu_comandos['cmd_item'] = ["*si"]
 Gmenu_comandos['cmd_geral'] = ["*sg", "*gl", "*tt", "*qq"]
 
-# Constantes para localização de seções do laudo
-GsapiQuesitos = 'sapiQuesitos'
-GsapiRespostas = 'sapiRespostas'
+# Constantes para localização de seções do laudo, que serão substituídos por blocos de parágrafos
+GsapiQuesitos   = 'sapiQuesitos'
+GsapiRespostas  = 'sapiRespostas'
+GsapiEntrega    = 'sapiEntrega'
 
 # Debug
 Gverbose = True  # Aumenta a exibição de detalhes
@@ -1237,7 +1238,7 @@ def criar_linha_matdevol(tr_modelo_linha_matdevol, mat):
     else:
         # === Material de DESTINO ===
         # Lista de itens é nula para material de destino
-        texto_itens="-"
+        texto_itens="n/a (destino)"
         # Exibe descrição e se existir o lacre
         descricao_ou_lacre = descricao
         if lacre is not None:
@@ -1278,7 +1279,7 @@ def odt_clonar_bloco(nome_bloco, dblocos):
 
     bloco = dblocos.get(nome_bloco.lower(), None)
     if (bloco is None):
-        erro_fatal("Erro: Não foi localizado bloco com nome[", nome_bloco, "] odt_clonar_bloco")
+        erro_fatal("Erro: Não foi localizado bloco com nome[", nome_bloco, "] odt_clonar_bloco (case insensitive)")
 
     # Monta lista de parágrafos para substituir
     # ----------------------------------------------------------
@@ -1506,6 +1507,7 @@ def determina_quesitacao(quesitos_respostas, dblocos):
     lista_par_respostas = odt_clonar_bloco(nome_bloco_respostas, dblocos)
 
     return lista_par_quesitos, lista_par_respostas
+
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -1738,7 +1740,7 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     # Substitui textos gerais do corpo do laudo
     # ------------------------------------------------------------------
     print()
-    print("Passo 5: Substituição de textos gerais do laudo")
+    print("Passo 4: Substituição de textos gerais do laudo")
     print("-----------------------------------------------")
 
     print("- Consultando dados da solicitação de exame no servidor.")
@@ -1747,11 +1749,10 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     # ------------------------------------------------------------------
     solicitacao = sapisrv_chamar_programa_sucesso_ok(
         programa="sapisrv_consultar_solicitacao_exame.php",
-        parametros={'codigo_solicitacao_exame_siscrim': GdadosGerais["codigo_solicitacao_exame_siscrim"]}
+        parametros={'codigo_solicitacao_exame_siscrim': GdadosGerais["codigo_solicitacao_exame_siscrim"]},
+        registrar_log=Gverbose
     )
 
-    #var_dump(solicitacao)
-    #die('ponto1636')
 
     # Processa auto
     auto_apreensao = solicitacao["auto_apreensao"]
@@ -1771,6 +1772,10 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     dict_software = dict()
     for dados_item in Gitens:
         item = dados_item['item']
+        # Despreza materiais de destino
+        if item=='destino':
+            continue
+
         print_tela_log("- Recuperando dados gerais de tarefas do item", item)
         recupera_dados_gerais_tarefas(dados_item, dict_software)
 
@@ -1795,6 +1800,54 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
             print("Falhou na substituição de '" + substituir + "'")
             return
 
+    # ------------------------------------------------------------------------------------------------------------------
+    # Substitui sapiEntrega
+    # ------------------------------------------------------------------------------------------------------------------
+    # yyyy
+
+    cv_sapi_entrega = odt_localiza_campo_variavel(lista_cv_office_text, GsapiEntrega)
+    if (cv_sapi_entrega is None):
+        print_tela_log(
+            "AVISO: No modelo não existe campo (", + GsapiEntrega + "). Substituição não será efetuada.")
+    else:
+        # --- Início substituição de sapiEntrega
+        var_dump(solicitacao)
+        #die('ponto1636')
+
+        # Ajusta metodo_entrega
+        metodo_entrega = solicitacao['dados_exame']['metodo_entrega']
+        # O método do banco vem no seguinte formato:
+        # entrega_DVD
+        # entrega_BLURAY
+        # entrega_midiadestino
+        # entrega_copia_pasta:sto_gtpi_ftk_entrega
+        # yyy
+        # Descartando o que vem depois de :
+        # Exemplo: entrega_copia_pasta:sto_gtpi_ftk_entrega => entrega_copia_pasta
+        partes = metodo_entrega.split(":")
+        metodo_entrega=partes[0]
+        # Remove o prefixo "entrega_"
+        metodo_entrega = metodo_entrega.replace("entrega_", "")
+        var_dump(metodo_entrega)
+
+        # Recupera bloco de parágrafos do método de entrega selecionado
+        nome_bloco_entrega = GsapiEntrega + metodo_entrega
+        var_dump(nome_bloco_entrega)
+
+        # Recupera listas de parágrafos das perguntas e respostas
+        lista_par_entrega = odt_clonar_bloco(nome_bloco_entrega, dblocos)
+        var_dump(lista_par_entrega)
+
+        # Substitui bloco de parágrafo
+        paragrafo_substituir_sapi_entrega = odt_busca_ancestral_com_tipo(cv_sapi_entrega['pai'], raiz=odt_raiz,
+                                                                           tipo='p')
+        var_dump(paragrafo_substituir_sapi_entrega)
+        if (paragrafo_substituir_sapi_entrega is None):
+            print_tela_log("ERRO: Não encontrado parágrafo onde se localiza '" + GsapiEntrega + "'")
+            return
+
+        odt_substituir_paragrafo_por_lista(paragrafo_substituir_sapi_entrega, odt_raiz, lista_par_entrega)
+        # --- Fim substituição de sapiEntrega
 
     # ------------------------------------------------------------------------------------------------------------------
     # ------------------------------------------------------------------------------------------------------------------
@@ -1803,7 +1856,7 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     # ------------------------------------------------------------------------------------------------------------------
     # ------------------------------------------------------------------------------------------------------------------
     print()
-    print("Passo 8 : Montagem de tabelas de materiais devolvidos")
+    print("Passo 5 : Montagem de tabelas de materiais devolvidos")
     print("-----------------------------------------------------")
 
     # Procura tabela de materiais devolvidos
@@ -1855,6 +1908,7 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     posicao_inserir_tab_matdevol = odt_determina_posicao_pai_filho(tabela_matdevol, tr_modelo_linha_matdevol)
 
     dic_mat=dict()
+    qtd_destino=0
     # Processa itens, agrupando dados por materiais
     for dados_item in Gitens:
 
@@ -1862,6 +1916,9 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
         # yyy
         #var_dump(dados_item)
         #die('ponto1820')
+
+        if item=='destino':
+            qtd_destino += 1
 
         material=dados_item['material']
 
@@ -1914,6 +1971,23 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     # Remove linha de modelo da tabela
     tabela_matdevol.remove(tr_modelo_linha_matdevol)
 
+    # Verifica se método de entrega está coerente com materiais de destino do laudo
+    if metodo_entrega=='midiadestino':
+        if qtd_destino==0:
+            print_centralizado(" ERRO ")
+            print("- Você selecionou como método de entrega 'Material de destino'")
+            print("- Contudo, não foi localizado nenhum material de destino na lista de materiais devolvidos")
+            print("- Revise o método de entrega e/ou material de destino vinculado ao laudo")
+            return
+
+    if metodo_entrega != 'midiadestino':
+        if qtd_destino > 0:
+            print_centralizado(" ERRO ")
+            print("- Neste laudo existe material de destino")
+            print("- Contudo, o método de entrega selecionado não é através de 'Material de destino'")
+            print("- Contudo, não foi localizado nenhum material de destino na lista de materiais devolvidos")
+            print("- Revise o método de entrega e/ou material de destino vinculado ao laudo")
+            return
 
 
     # ------------------------------------------------------------------------------------------------------------------
@@ -1978,6 +2052,9 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     for dados_item in Gitens:
 
         item = dados_item['item']
+        # Despreza materiais de destino
+        if item=='destino':
+            continue
 
         print_tela_log("- Tabela de hashes, processando item ", item)
 
@@ -1999,7 +2076,7 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     # ------------------------------------------------------------------------------------------------------------------
     # ------------------------------------------------------------------------------------------------------------------
     print()
-    print("Passo 5 : Montagem de tabelas de materiais")
+    print("Passo 7 : Montagem de tabelas de materiais")
     print("------------------------------------------")
 
     # Procura tabela de materiais
@@ -2078,6 +2155,11 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
         q += 1
 
         item = dados_item['item']
+        # Despreza materiais de destino
+        if item=='destino':
+            continue
+
+
         #var_dump(dadosItem)
         #die('ponto1863')
         print_tela_log("- Tabela de materiais, processando item ", item)
@@ -2099,7 +2181,7 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     # ------------------------------------------------------------------------------------------------------------------
     # ------------------------------------------------------------------------------------------------------------------
     print()
-    print("Passo 7 : Procedimentos finais")
+    print("Passo 8 : Procedimentos finais")
     print("------------------------------")
 
     # Gera novo documento e encerra
@@ -2245,11 +2327,33 @@ def _gerar_laudo():
         return
 
     # ------------------------------------------------------------------------------------------------------------------
+    # Verifica dados básicos do exame
+    # ------------------------------------------------------------------------------------------------------------------
+    print("- Verificando dados gerais do exame.")
+
+    # Recupera dados gerais da solicitação de exame
+    # ------------------------------------------------------------------
+    solicitacao = sapisrv_chamar_programa_sucesso_ok(
+        programa="sapisrv_consultar_solicitacao_exame.php",
+        parametros={'codigo_solicitacao_exame_siscrim': GdadosGerais["codigo_solicitacao_exame_siscrim"]},
+        registrar_log=Gverbose
+    )
+
+    # Método de entrega
+    metodo_entrega = solicitacao['dados_exame']['metodo_entrega']
+
+    if metodo_entrega=='indefinido':
+        print_centralizado(" ERRO ")
+        print("- Antes de gerar o laudo você deve definir o método de entrega (mídia óptica, cópia storage, etc).")
+        print("- Configure no SETEC3 e em seguida retorne a esta opção.")
+        return
+
+    # ------------------------------------------------------------------------------------------------------------------
     # Seleciona o modelo do laudo
     # ------------------------------------------------------------------------------------------------------------------
 
     print()
-    print("Passo1: Selecione arquivo de laudo (modelo)")
+    print("Passo 1: Selecione arquivo de laudo (modelo)")
     print("-------------------------------------------")
     print("- Caso ainda não tenha feito, entre no SisCrim e gere um laudo (modelo) padrão SAPI.")
     print("- Na janela gráfica que foi aberta, selecione o arquivo .ODT correspodente")
@@ -2291,7 +2395,7 @@ def exibir_situacao():
 
     # Calcula largura da última coluna, que é variável (item : Descrição)
     # A constante na subtração é a soma de todos os campos e espaços antes da última coluna
-    lid = Glargura_tela - 34
+    lid = Glargura_tela - 28
     lid_formatado = "%-" + str(lid) + "." + str(lid) + "s"
 
     string_formatacao = '%2s %2s %-13s %-6s ' + lid_formatado
