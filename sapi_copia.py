@@ -23,7 +23,7 @@ import shutil
 import time
 import socket
 
-from sapilib_0_5_4 import *
+from sapilib_0_6 import *
 
 # =======================================================================
 # GLOBAIS
@@ -38,7 +38,7 @@ Gcd_tarefa_atual = None
 Garg_tipo = sys.argv[1]
 Gnome_agente = socket.gethostbyaddr(socket.gethostname())[0]
 Gdebug = False
-
+sapisrv_inicializar("sapi_copia", Gversao)
 
 # Faz uma pausa por alguns segundos
 # Dependendo de parâmetro, ignora a pausa
@@ -56,14 +56,14 @@ def funcao_copia_com_status(src, dst):
     global Gtempo_ultimo_status_update
     if time.time() > Gtempo_ultimo_status_update:
         Gtempo_ultimo_status_update += Gtempo_atualizacao_progresso
-        atualizar_status_tarefa(Gcd_tarefa_atual, GEmAndamento, "Copiando arquivo " + src)
+        sapisrv_atualizar_status_tarefa(Gcd_tarefa_atual, GEmAndamento, "Copiando arquivo " + src)
     shutil.copy2(src, dst)
 
 
 def atualizar_tarefa_com_espera(cd_tarefa, cd_situacao_tarefa, texto_status):
     print_log_dual("Atualizando tarefa " + texto_status)  # alterar para incluir cd_tarefa
     if not Gdebug:
-        while not atualizar_status_tarefa(cd_tarefa,
+        while not sapisrv_atualizar_status_tarefa(cd_tarefa,
                                           cd_situacao_tarefa,
                                           status=texto_status
                                           ):
@@ -88,7 +88,7 @@ def copia_com_status(file_size, fsrc, fdst, length=16 * 1024):
         if time.time() > Gtempo_ultimo_status_update:
             Gtempo_ultimo_status_update += Gtempo_atualizacao_progresso
             if not Gdebug:
-                atualizar_status_tarefa(Gcd_tarefa_atual, GEmAndamento, "Cópia em andamento: Copiados %s - %.1f%%" % (
+                sapisrv_atualizar_status_tarefa(Gcd_tarefa_atual, GEmAndamento, "Cópia em andamento: Copiados %s - %.1f%%" % (
                     formata_tamanho(bytes_lidos), bytes_lidos * 100 / file_size))
         if not buf:
             break
@@ -102,7 +102,7 @@ def copiar_arquivo_com_status(src, dst):
     mensagem_tamanho = "Copiando arquivo " + src + " com tamanho de " + formata_tamanho(file_size)
     print_log_dual(mensagem_tamanho)
     if not Gdebug:
-        atualizar_status_tarefa(Gcd_tarefa_atual, GEmAndamento, mensagem_tamanho)
+        sapisrv_atualizar_status_tarefa(Gcd_tarefa_atual, GEmAndamento, mensagem_tamanho)
     with open(src, 'rb') as fsrc:
         with open(dst, 'wb') as fdst:
             copia_com_status(file_size, fsrc, fdst)

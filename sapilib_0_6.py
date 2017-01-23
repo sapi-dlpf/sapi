@@ -65,6 +65,9 @@ import urllib.request
 import subprocess
 import http.client
 import socket
+import tkinter
+from tkinter import filedialog
+
 
 # ---------- Constantes (na realidade variáveis Globais) ------------
 Gversao_sapilib = "0.6"
@@ -108,7 +111,7 @@ Gparini = dict()  # Parâmetros de inicialização
 
 
 # =====================================================================================================================
-# Funções de ALTO NÍVEL (sapisrv_*)
+# Funções de ALTO NÍVEL relacionadas com acesso ao servidor (sapisrv_*)
 #
 # Todas as funções de alto nível possuem prefixo 'sapisrv'
 #
@@ -345,8 +348,25 @@ def sapisrv_chamar_programa(programa, parametros, abortar_insucesso=False, regis
     else:
         erro_fatal("sapisrv_chamar_programa: Método inválido: ", metodo)
 
+# Invoca Sapi server (sapisrv), contando com sucesso.
+# Se ocorrer uma exceção, será exibido mensagem e abortado.
+# Se o servidor responder com 'Sucesso=0', será exibo mensagem e aborta.
+# Importante: 'Sucesso=0' não é necessariamente um erro. Pode ser uma condição normal, se os parâmetros ainda não foram
+# validados, ou seja houve alguma mudança na situação dos dados no servidor.
+# Utilize esta chamada apenas quando existe certeza que o resultado tem que SUCESSO
+# ----------------------------------------------------------------------------------------------------------------------
+def sapisrv_chamar_programa_sucesso_ok(programa, parametros, registrar_log=False):
+
+    (sucesso, msg_erro, dados) = sapisrv_chamar_programa(
+        programa, parametros, abortar_insucesso=True, registrar_log=registrar_log)
+    if (not sucesso):
+        erro_fatal("Resposta inesperada para ", programa, " => ", msg_erro)
+
+    return dados
+
 
 # Retorna o nome do ambiente de execução
+# ----------------------------------------------------------------------------------------------------------------------
 def obter_ambiente():
     return _obter_parini('nome_ambiente')
 
@@ -918,7 +938,7 @@ def decompoe_caminho(caminho):
     partes = caminho.split("/")
 
     nome_arquivo = partes.pop()
-    pasta = "/".join(partes)
+    pasta = "/".join(partes) + "/"
 
     return (pasta, nome_arquivo)
 
@@ -1114,6 +1134,200 @@ def acesso_storage_windows(conf_storage, utilizar_ip=False):
 
     # Sucesso: Montado e confirmado ok
     return True, ponto_montagem, ""
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Funções relacinadas com a interface em linha de comando (console)
+# Possuem prefixo console_
+# ---------------------------------------------------------------------------------------------------------------------
+
+# Chama função geral, e intercepta CTR-C
+# ----------------------------------------------------------------------------------------------------------------------
+def console_executar_tratar_ctrc(funcao, *args):
+    try:
+        return(funcao( *args ))
+    except KeyboardInterrupt:
+        print()
+        print("Operação interrompida pelo usuário")
+        return False
+
+
+# Chama função de menu e intercepta CTR-C, gerando comando de encerramento normal (*qq)
+# ----------------------------------------------------------------------------------------------------------------------
+def console_receber_comando(menu_comando):
+    try:
+        return _receber_comando(menu_comando)
+    except KeyboardInterrupt:
+        print("Para encerrar, utilize comando *qq")
+        return (None, "")
+        #return ("*qq", "")
+
+
+# Recebe e confere a validade de um comando de usuário
+# ----------------------------------------------------------------------------------------------------------------------
+def _receber_comando(menu_comando):
+
+    comandos = menu_comando['comandos']
+    cmd_navegacao = menu_comando['cmd_navegacao']
+    cmd_item = menu_comando['cmd_item']
+    cmd_geral = menu_comando['cmd_geral']
+
+    comando_ok = False
+    comando_recebido = ""
+    argumento_recebido = ""
+    while not comando_ok:
+        print()
+        entrada = input("Comando (?=ajuda): ")
+        entrada = entrada.lower().strip()
+        lista_partes_comando = entrada.split(" ", 2)
+        comando_recebido = ""
+        if (len(lista_partes_comando) >= 1):
+            comando_recebido = lista_partes_comando[0]
+        argumento_recebido = ""
+        if (len(lista_partes_comando) >= 2):
+            argumento_recebido = lista_partes_comando[1]
+
+        if comando_recebido in comandos:
+            # Se está na lista de comandos, ok
+            comando_ok = True
+        elif comando_recebido.isdigit():
+            # um número é um comando válido
+            comando_ok = True
+        elif (comando_recebido == "H" or comando_recebido == "?"):
+            # Exibe ajuda para comando
+            print()
+            print("Navegacao:")
+            print("----------")
+            print('<ENTER> : Exibe lista de tarefas atuais (sem Refresh no servidor)')
+            for key in cmd_navegacao:
+                print(key.upper(), " : ", comandos[key])
+            print()
+
+            print("Processamento da tarefa corrente (marcada com =>):")
+            print("--------------------------------------------------")
+            for key in cmd_item:
+                print(key.upper(), " : ", comandos[key])
+            print()
+
+            print("Comandos gerais:")
+            print("----------------")
+            for key in cmd_geral:
+                print(key.upper(), " : ", comandos[key])
+        elif (comando_recebido == ""):
+            # print("Para ajuda, digitar comando 'h' ou '?'")
+            return ("", "")
+        else:
+            if (comando_recebido != ""):
+                print("Comando (" + comando_recebido + ") inválido")
+                print("Para ajuda, digitar comando 'h' ou '?'")
+
+    return (comando_recebido, argumento_recebido)
+
+
+
+# Sanitiza strings em UTF8, substituindo caracteres não suportados pela codepage da console do Windows por '?'
+# Normalmente a codepage é a cp850 (Western Latin)
+# Retorna a string sanitizada e a quantidade de elementos que forma recodificados
+def console_sanitiza_utf8(dado):
+    #
+    codepage = sys.stdout.encoding
+
+    # String => ajusta, trocando caracteres não suportados por '?'
+    if isinstance(dado, str):
+        # Isto aqui é um truque sujo, para resolver o problema de exibir caracteres UTF8 em console do Windows
+        # com configuração cp850
+        saida = dado.encode(codepage, 'replace').decode(codepage)
+        # Verifica se a recodificação introduziu alguma diferença
+        qtd = 0
+        if saida != dado:
+            qtd = 1
+        return (saida, qtd)
+
+    # Dicionário,
+    if isinstance(dado, dict):
+        saida = dict()
+        qtd = 0
+        for k in dado:
+            (saida[k], q) = console_sanitiza_utf8(dado[k])
+            qtd += q
+        return (saida, qtd)
+
+    # Lista
+    if isinstance(dado, list):
+        saida = list()
+        qtd = 0
+        for v in dado:
+            (novo_valor, q) = console_sanitiza_utf8(v)
+            saida.append(q)
+            qtd += q
+        return (saida, qtd)
+
+    # Qualquer outro tipo de dado (numérico por exemplo), retorna o próprio valor
+    # Todo: Será que tem algum outro tipo de dado que precisa tratamento!?...esperar dar erro
+    saida = dado
+    return (saida, 0)
+
+
+# Faz dump formatado de um objeto qualquer na console
+# --------------------------------------------------------------------------------
+def console_dump_formatado(d, largura_tela=129):
+
+    # Sanitiza, para exibição na console
+    (d_sanitizado, qtd_alteracoes) = console_sanitiza_utf8(d)
+
+    # Exibe formatado
+    pp = pprint.PrettyPrinter(indent=4, width=largura_tela)
+    pp.pprint(d_sanitizado)
+
+    if qtd_alteracoes > 0:
+        print()
+        print("#Aviso: Para viabilizar a exibição acima na console, foram efetuadas", qtd_alteracoes,
+              "substituições de caracteres especiais por '?'")
+
+    return
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Classe para tratamento de janelas gráficas
+# ---------------------------------------------------------------------------------------------------------------------
+class JanelaTk(tkinter.Frame):
+    def __init__(self, master=None):
+        super().__init__(master)
+        self.pack()
+
+    def selecionar_arquivo(self, filetypes=None):
+
+        if filetypes is None:
+            filetypes = [('All files', '*.*'),
+                          ('ODT files', '*.odt'),
+                          ('CSV files', '*.csv')]
+
+        self.file_name = tkinter.filedialog.askopenfilename(filetypes=filetypes)
+
+        # self.file_name = tkinter.filedialog.askopenfilename(filetypes=([('All files', '*.*'),
+        #                                                                 ('ODT files', '*.odt'),
+        #                                                                 ('CSV files', '*.csv')]))
+        return self.file_name
+
+    def selecionar_pasta(self):
+        self.directory = tkinter.filedialog.askdirectory()
+        return self.directory
+
+
+def tk_get_clipboard():
+    try:
+        root = tkinter.Tk()
+        root.withdraw()
+        clip = root.clipboard_get()
+        root.destroy()
+    except BaseException as e:
+        print("Nao foi possivel recuperado dados do clipboard: ", e)
+        clip = ""
+
+    return clip
+
+
+
+
 
 # *********************************************************************************************************************
 # *********************************************************************************************************************

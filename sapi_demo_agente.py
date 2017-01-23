@@ -94,6 +94,7 @@ from sapilib_0_6 import *
 # Dependendo de parâmetro, ignora a pausa 
 def dormir(tempo):
     if (not GmodoInstantaneo):
+        print_log_dual("Dormindo por ", tempo, "segundos")
         time.sleep(tempo)
     else:
         print_log_dual("Sem pausa...modo instantâneo em demonstração")
