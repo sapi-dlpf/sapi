@@ -51,7 +51,7 @@ if sys.version_info <= (3, 0):
 # =======================================================================
 # GLOBAIS
 # =======================================================================
-Gprograma = "sapi_iped"
+Gprograma = "sapi_iped.py"
 Gversao = "1.0"
 
 # Controle de tempos/pausas
@@ -60,6 +60,8 @@ GdormirSemServico = 10 #60
 GmodoInstantaneo=False
 #GmodoInstantaneo = True
 
+#
+Gconfiguracao = dict()
 
 
 # **********************************************************************
@@ -68,13 +70,11 @@ GmodoInstantaneo=False
 
 # Para código produtivo, o comando abaixo deve ser substituído pelo
 # código integral de sapi.py, para evitar dependência
-from sapilib_0_6 import *
-
+from sapilib_0_7 import *
 
 # **********************************************************************
 # PRODUCAO 
 # **********************************************************************
-
 
 
 # ======================================================================
@@ -84,11 +84,11 @@ from sapilib_0_6 import *
 # Faz um pausa por alguns segundos
 # Dependendo de parâmetro, ignora a pausa
 def dormir(tempo):
+    print_log_dual("Dormindo por ", tempo, " segundos")
     if (not GmodoInstantaneo):
-        print_log_dual("Dormindo por ", tempo, " segundos")
         time.sleep(tempo)
     else:
-        print_log_dual("Sem pausa...modo instantâneo em demonstração")
+        print_log_dual("Sem pausa...deve ser usado apenas para debug...modo instantâneo (ver GmodoInstantaneo)")
 
 # Inicialização do agente
 # Procedimento de inicialização
@@ -100,41 +100,31 @@ def dormir(tempo):
 # ---------------------------------------------------------------------------------------------------------------------
 def inicializar():
 
+    global Gconfiguracao
+
     # Fica em loop até obter alguma conclusão sobre a inicialização,
     # pois o servidor pode momentaneamente não estar disponível (problema de rede por exemplo)
     while True:
 
         try:
+            print_log_dual("Efetuando inicialização")
             sapisrv_inicializar(Gprograma, Gversao)  # Outros parâmetros: nome_agente='xxxx', ambiente='desenv'
+            print_log_dual("Inicialização efetuada")
+
+            # Obtendo arquivo de configuração
+            print_log_dual("Obtendo configuração")
+            Gconfiguracao=sapisrv_obter_configuracao_cliente(Gprograma)
+            print_log_dual("Configuração obtida")
+            print_log_dual(Gconfiguracao)
 
             # Tudo certo
-            print_log_dual("Inicialização efetuada")
             break
 
-        except SapiExceptionFalhaComunicacao as e:
-            # Aborta
-            print_log_dual("Falhou comunicação com servidor durante inicialização (Rede ok?)", e)
+        except BaseException as e:
+            # Não importa a falha...irá ficar tentanto eternamente
+            print_log_dual("Falhou durante procedimento iniciais: ", e)
             dormir(GdormirSemServico)
             print_log_dual("Tentando inicialização novamente")
-            continue
-
-        except SapiExceptionProgramaDesautorizado as e:
-            # Aborta
-            print_log_dual("Programa/versão não foi autorizado pelo servidor: ", e)
-            # Neste caso, tem que encerrar o programa, para se auto-atualizar, ou algo similar
-            sys.exit(1)
-
-        except SapiExceptionAgenteDesautorizado as e:
-            # Aborta
-            print_log_dual("Agente (máquina) desautorizado: ", e)
-            print_log_dual("Se esta é uma nova máquina, efetue o registro da mesma no sistema")
-            sys.exit(1)
-
-        except BaseException as e:
-            # Alguma outra coisa...não deveria ocorrer, mas se ocorrer é melhor abortar aqui
-            print_log_dual("Erro inesperado e fatal na inicialização: " + str(e))
-            print("Para mais detalhes consulte o arquivo de log (sapi_log.txt)")
-            sys.exit(1)
 
 
 # Monta lista de tipos de IPED que serão executados
@@ -154,30 +144,120 @@ def montar_lista_tipos_iped():
     iped["pasta_programa"]='C:\\iped_ocr_3_11';
     lista.append(iped)
 
-
     return lista
+
+
+# Tenta obter uma tarefa com tipo contido em lista_tipo, para o storage (se for indicado)
+def solicita_tarefas(lista_tipos, storage=None):
+
+    for i in lista_tipos:
+        # Tipo de tarefa
+        tipo=i["tipo"]
+
+        # Registra em log
+        log="Solicitando tarefa com tipo=[" + tipo + "]"
+        if storage is not None:
+            log += " para storage =[" + storage + "]"
+        else:
+            log += " para qualquer storage"
+        print_log_dual(log)
+
+        # Requisita tarefa
+        (disponivel, tarefa) = sapisrv_obter_iniciar_tarefa(tipo, storage=storage)
+        if disponivel:
+            print_log("Ok, tarefa retornada")
+            return tarefa
+
+    print_log("Nenhuma tarefa retornada")
+    return None
+
+
+
+# Atualiza status no servidor
+# fica em loop até conseguir
+def atualizar_status_servidor_loop(codigo_tarefa, codigo_situacao_tarefa, texto_status, dados_relevantes=None):
+
+    # Se a atualização falhar, fica tentando até conseguir
+    # Se for problema transiente, vai resolver
+    # Caso contrário, algum humano irá mais cedo ou mais tarde intervir
+    while not sapisrv_atualizar_status_tarefa(codigo_tarefa=codigo_tarefa,
+                                              codigo_situacao_tarefa=codigo_situacao_tarefa,
+                                              status=texto_status,
+                                              dados_relevantes=dados_relevantes
+                                              ):
+        print_log_dual("Falhou atualização de status para tarefa [",codigo_tarefa,"]. Tentando novamente")
+        dormir(60)  # Tenta novamente em 1 minuto
+
+    #Ok, conseguiu atualizar
+    print_log("Tarefa [",codigo_tarefa,"]: Situação atualizada para [",codigo_situacao_tarefa,"] com texto [",texto_status,"]")
+
+# Devolve ao servidor uma tarefa
+def devolver(codigo_tarefa, texto_status):
+
+    # Registra em log
+    print_log_dual("Devolvendo tarefa [",codigo_tarefa,"] para servidor: ",texto_status)
+
+    # Atualiza status no servidor
+    codigo_situacao_tarefa = GAguardandoProcessamento
+    atualizar_status_servidor_loop(codigo_tarefa, codigo_situacao_tarefa, texto_status)
+
+    # Ok
+    print_log_dual("Tarefa devolvida")
+
+
+# Aborta tarefa
+def abortar(codigo_tarefa, texto_status):
+
+    # Registra em log
+    print_log_dual("Abortando execução da tarefa [",codigo_tarefa,"]: ",texto_status)
+
+    # Atualiza status no servidor
+    codigo_situacao_tarefa = GAbortou
+    atualizar_status_servidor_loop(codigo_tarefa, codigo_situacao_tarefa, texto_status)
+
+
+    # Ok
+    print_log_dual("Execução da tarefa abortada")
+
+
+# Tratamento para erro no cliente
+def reportar_erro(erro):
+    try:
+        # Registra no log (local)
+        print_log_dual("ERRO: ",erro)
+
+        # Reportanto ao servidor, para registrar no log do servidor
+        sapisrv_reportar_erro_cliente(erro)
+        print_log_dual("Erro reportado ao servidor")
+
+    except BaseException as e:
+        # Se não conseguiu reportar ao servidor, deixa para lá
+        # Afinal, já são dois erros seguidos (pode ser que tenha perdido a rede)
+        print_log_dual("Não foi possível reportar o erro ao servidor: ", e)
+
 
 # Fica em loop de execução de tarefa
 # Encerra apenas se houver algum erro que impeça o prosseguimento
 def executar_uma_tarefa(lista_ipeds):
 
-    # Todo: Fazer loop para os diversos tipos de IPED aqui
-    for i in lista_ipeds:
-        #var_dump(i)
-        #die('ponto162')
-        tipo_iped=i["tipo"]
-        pasta_programa=i["pasta_programa"]
+    # Solicita tarefa, dependendo da configuração de storage do agente
+    outros_storages = True
+    tarefa = None
+    if Gconfiguracao["storage_unico"]!="":
+        print_log_dual("Este agente trabalha apenas com storage=",Gconfiguracao["storage_unico"])
+        tarefa=solicita_tarefas(lista_ipeds, Gconfiguracao["storage_unico"])
+        outros_storages=False
+    elif Gconfiguracao["storage_preferencial"]!="":
+        print_log_dual("Este agente trabalha com storage preferencial=",Gconfiguracao["storage_preferencial"])
+        tarefa=solicita_tarefas(lista_ipeds, Gconfiguracao["storage_preferencial"])
+        outros_storages=True
+    else:
+        print_log_dual("Este agente trabalha com qualquer storage")
+        outros_storages=True
 
-        # Requisita uma tarefa
-        # Existem vários parâmetros opcionais (storage, tamanhos), ver funçao.
-        print_log_dual("Solicitando tarefa ao servidor para ", tipo_iped)
-        # Todo: Pegar o hostname da máquina e utilizar como storage...isto faz com que o sapi_iped só atue no storage aonde estiver instalado
-        # Todo: Depois isto tem que se tornar configurável
-        (disponivel, tarefa) = sapisrv_obter_iniciar_tarefa(tipo_iped)
-
-        if disponivel:
-            # Se já encontrou um tarefa, interrompe
-            break;
+    if outros_storages:
+        # Solicita tarefa para qualquer storage
+        tarefa=solicita_tarefas(lista_ipeds)
 
     # Para a versão 2.0, será implementado também um mecanismo de retomada, utilizado pelo agente para retomar
     # tarefas interrompidas (por falta de energia por exemplo)
@@ -185,36 +265,83 @@ def executar_uma_tarefa(lista_ipeds):
     # (continuar, ou reinicar se for o caso)
 
     # Se não tem nenhuma tarefa disponível, não tem o que fazer
-    if not disponivel:
-        print_log_dual("Servidor informou que não existe tarefa para processamento para este programa")
+    if tarefa is None:
+        print_log_dual("Nenhuma tarefa fornecida. Nada a fazer.")
         return
 
     # Ok, temos trabalho a fazer
     # ------------------------------------------------------------------
-
-    # O sistema retorna um conjunto bastante amplo de dados
-    # Os mais relevantes estão aqui
     codigo_tarefa = tarefa["codigo_tarefa"]  # Identificador único da tarefa
-    caminho_origem = tarefa["caminho_origem"]
-    caminho_destino = tarefa["caminho_destino"]
+    # Verifica se é uma retomada de tarefa, ou seja,
+    # uma tarefa que foi iniciada mas que não foi concluída
+    retomada=False
+    if tarefa["executando"]=='t':
+        retomada=True
 
-    print_log_dual("Processando tarefa: ", codigo_tarefa)
+    # Indicativo de início
+    if retomada:
+        print_log_dual("Retomando tarefa interrompida: ", codigo_tarefa)
+    else:
+        print_log_dual("Iniciando tarefa: ", codigo_tarefa)
 
     # Para ver o conjunto completo, descomentar a linha abaixo
-    var_dump(tarefa)
-    die('ponto200')
+    # var_dump(Gconfiguracao)
+    #var_dump(tarefa)
+
+    # Teste de devolução
+    #texto_status="teste de devolução"
+    #devolver(codigo_tarefa, texto_status)
+
+
+    # Teste abortar
+    #texto_status="teste de abotar"
+    #abortar(codigo_tarefa, texto_status)
+
+    die('ponto298')
 
     # Montar storage
     # ------------------------------------------------------------------
-    # Teria que montar o storage (caso a montagem seja dinâmica)
-    # Os dados do storage estão em tarefa["dados_storage"]
+    # Confirma que tem acesso ao storage escolhido
+    (sucesso, ponto_montagem, erro) = acesso_storage_windows(tarefa["dados_storage"])
+    if not sucesso:
+        erro = "Acesso ao storage [" + ponto_montagem + "] falhou"
+        # Talvez seja um problema de rede (trasiente)
+        reportar_erro(erro)
+        print_log_dual("Problema insolúvel neste momento, mas possivelmente transiente")
+        # Tarefa não foi iniciada, então pode ser devolvida
+        texto_status="Agente sem condição de executar tarefa. Devolvida ao servidor"
+        print_log_dual(texto_status)
+        # Abortando tarefa, pois tem algo errado aqui.
+        # Não adianta ficar retentando nesta condição
+        devolver(codigo_tarefa, texto_status)
+        print_log("Dormindo por um bom tempo, para dar oportunidade de outro agente pegar tarefa")
+        dormir(300)
+
+        return
+
+
 
     # Conferir se pasta/arquivo de origem está ok
     # ------------------------------------------------------------------
     # O caminho de origem pode indicar um arquivo (.E01) ou uma pasta
     # Neste ponto, seria importante verificar se esta origem está ok
     # Ou seja, se existe o arquivo ou pasta de origem
+    caminho_origem = ponto_montagem + tarefa["caminho_origem"]
     print_log_dual("Caminho de origem (", caminho_origem, "): localizado")
+
+    if os.path.isfile(caminho_origem):
+        print_log_dual("Arquivo de origem encontrado no storage")
+    elif os.path.exists(caminho_origem):
+        print_log_dual("Pasta de origem encontrada no storage")
+    else:
+        # Se não existe nem arquivo nem pasta, tem algo muito errado aqui
+        # Aborta esta tarefa
+        texto_status="Caminho de origem não encontrado no storage"
+        print_log_dual(texto_status)
+        # Abortando tarefa, pois tem algo errado aqui.
+        # Não adianta ficar retentando nesta condição
+        abortar(codigo_tarefa, texto_status)
+        return
 
     # Criar pasta de destino
     # ------------------------------------------------------------------
@@ -222,7 +349,10 @@ def executar_uma_tarefa(lista_ipeds):
     # Se a pasta de destino já existe...opa, pode ter algo errado.
     # Neste cenário, teria que conferir se a pasta não tem nada
     # de útil (indicando alguma concorrência....ou processo abortado)
+    caminho_destino = ponto_montagem + tarefa["caminho_destino"]
     print_log_dual("Caminho de destino (", caminho_destino, "): Criado")
+
+    die('ponto267')
 
     # Fork para executar e esperar resposta
     # ------------------------------------------------------------------
@@ -365,6 +495,9 @@ if __name__ == '__main__':
 
     # testes gerais
     # die('ponto2061')
+
+    # Todas as mensagens do log serão exibidas também na tela
+    ligar_log_dual()
 
     # Cabeçalho inicial do programa
     # ------------------------------------------------------------------------------------------------------------------
