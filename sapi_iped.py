@@ -31,6 +31,7 @@ try:
     import time
     import random
     import hashlib
+    import shutil
 except ImportError:
     print("Falha na importação de módulos")
     # Não precisa nenhum tratamento adicional,
@@ -102,6 +103,8 @@ def inicializar():
 
     global Gconfiguracao
 
+    lista_ipeds_ok = list()
+
     # Fica em loop até obter alguma conclusão sobre a inicialização,
     # pois o servidor pode momentaneamente não estar disponível (problema de rede por exemplo)
     while True:
@@ -117,42 +120,42 @@ def inicializar():
             print_log_dual("Configuração obtida")
             print_log_dual(Gconfiguracao)
 
-            # Tudo certo
-            break
-
-        except BaseException as e:
+        except Exception as e:
             # Não importa a falha...irá ficar tentanto eternamente
-            print_log_dual("Falhou durante procedimento iniciais: ", e)
+            print_log_dual("Falhou durante procedimento iniciais: ", str(e))
             dormir(GdormirSemServico)
             print_log_dual("Tentando inicialização novamente")
 
+        # Verifica se máquina corresponde à configuração recebida, ou seja, se todos os programas de IPED
+        # que deveriam estar instalados realmente estão instalados
+        for t in Gconfiguracao["tipo_tarefa"]:
+            tipo=Gconfiguracao["tipo_tarefa"][t]
+            pasta_programa=tipo["pasta_programa"]
+            if os.path.exists(pasta_programa):
+                print_log_dual("Pasta de iped ", pasta_programa, " localizada")
+                lista_ipeds_ok.append(t)
+            else:
+                erro="Não foi localizada pasta de iped: " + pasta_programa
+                reportar_erro(erro)
 
-# Monta lista de tipos de IPED que serão executados
-# Verifica se a instalação para cada tipo está ok
-def montar_lista_tipos_iped():
-    lista=list()
+        if len(lista_ipeds_ok)==0:
+            erro = "Nenhum IPED habilitado nesta máquina"
+            reportar_erro(erro)
+            # Vamos dormir por um bom tempo (60 minutos), pois este erro não deve ser corrigido tão cedo
+            dormir(60*60)
+            continue
+        else:
+            # Tudo bem, prossegue (mesmo que nem todos os ipeds estejam ativos)
+            break
 
-    # IPED básico
-    iped=dict()
-    iped["tipo"]='iped-basico';
-    iped["pasta_programa"]='C:\\iped_3_11';
-    lista.append(iped)
-
-    # IPED com OCR
-    iped=dict()
-    iped["tipo"]='iped-ocr';
-    iped["pasta_programa"]='C:\\iped_ocr_3_11';
-    lista.append(iped)
-
-    return lista
+    # Retorna a lista de opções de execução de iped disponíveis nesta máquina
+    return lista_ipeds_ok
 
 
 # Tenta obter uma tarefa com tipo contido em lista_tipo, para o storage (se for indicado)
 def solicita_tarefas(lista_tipos, storage=None):
 
-    for i in lista_tipos:
-        # Tipo de tarefa
-        tipo=i["tipo"]
+    for tipo in lista_tipos:
 
         # Registra em log
         log="Solicitando tarefa com tipo=[" + tipo + "]"
@@ -165,10 +168,10 @@ def solicita_tarefas(lista_tipos, storage=None):
         # Requisita tarefa
         (disponivel, tarefa) = sapisrv_obter_iniciar_tarefa(tipo, storage=storage)
         if disponivel:
-            print_log("Ok, tarefa retornada")
+            print_log("Tarefa disponível")
             return tarefa
 
-    print_log("Nenhuma tarefa retornada")
+    print_log("Nenhuma tarefa disponível")
     return None
 
 
@@ -204,6 +207,11 @@ def devolver(codigo_tarefa, texto_status):
     # Ok
     print_log_dual("Tarefa devolvida")
 
+    # Para garantir que a tarefa devolvida não será pega por este mesmo agente logo em seguida,
+    # vamos dormir por um tempo longo
+    print_log("Dormindo por um bom tempo, para dar oportunidade de outro agente pegar tarefa")
+    dormir(3*60)  # Tenta novamente em 1 minuto
+
 
 # Aborta tarefa
 def abortar(codigo_tarefa, texto_status):
@@ -214,7 +222,6 @@ def abortar(codigo_tarefa, texto_status):
     # Atualiza status no servidor
     codigo_situacao_tarefa = GAbortou
     atualizar_status_servidor_loop(codigo_tarefa, codigo_situacao_tarefa, texto_status)
-
 
     # Ok
     print_log_dual("Execução da tarefa abortada")
@@ -230,10 +237,10 @@ def reportar_erro(erro):
         sapisrv_reportar_erro_cliente(erro)
         print_log_dual("Erro reportado ao servidor")
 
-    except BaseException as e:
+    except Exception as e:
         # Se não conseguiu reportar ao servidor, deixa para lá
         # Afinal, já são dois erros seguidos (pode ser que tenha perdido a rede)
-        print_log_dual("Não foi possível reportar o erro ao servidor: ", e)
+        print_log_dual("Não foi possível reportar o erro ao servidor: ", str(e))
 
 
 # Fica em loop de execução de tarefa
@@ -255,14 +262,10 @@ def executar_uma_tarefa(lista_ipeds):
         print_log_dual("Este agente trabalha com qualquer storage")
         outros_storages=True
 
-    if outros_storages:
+    # Se ainda não tem tarefa, e agente trabalha com outros storages, solicita para qualquer storage
+    if tarefa is None and outros_storages:
         # Solicita tarefa para qualquer storage
         tarefa=solicita_tarefas(lista_ipeds)
-
-    # Para a versão 2.0, será implementado também um mecanismo de retomada, utilizado pelo agente para retomar
-    # tarefas interrompidas (por falta de energia por exemplo)
-    # Logo, aqui será necessário verificar se a tarefa já estava em andamento, e tomara as medidas necessárias
-    # (continuar, ou reinicar se for o caso)
 
     # Se não tem nenhuma tarefa disponível, não tem o que fazer
     if tarefa is None:
@@ -297,7 +300,7 @@ def executar_uma_tarefa(lista_ipeds):
     #texto_status="teste de abotar"
     #abortar(codigo_tarefa, texto_status)
 
-    die('ponto298')
+    #die('ponto298')
 
     # Montar storage
     # ------------------------------------------------------------------
@@ -314,14 +317,10 @@ def executar_uma_tarefa(lista_ipeds):
         # Abortando tarefa, pois tem algo errado aqui.
         # Não adianta ficar retentando nesta condição
         devolver(codigo_tarefa, texto_status)
-        print_log("Dormindo por um bom tempo, para dar oportunidade de outro agente pegar tarefa")
-        dormir(300)
-
         return
 
 
-
-    # Conferir se pasta/arquivo de origem está ok
+    # Confere se pasta/arquivo de origem está ok
     # ------------------------------------------------------------------
     # O caminho de origem pode indicar um arquivo (.E01) ou uma pasta
     # Neste ponto, seria importante verificar se esta origem está ok
@@ -335,7 +334,7 @@ def executar_uma_tarefa(lista_ipeds):
         print_log_dual("Pasta de origem encontrada no storage")
     else:
         # Se não existe nem arquivo nem pasta, tem algo muito errado aqui
-        # Aborta esta tarefa
+        # Aborta esta tarefa para que PCF possa analisar
         texto_status="Caminho de origem não encontrado no storage"
         print_log_dual(texto_status)
         # Abortando tarefa, pois tem algo errado aqui.
@@ -343,18 +342,127 @@ def executar_uma_tarefa(lista_ipeds):
         abortar(codigo_tarefa, texto_status)
         return
 
-    # Criar pasta de destino
+    # Pasta de destino
     # ------------------------------------------------------------------
-    # Teria que criar a pasta de destino, caso ainda não exista
-    # Se a pasta de destino já existe...opa, pode ter algo errado.
-    # Neste cenário, teria que conferir se a pasta não tem nada
-    # de útil (indicando alguma concorrência....ou processo abortado)
     caminho_destino = ponto_montagem + tarefa["caminho_destino"]
     print_log_dual("Caminho de destino (", caminho_destino, "): Criado")
 
+    # Se pasta para armazenamento de resultado já existe, tem que limpar pasta antes
+    # pois pode conter algum lixo de uma execução anterior
+    if os.path.exists(caminho_destino):
+        try:
+            # Registra situação
+            atualizar_status_servidor_loop(codigo_tarefa, GPastaDestinoCriada, "Pasta de destino já existe: Excluíndo")
+            # Limpa pasta de destino
+            shutil.rmtree(caminho_destino, ignore_errors=True)
+        except Exception as e:
+            erro="Não foi possível limpar pasta de destino da tarefa: " + str(e)
+            # Aborta tarefa
+            abortar(codigo_tarefa, erro)
+            return
+
+    # Não pode existir. Se existir, processo de exclusão acima falhou
+    if os.path.exists(caminho_destino):
+        erro = "Pasta de destino ainda existe, mesmo após ter sido excluída?"
+        # Aborta tarefa
+        abortar(codigo_tarefa, erro)
+        return
+
+    # Cria pasta de destino
+    try:
+        os.makedirs(caminho_destino)
+    except Exception as e:
+        erro = "Não foi possível criar pasta de destino: " + str(e)
+        # Aborta tarefa
+        abortar(codigo_tarefa, erro)
+        return
+
+    # Confere se deu certo
+    if not os.path.exists(caminho_destino):
+        erro = "Criação de pasta de destino falhou"
+        # Aborta tarefa
+        abortar(codigo_tarefa, erro)
+        return
+
+    # Tudo certo, pasta criada
+    atualizar_status_servidor_loop(codigo_tarefa, GPastaDestinoCriada, "Pasta de destino criada")
+
+    # ------------------------------------------------------------------------------------------------------------------
+    # Executa IPED
+    # ------------------------------------------------------------------------------------------------------------------
+
+    #var_dump(Gconfiguracao)
+    #var_dump(tarefa)
+    #die('ponto402')
+
+    tipo_iped=tarefa["tipo"]
+    comando=Gconfiguracao["tipo_tarefa"][tipo_iped]["comando"]
+
+    # Adiciona a pasta de origem e destino
+    comando=comando + " -d " + caminho_origem + " -o " + caminho_destino
+
+    #Para teste
+    #comando='dir'
+    #comando='java -version'
+    #comando='java' #Executa mas com exit code =1
+    # Para teste
+    #caminho_origem  ="C:\\teste_iped\\Memorando_1086-16\\item11\\item11_extracao"
+    #caminho_destino ="C:\\teste_iped\\Memorando_1086-16\\item11\\item11_extracao_iped"
+    #comando='java -Xmx24G -jar c:\\iped-basico-3.11\\iped.jar -d ' + caminho_origem + " -o " + caminho_destino
+    resultado=''
+
+    #var_dump(comando)
+    #die('ponto415')
+
+    # Executa comando
+    deu_erro=False
+    try:
+        # Registra comando iped na situação
+        atualizar_status_servidor_loop(codigo_tarefa, GEmAndamento, comando)
+        # Executa comando
+        resultado = subprocess.check_output(comando, shell=True, stderr=subprocess.STDOUT, universal_newlines=True)
+    except subprocess.CalledProcessError as e:
+        # Se der algum erro, não volta nada acima, mas tem como capturar pegando o output da exception
+        resultado = str(e.output)
+        deu_erro=True
+    except Exception as e:
+        # Alguma outra coisa aconteceu...
+        resultado = "Erro desconhecido: " + str(e)
+        deu_erro = True
+
+    # Atualiza com situação final do IPED
+    atualizar_status_servidor_loop(codigo_tarefa, GEmAndamento, "Resultado do IPED:\n" + resultado)
+
+    if deu_erro:
+        # Aborta tarefa
+        erro = "IPED falhou (retornou exit code de erro)"
+        abortar(codigo_tarefa, erro)
+        # Tolerância a Falhas: Permite que outro agente execute
+        devolver(codigo_tarefa, "Sem sucesso: Repassando tarefa para outro agente")
+        return
+
+    # Se não deu erro, espera-se que o IPED tenha chegado até o final normalmente
+    # Para confirmar isto, confere se existe o string abaixo
+    if "IPED finalizado" not in resultado:
+        # Algo estranho aconteceu, pois não retornou erro (via exit code), mas também não retornou mensagem de sucesso
+        erro = "Não foi detectado string de sucesso no resultado do IPED. Consulte desenvolvedor."
+        abortar(codigo_tarefa, erro)
+        # Neste caso, vamos abortar definitivamente, para fazer um análise do que está acontecendo
+        return
+
+    # Tudo certo, IPED finalizado
+    atualizar_status_servidor_loop(codigo_tarefa, GEmAndamento, "IPED finalizado com sucesso")
+
+    # Prepara para execução multicase
+    # 1) Copia pasta lib para
+    # 2) Cria bat para usuário invocar multicase
+
+    # Calcula hash
+    devolver(codigo_tarefa, "Para teste, retornando para novo processamento")
+
     die('ponto267')
 
-    # Fork para executar e esperar resposta
+    # Fork para monitorar andamento
     # ------------------------------------------------------------------
     # Em um agente de verdade, aqui teria que fazer um fork
     # (Utilizar  multiprocessing, ver sapi_cellebrite)
@@ -494,7 +602,33 @@ def executar_uma_tarefa(lista_ipeds):
 if __name__ == '__main__':
 
     # testes gerais
+    # comando='dir'
+    # comando='java -version'
+    # comando='java' #Executa mas com exit code =1
+    # caminho_origem  ="C:\\teste_iped\\Memorando_1086-16\\item11\\item11_extracao"
+    # caminho_destino ="C:\\teste_iped\\Memorando_1086-16\\item11\\item11_extracao_iped"
+    # comando='java -Xmx24G -jar c:\\iped-basico-3.11\\iped.jar -d ' + caminho_origem + " -o " + caminho_destino
+    # resultado=''
+    # deu_erro=False
+    # print(comando)
+    # try:
+    #     resultado = subprocess.check_output(comando, shell=True, stderr=subprocess.STDOUT, universal_newlines=True)
+    # except subprocess.CalledProcessError as e:
+    #     # Se der algum erro, não volta nada acima, mas tem como capturar pegando o output da exception
+    #     resultado = str(e.output)
+    #     deu_erro=True
+    # except Exception as e:
+    #     # Alguma outra coisa aconteceu...
+    #     print(str(e))
+    #     die('ponto600')
+    #
+    # # java -jar Indexador/lib/iped-search-app.jar
+    # var_dump(deu_erro)
+    # var_dump(resultado)
     # die('ponto2061')
+
+
+
 
     # Todas as mensagens do log serão exibidas também na tela
     ligar_log_dual()
@@ -509,11 +643,9 @@ if __name__ == '__main__':
     # Inicialização do programa
     # -----------------------------------------------------------------------------------------------------------------
     print_log_dual('Iniciando ', Gprograma , ' - ', Gversao)
-    inicializar()
-
-    # Monta lista de tipos de IPED
-    # ------------------------------------------------------------------------------------------------------------------
-    lista_ipeds=montar_lista_tipos_iped()
+    lista_ipeds=inicializar()
+    #var_dump(lista_ipeds)
+    #die('ponto591')
 
     # Loop de execução de tarefas.
     # ------------------------------------------------------------------------------------------------------------------
