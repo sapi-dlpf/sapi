@@ -194,6 +194,48 @@ def atualizar_status_servidor_loop(codigo_tarefa, codigo_situacao_tarefa, texto_
     #Ok, conseguiu atualizar
     print_log("Tarefa [",codigo_tarefa,"]: Situação atualizada para [",codigo_situacao_tarefa,"] com texto [",texto_status,"]")
 
+
+# Atualiza arquivo de texto no servidor
+# Fica em loop até conseguir
+def armazenar_texto_tarefa(codigo_tarefa, titulo, conteudo):
+
+    # Se a atualização falhar, fica tentando até conseguir
+    # Se for problema transiente, vai resolver
+    # Caso contrário, algum humano irá mais cedo ou mais tarde intervir
+    while not sapisrv_armazenar_texto(tipo_objeto='tarefa',
+                                      codigo_objeto=codigo_tarefa,
+                                      titulo=titulo,
+                                      conteudo=conteudo
+                                              ):
+        print_log_dual("Falhou upload de texto para tarefa [",codigo_tarefa,"]. Tentando novamente")
+        dormir(60)  # Tenta novamente em 1 minuto
+
+    #Ok, conseguiu atualizar
+    print_log("Efetuado upload de texto [",titulo,"] para tarefa [",codigo_tarefa,"]")
+
+
+def armazenar_texto_log_iped(codigo_tarefa, caminho_log_iped):
+
+    # Le arquivo de log do iped e faz upload
+
+    # Por enquanto, vamos ler tudo, mas talvez mais tarde seja melhor sintetizar, removendo informações sem valor
+    # que só interesseriam para o desenvolvedor
+    # Neste caso, talvez ter dois logs: O completo e o sintético.
+    # Para arquivos maiores, terá que configurar no /etc/php.ini os parâmetros post_max_size e upload_max_filesize
+    # para o tamanho necessário (atualmente no SETEC3 está bem baixo...8M)
+
+    # Se precisar sintetizar no futuro, ver sapi_cellebrite => sintetizar_arquivo_xml
+    # Fazer uma função específica
+    conteudo=""
+    # with codecs.open(caminho_log_iped, "r", "utf-8") as fentrada:
+    # Tem algo no arquivo de log que não é UTF8
+    with open(caminho_log_iped, "r") as fentrada:
+        for linha in fentrada:
+            conteudo=conteudo+linha
+
+    armazenar_texto_tarefa(codigo_tarefa, 'Arquivo de log do IPED', conteudo)
+
+
 # Devolve ao servidor uma tarefa
 def devolver(codigo_tarefa, texto_status):
 
@@ -345,14 +387,14 @@ def executar_uma_tarefa(lista_ipeds):
     # Pasta de destino
     # ------------------------------------------------------------------
     caminho_destino = ponto_montagem + tarefa["caminho_destino"]
-    print_log_dual("Caminho de destino (", caminho_destino, "): Criado")
 
     # Se pasta para armazenamento de resultado já existe, tem que limpar pasta antes
     # pois pode conter algum lixo de uma execução anterior
     if os.path.exists(caminho_destino):
         try:
             # Registra situação
-            atualizar_status_servidor_loop(codigo_tarefa, GPastaDestinoCriada, "Pasta de destino já existe: Excluíndo")
+            atualizar_status_servidor_loop(codigo_tarefa, GPastaDestinoCriada,
+                                           "Pasta de destino já existe. Excluindo pasta para reiniciar")
             # Limpa pasta de destino
             shutil.rmtree(caminho_destino, ignore_errors=True)
         except Exception as e:
@@ -388,6 +430,12 @@ def executar_uma_tarefa(lista_ipeds):
     atualizar_status_servidor_loop(codigo_tarefa, GPastaDestinoCriada, "Pasta de destino criada")
 
     # ------------------------------------------------------------------------------------------------------------------
+    # Inicia em background processo para controlar a execução do IPED
+    # Todo: Implementar
+    # ------------------------------------------------------------------------------------------------------------------
+
+
+    # ------------------------------------------------------------------------------------------------------------------
     # Executa IPED
     # ------------------------------------------------------------------------------------------------------------------
 
@@ -414,11 +462,15 @@ def executar_uma_tarefa(lista_ipeds):
     #var_dump(comando)
     #die('ponto415')
 
+    # Adiciona parâmetros na linha de comando
+    caminho_log_iped=caminho_destino + "\\iped.log"
+    comando=comando +" --nogui " + " -log " + caminho_log_iped
+
     # Executa comando
     deu_erro=False
     try:
         # Registra comando iped na situação
-        atualizar_status_servidor_loop(codigo_tarefa, GEmAndamento, comando)
+        atualizar_status_servidor_loop(codigo_tarefa, GEmAndamento, "Chamando IPED: " + comando)
         # Executa comando
         resultado = subprocess.check_output(comando, shell=True, stderr=subprocess.STDOUT, universal_newlines=True)
     except subprocess.CalledProcessError as e:
@@ -430,8 +482,9 @@ def executar_uma_tarefa(lista_ipeds):
         resultado = "Erro desconhecido: " + str(e)
         deu_erro = True
 
-    # Atualiza com situação final do IPED
-    atualizar_status_servidor_loop(codigo_tarefa, GEmAndamento, "Resultado do IPED:\n" + resultado)
+    # Faz upload do resultado e do log
+    armazenar_texto_tarefa(codigo_tarefa, 'Resultado IPED (tela)', resultado)
+    armazenar_texto_log_iped(codigo_tarefa, caminho_log_iped)
 
     if deu_erro:
         # Aborta tarefa
@@ -441,7 +494,7 @@ def executar_uma_tarefa(lista_ipeds):
         devolver(codigo_tarefa, "Sem sucesso: Repassando tarefa para outro agente")
         return
 
-    # Se não deu erro, espera-se que o IPED tenha chegado até o final normalmente
+    # Se não deu erro (exit code), espera-se que o IPED tenha chegado até o final normalmente
     # Para confirmar isto, confere se existe o string abaixo
     if "IPED finalizado" not in resultado:
         # Algo estranho aconteceu, pois não retornou erro (via exit code), mas também não retornou mensagem de sucesso
@@ -449,6 +502,7 @@ def executar_uma_tarefa(lista_ipeds):
         abortar(codigo_tarefa, erro)
         # Neste caso, vamos abortar definitivamente, para fazer um análise do que está acontecendo
         return
+
 
     # Tudo certo, IPED finalizado
     atualizar_status_servidor_loop(codigo_tarefa, GEmAndamento, "IPED finalizado com sucesso")
@@ -458,6 +512,8 @@ def executar_uma_tarefa(lista_ipeds):
     # 2) Cria bat para usuário invocar multicase
 
     # Calcula hash
+
+
     devolver(codigo_tarefa, "Para teste, retornando para novo processamento")
 
     die('ponto267')
