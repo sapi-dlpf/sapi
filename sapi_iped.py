@@ -30,6 +30,7 @@ import sys
 try:
     import time
     import random
+    import re
     import hashlib
     import shutil
     import multiprocessing
@@ -62,6 +63,10 @@ GmodoInstantaneo = False
 
 #
 Gconfiguracao = dict()
+
+# Dados para laudo
+Gdados_laudo = None
+
 
 # **********************************************************************
 # PRODUCAO DEPLOYMENT AJUSTAR
@@ -195,7 +200,7 @@ def atualizar_status_servidor_loop(codigo_tarefa, codigo_situacao_tarefa, texto_
             atualizou = True
         except Exception as e:
             atualizou = False
-            print_log_dual("Falhou atualização de status para tarefa [", codigo_tarefa, "]. Tentando novamente")
+            print_log_dual("Falhou atualização de situação para tarefa [", codigo_tarefa, "]. Tentando novamente")
             dormir(60)  # Tenta novamente em 1 minuto
 
         # Encerra se conseguiu atualizar
@@ -204,8 +209,12 @@ def atualizar_status_servidor_loop(codigo_tarefa, codigo_situacao_tarefa, texto_
             break
 
     # Registra atualização com sucesso
-    print_log("Tarefa [", codigo_tarefa, "]: Situação atualizada para [", codigo_situacao_tarefa,
-              "] com texto [", texto_status, "]")
+    msg_log="Tarefa [" +  codigo_tarefa + "]: Atualizada. "
+    if codigo_situacao_tarefa>0:
+        msg_log = msg_log + " Código da situação=[" + str(codigo_situacao_tarefa) + "]"
+    if texto_status != "":
+        msg_log = msg_log + " Texto Situação=[" +  texto_status + "]"
+    print_log(msg_log)
 
 
 # Atualiza apenas status no servidor
@@ -254,38 +263,51 @@ def armazenar_texto_log_iped(codigo_tarefa, caminho_log_iped):
 
 # Devolve ao servidor uma tarefa
 def devolver(codigo_tarefa, texto_status):
-    # Registra em log
-    print_log_dual("Devolvendo tarefa [", codigo_tarefa, "] para servidor: ", texto_status)
 
-    # Atualiza status no servidor
+    erro="Devolvendo [[tarefa:" + codigo_tarefa+ "]] ao servidor (para ser executada por outro agente) em função de ERRO: " + texto_status
+
+    # Registra em log
+    print_log(erro)
+
+    # Reportar erro para ficar registrado no servidor
+    # Desta forma, é possível analisar os erros diretamente
+    reportar_erro(erro)
+
+    # Registra situação de devolução
     codigo_situacao_tarefa = GAguardandoProcessamento
     atualizar_status_servidor_loop(codigo_tarefa, codigo_situacao_tarefa, texto_status)
 
     # Ok
-    print_log_dual("Tarefa devolvida")
+    print_log("Tarefa devolvida")
 
     # Para garantir que a tarefa devolvida não será pega por este mesmo agente logo em seguida,
     # vamos dormir por um tempo longo
-    print_log("Dormindo por um bom tempo, para dar oportunidade de outro agente pegar tarefa")
-    dormir(3 * 60)  # Tenta novamente em 1 minuto
+    dormir(3 * 60, "Pausa para dar oportunidade de outro agente pegar tarefa")
 
+    # Retorna false, para uso
+    return False
 
-# Aborta tarefa
+# Aborta tarefa.
+# Retorna False sempre, para repassar para cima
 def abortar(codigo_tarefa, texto_status):
-    # Registra em log
-    print_log_dual("Abortando execução da tarefa [", codigo_tarefa, "]: ", texto_status)
 
-    # Atualiza status no servidor
-    try:
-        # Registra situação
-        codigo_situacao_tarefa = GAbortou
-        atualizar_status_servidor_loop(codigo_tarefa, codigo_situacao_tarefa, texto_status)
-        # Ok
-        print_log_dual("Execução da tarefa abortada")
-    except Exception as e:
-        erro = "Não foi possível atualizar no servidor que tarefa abortou."
-        print_log(erro)
-        return
+    erro="Abortando [[tarefa:" + codigo_tarefa+ "]] em função de ERRO: " + texto_status
+
+    # Registra em log
+    print_log(erro)
+
+    # Reportar erro para ficar registrado no servidor
+    # Desta forma, é possível analisar os erros diretamente
+    reportar_erro(erro)
+
+    # Registra situação de devolução
+    codigo_situacao_tarefa = GAbortou
+    atualizar_status_servidor_loop(codigo_tarefa, codigo_situacao_tarefa, texto_status)
+
+    # Ok
+    print_log_dual("Execução da tarefa abortada")
+
+    return False
 
 
 # Tratamento para erro no cliente
@@ -342,12 +364,23 @@ def acompanhar_iped(codigo_tarefa, caminho_tela_iped):
             dormir(30)
 
 
+# Executa IPED
+# Retorna:
+#   True: Executado com sucesso
+#   False: Execução falhou
 def executa_iped(codigo_tarefa, comando, caminho_destino, caminho_log_iped, caminho_tela_iped):
 
     # ------------------------------------------------------------------------------------------------------------------
     # Pasta de destino
     # ------------------------------------------------------------------------------------------------------------------
-    # Assegura que pasta de destino existe, e que não possui nenhum conteúdo
+    # Se já existe conteúdo na pasta, verifica se foi concluído com sucesso
+    if os.path.exists(caminho_destino):
+        print_log("Pasta de destino já existe.")
+        print_log("Verificando se existe IPED rodado com sucesso")
+        if verificar_sucesso_iped(caminho_tela_iped):
+            # Tudo certo, IPED finalizado
+            atualizar_status_servidor_loop(codigo_tarefa, GIpedFinalizado, "Execução de IPED anterior foi concluída com sucesso.")
+            return True
 
     # Se pasta para armazenamento de resultado já existe, tem que limpar pasta antes
     # pois pode conter algum lixo de uma execução anterior
@@ -355,7 +388,7 @@ def executa_iped(codigo_tarefa, comando, caminho_destino, caminho_log_iped, cami
         try:
             # Registra situação
             atualizar_status_servidor_loop(codigo_tarefa, GPastaDestinoCriada,
-                                           "Pasta de destino ["+ caminho_destino + "] já existe."+
+                                           "Pasta de destino ["+ caminho_destino + "] já existe, mas sem IPED finalizado ok."+
                                            " Excluindo pasta para rodar iped desde o início")
             print_log("Excluindo pasta ["+caminho_destino+"]")
             # Limpa pasta de destino
@@ -366,15 +399,13 @@ def executa_iped(codigo_tarefa, comando, caminho_destino, caminho_log_iped, cami
         except Exception as e:
             erro = "Não foi possível limpar pasta de destino da tarefa: " + str(e)
             # Aborta tarefa
-            abortar(codigo_tarefa, erro)
-            return
+            return abortar(codigo_tarefa, erro)
 
     # Não pode existir. Se existir, processo de exclusão acima falhou
     if os.path.exists(caminho_destino):
         erro = "Tentativa de excluir pasta falhou: Verifique se existe algo aberto na pasta, que esteja criando um lock em algum dos seus recursos"
         # Aborta tarefa
-        abortar(codigo_tarefa, erro)
-        return
+        return abortar(codigo_tarefa, erro)
 
     # Cria pasta de destino
     try:
@@ -382,15 +413,13 @@ def executa_iped(codigo_tarefa, comando, caminho_destino, caminho_log_iped, cami
     except Exception as e:
         erro = "Não foi possível criar pasta de destino: " + str(e)
         # Aborta tarefa
-        abortar(codigo_tarefa, erro)
-        return
+        return abortar(codigo_tarefa, erro)
 
     # Confere se deu certo
     if not os.path.exists(caminho_destino):
         erro = "Criação de pasta de destino falhou sem causar exceção!! Situação inesperada!"
         # Aborta tarefa
-        abortar(codigo_tarefa, erro)
-        return
+        return abortar(codigo_tarefa, erro)
 
     # Tudo certo, pasta criada
     atualizar_status_servidor_loop(codigo_tarefa, GPastaDestinoCriada, "Pasta de destino criada")
@@ -416,11 +445,11 @@ def executa_iped(codigo_tarefa, comando, caminho_destino, caminho_log_iped, cami
         resultado = subprocess.check_output(comando, shell=True, stderr=subprocess.STDOUT, universal_newlines=True)
     except subprocess.CalledProcessError as e:
         # Se der algum erro, não volta nada acima, mas tem como capturar pegando o output da exception
-        resultado = str(e.output)
+        erro_exception = str(e.output)
         deu_erro = True
     except Exception as e:
         # Alguma outra coisa aconteceu...
-        resultado = "Erro desconhecido: " + str(e)
+        erro_exception = str(e)
         deu_erro = True
 
     # Como iped terminou, finaliza o processo de acompanhamento
@@ -441,29 +470,23 @@ def executa_iped(codigo_tarefa, comando, caminho_destino, caminho_log_iped, cami
 
     if deu_erro:
         # Aborta tarefa
-        erro = "IPED falhou (retornou exit code de erro)"
-        abortar(codigo_tarefa, erro)
+        erro = "IPED falhou (retornou exit code de erro) : " + erro_exception
         # Tolerância a Falhas: Permite que outro agente execute
-        devolver(codigo_tarefa, "Sem sucesso: Repassando tarefa para outro agente")
-        return
-
+        return devolver(codigo_tarefa, erro)
 
     # Se não deu erro (exit code), espera-se que o IPED tenha chegado até o final normalmente
     # Para confirmar isto, confere se existe o string abaixo
-    if verificar_sucesso_iped(caminho_tela_iped):
-        # Tudo certo, IPED finalizado
-        atualizar_status_servidor_loop(codigo_tarefa, GIpedFinalizado, "IPED finalizado com sucesso")
-        return
-    else:
+    if not verificar_sucesso_iped(caminho_tela_iped):
         # Algo estranho aconteceu, pois não retornou erro (via exit code),
         # mas também não retornou mensagem de sucesso na tela
         erro = "Não foi detectado indicativo de sucesso do IPED. Verifique arquivos de Resultado e Log."
-        abortar(codigo_tarefa, erro)
         # Neste caso, vamos abortar definitivamente, para fazer um análise do que está acontecendo
-        return
+        # pois isto não deveria acontecer jamais
+        return abortar(codigo_tarefa, erro)
 
-
-
+    # Tudo certo, IPED finalizado com sucesso
+    atualizar_status_servidor_loop(codigo_tarefa, GIpedFinalizado, "IPED finalizado com sucesso")
+    return True
 
 # Verifica se existe indicação que iped foi finalizado com sucesso
 def verificar_sucesso_iped(caminho_tela_iped):
@@ -471,90 +494,81 @@ def verificar_sucesso_iped(caminho_tela_iped):
     # Será lido o arquivo de "tela" do IPED, ou seja, o arquivo que contém as mensagens
     print_log("Analisando arquivo de tela do IPED: [", caminho_tela_iped,"]")
 
+    if not os.path.exists(caminho_tela_iped):
+        print_log("Arquivo de resultado de IPED não encontrado")
+        return False
+
     # Processa arquivo de tela
     with open(caminho_tela_iped, "r") as fentrada:
         for linha in fentrada:
-            if "IPED finalizado" in linha:
-                print_log("Indicativo de sucesso encontrado")
+            # Sucesso
+            indicativo="IPED finalizado"
+            if indicativo in linha:
+                print_log("Indicativo de sucesso [", indicativo," ] encontrado.")
                 return True
-            # Todo: Tratar indicativo de erro também
+            # Erro
+            indicativo = 'ERRO!!!'
+            if indicativo in linha:
+                print_log("Indicativo de erro [",indicativo,"] encontrado.")
+                return False
 
     # Se não tem informação conclusiva, retorna falso
-    print_log("Sem informação conclusiva na análise do arquivo de tela do IPED")
+    print_log("Sem informação conclusiva na análise do arquivo de resultado do IPED")
     return False
 
 
-def calcula_hash_iped(codigo_tarefa, caminho_destino):
-    # xxx
+def calcula_sha256_arquivo(caminho_arquivo, blocksize=2 ** 20):
+    m = hashlib.sha256()
+    with open(caminho_arquivo, "rb") as f:
+        while True:
+            buf = f.read(blocksize)
+            if not buf:
+                break
+            m.update(buf)
+    return m.hexdigest()
 
-    print_log("Calculando hash do IPED")
-    die('ponto490')
+
+def calcula_hash_iped(codigo_tarefa, caminho_destino):
+
+    print_log("Calculando hash do resultado do IPED")
 
     # Monta linha de comando
     nome_arquivo = "Lista de Arquivos.csv"
     caminho_arquivo_calcular_hash = caminho_destino + "/" + nome_arquivo
-    caminho_hash = caminho_destino + "/" + "hash.txt"
-    comando="fsum.exe -sha256 " + caminho_arquivo_calcular_hash + " >" + caminho_hash + " 2>&1"
 
     deu_erro = False
     try:
-        # Registra comando iped na situação
-        atualizar_status_servidor_loop(codigo_tarefa, GManterSituacaoAtual, "Calculando hash: " + comando)
-        # Executa comando
-        resultado = subprocess.check_output(comando, shell=True, stderr=subprocess.STDOUT, universal_newlines=True)
+        algoritmo_hash = 'sha256'
+        texto_status = "Calculando hash " + algoritmo_hash + " para " + caminho_arquivo_calcular_hash
+        atualizar_status_servidor_loop(codigo_tarefa, GManterSituacaoAtual, texto_status)
+        valor_hash =calcula_sha256_arquivo(caminho_arquivo_calcular_hash)
     except Exception as e:
-        # Alguma outra coisa aconteceu...
-        resultado = "Erro: " + str(e)
-        deu_erro = True
+        erro = "Não foi possível calcular hash para " + nome_arquivo + " => " + str(e)
+        # Não deveria ocorrer este erro??? Abortar e analisar
+        return abortar(codigo_tarefa, erro)
 
-    # Faz upload do arquivo de hash
-    conteudo_hash=""
-    hash_iped=None
-    # Upload do resultado do IPED
-    with open(caminho_hash, "r") as fentrada:
-        for linha in fentrada:
-            conteudo_hash = conteudo_hash + linha
-
-            # Faz parse da linha de hash do arquivo
-            #5b6632ee10ad510489274ca9a5327f1052d271b6d127d16e3abae69af044345d ?SHA256*Lista de Arquivos.csv
-            if nome_arquivo in linha:
-                #
-                die('ponto522')
+    # Extrai a subpasta de destino
+    partes=caminho_destino.split("/")
+    subpasta_destino=partes[len(partes)-1]
+    if subpasta_destino=="":
+        subpasta_destino = partes[len(partes) - 2]
 
 
+    # Armazena dados de hash
+    h = dict()
+    h["sapiHashDescricao"] = "Hash do arquivo " + subpasta_destino + "/listaArquivos.csv"
+    h["sapiHashValor"] = valor_hash
+    h["sapiHashAlgoritmo"] = algoritmo_hash
+    lista_hash = [h]
 
-    armazenar_texto_tarefa(codigo_tarefa, 'Hash do IPED', conteudo_hash)
+    Gdados_laudo['sapiHashes']=lista_hash
 
-    # Faz upload do log do IPED
-    armazenar_texto_log_iped(codigo_tarefa, caminho_log_iped)
+    print_log("Hash calculado para resultado do IPED: ", valor_hash, "(",algoritmo_hash,")")
 
-    if deu_erro:
-        # Aborta tarefa
-        erro = "IPED falhou (retornou exit code de erro)"
-        abortar(codigo_tarefa, erro)
-        # Tolerância a Falhas: Permite que outro agente execute
-        devolver(codigo_tarefa, "Sem sucesso: Repassando tarefa para outro agente")
-        return
+    # Tudo certo, Hash calculado
+    atualizar_status_servidor_loop(codigo_tarefa, GIpedHashCalculado, "Hash calculado com sucesso")
+    return True
 
-
-    # Se não deu erro (exit code), espera-se que o IPED tenha chegado até o final normalmente
-    # Para confirmar isto, confere se existe o string abaixo
-    if verificar_sucesso_iped(caminho_tela_iped):
-        # Tudo certo, IPED finalizado
-        atualizar_status_servidor_loop(codigo_tarefa, GIpedFinalizado, "IPED finalizado com sucesso")
-        return
-    else:
-        # Algo estranho aconteceu, pois não retornou erro (via exit code),
-        # mas também não retornou mensagem de sucesso na tela
-        erro = "Não foi detectado indicativo de sucesso do IPED. Verifique arquivos de Resultado e Log."
-        abortar(codigo_tarefa, erro)
-        # Neste caso, vamos abortar definitivamente, para fazer um análise do que está acontecendo
-        return
-
-
-
-
-    return
 
 def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
 
@@ -584,8 +598,7 @@ def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
         except Exception as e:
             erro = "Não foi possível copiar lib do item para lib da pasta raiz: " + str(e)
             # Neste caso, aborta tarefa, pois este erro deve ser analisado
-            abortar(codigo_tarefa, erro)
-            return
+            return abortar(codigo_tarefa, erro)
 
     # Confere se lib existe
     if os.path.exists(caminho_lib):
@@ -593,8 +606,7 @@ def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
     else:
         erro = "Situação inesperada: Pasta [" + caminho_lib + "] não existe"
         # Neste caso, aborta tarefa, pois este erro deve ser analisado
-        abortar(codigo_tarefa, erro)
-        return
+        return abortar(codigo_tarefa, erro)
 
     # ------------------------------------------------------------------------------------------------------------------
     # Ajuste para execução multicase: Cria arquivo bat "ferramenta_pesquisa.bat"
@@ -614,8 +626,7 @@ def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
         except Exception as e:
             erro = "Não foi possível criar arquivo: " + str(e)
             # Neste caso, aborta tarefa, pois este erro deve ser analisado
-            abortar(codigo_tarefa, erro)
-            return
+            return abortar(codigo_tarefa, erro)
 
     # Confere se arquivo existe
     if os.path.isfile(caminho_bat):
@@ -623,28 +634,85 @@ def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
     else:
         erro = "Situação inesperada: Arquivo [" + caminho_bat + "] não existe"
         # Neste caso, aborta tarefa, pois este erro deve ser analisado
-        abortar(codigo_tarefa, erro)
-        return
+        return abortar(codigo_tarefa, erro)
 
 
     # Tudo certo, ajuste multicase concluído
     atualizar_status_servidor_loop(codigo_tarefa, GIpedMulticaseAjustado, "Ajuste multicase efetuado")
-    return
+    return True
 
 
-# Fica em loop de execução de tarefa
-# Encerra apenas se houver algum erro que impeça o prosseguimento
-def executar_uma_tarefa(lista_ipeds):
+# Recupera dados relevantes do log do IPED
+def recupera_dados_laudo(codigo_tarefa, caminho_log_iped):
+
+    # Será lido o arquivo de log
+    print_log("Recuperando dados para laudo de log do IPED: [", caminho_log_iped, "]")
+
+    if not os.path.exists(caminho_log_iped):
+        print_log("Arquivo de log do IPED não encontrado")
+        return False
+
+    # Processa arquivo
+    versao=None
+    total_itens=None
+    with open(caminho_log_iped, "r") as fentrada:
+        for linha in fentrada:
+            # Troca tabulação por espaço
+            linha = linha.replace('\t', ' ')
+
+            # Versão do IPED
+            # 2017-01-31 17:12:11	[INFO]	Indexador e Processador de Evidências Digitais 3.11
+            if "[INFO] Indexador e Processador" in linha:
+                (inicio, numero_versao)=linha.split('Digitais')
+                numero_versao=numero_versao.strip()
+                if not numero_versao=="":
+                    versao="IPED " + numero_versao
+
+            # Quantidade de itens processados
+            # 2017-01-31 17:21:19	[INFO]	Total processado: 153329 itens em 542 segundos (4084 MB)
+            if "[INFO] Total processado:" in linha:
+                match = re.search(r'processado: (\d+) itens', linha)
+                if match:
+                    total_itens=(match.group(1))
+
+            # Todo: Como calcular a quantidade de itens com erro (que não foram processados...)
+
+
+    if versao is None:
+        erro="Não foi possível recuperar versão do IPED"
+        return abortar(codigo_tarefa, erro)
+
+    if total_itens is None:
+        erro="Não foi possível recuperar quantidade total de itens processados"
+        return abortar(codigo_tarefa, erro)
+
+    # Armazena dados para laudo
+    Gdados_laudo['sapiSoftwareVersao']=versao
+    Gdados_laudo['sapiItensProcessados'] = total_itens
+
+    # Todo: 'sapiItensProcessados':
+    # Todo: 'sapiItensComErro':
+
+    # Ok, finalizado com sucesso
+    return True
+
+# Executa uma tarefa de iped que esteja ao alcance do agente
+def executar_uma_tarefa(lista_ipeds_suportados):
+
+    # Inicializa repositório de dados para laudo
+    global Gdados_laudo
+    Gdados_laudo = dict()
+
     # Solicita tarefa, dependendo da configuração de storage do agente
     outros_storages = True
     tarefa = None
     if Gconfiguracao["storage_unico"] != "":
         print_log_dual("Este agente trabalha apenas com storage=", Gconfiguracao["storage_unico"])
-        tarefa = solicita_tarefas(lista_ipeds, Gconfiguracao["storage_unico"])
+        tarefa = solicita_tarefas(lista_ipeds_suportados, Gconfiguracao["storage_unico"])
         outros_storages = False
     elif Gconfiguracao["storage_preferencial"] != "":
         print_log_dual("Este agente trabalha com storage preferencial=", Gconfiguracao["storage_preferencial"])
-        tarefa = solicita_tarefas(lista_ipeds, Gconfiguracao["storage_preferencial"])
+        tarefa = solicita_tarefas(lista_ipeds_suportados, Gconfiguracao["storage_preferencial"])
         outros_storages = True
     else:
         print_log_dual("Este agente trabalha com qualquer storage")
@@ -653,7 +721,7 @@ def executar_uma_tarefa(lista_ipeds):
     # Se ainda não tem tarefa, e agente trabalha com outros storages, solicita para qualquer storage
     if tarefa is None and outros_storages:
         # Solicita tarefa para qualquer storage
-        tarefa = solicita_tarefas(lista_ipeds)
+        tarefa = solicita_tarefas(lista_ipeds_suportados)
 
     # Se não tem nenhuma tarefa disponível, não tem o que fazer
     if tarefa is None:
@@ -684,12 +752,13 @@ def executar_uma_tarefa(lista_ipeds):
     # var_dump(tarefa)
 
     # Teste de devolução
-    # texto_status="teste de devolução"
-    # devolver(codigo_tarefa, texto_status)
+    #texto_status="teste de devolução"
+    #return devolver(codigo_tarefa, texto_status)
+    #die('ponto712')
 
     # Teste abortar
-    # texto_status="teste de abotar"
-    # abortar(codigo_tarefa, texto_status)
+    #texto_status="teste de abotar"
+    #return abortar(codigo_tarefa, texto_status)
 
     # die('ponto298')
 
@@ -702,13 +771,8 @@ def executar_uma_tarefa(lista_ipeds):
         # Talvez seja um problema de rede (trasiente)
         reportar_erro(erro)
         print_log_dual("Problema insolúvel neste momento, mas possivelmente transiente")
-        # Tarefa não foi iniciada, então pode ser devolvida
-        texto_status = "Agente sem condição de executar tarefa. Devolvida ao servidor"
-        print_log_dual(texto_status)
-        # Abortando tarefa, pois tem algo errado aqui.
-        # Não adianta ficar retentando nesta condição
-        devolver(codigo_tarefa, texto_status)
-        return
+        # Devolve para ser executada por outro agente
+        return devolver(codigo_tarefa, erro)
 
     # Confere se pasta/arquivo de origem está ok
     # ------------------------------------------------------------------
@@ -725,12 +789,11 @@ def executar_uma_tarefa(lista_ipeds):
     else:
         # Se não existe nem arquivo nem pasta, tem algo muito errado aqui
         # Aborta esta tarefa para que PCF possa analisar
-        texto_status = "Caminho de origem não encontrado no storage"
-        print_log_dual(texto_status)
+        erro = "Caminho de origem ["+ caminho_origem + "] não encontrado no storage"
+        print_log_dual(erro)
         # Abortando tarefa, pois tem algo errado aqui.
         # Não adianta ficar retentando nesta condição
-        abortar(codigo_tarefa, texto_status)
-        return
+        return abortar(codigo_tarefa, erro)
 
     # ------------------------------------------------------------------
     # Pasta de destino
@@ -744,8 +807,8 @@ def executar_uma_tarefa(lista_ipeds):
     # var_dump(tarefa)
     # die('ponto402')
 
-    # 1) IPED
-    # ====================================
+    # Prepara parâmetros para execução das subatarefas do IPED
+    # ========================================================
     tipo_iped = tarefa["tipo"]
     comando = Gconfiguracao["tipo_tarefa"][tipo_iped]["comando"]
 
@@ -780,167 +843,38 @@ def executar_uma_tarefa(lista_ipeds):
     # die('ponto415')
 
 
-    # Se ainda não executou IPED, executa
-    if (codigo_situacao_tarefa<GIpedFinalizado):
-        executa_iped(codigo_tarefa, comando, caminho_destino, caminho_log_iped, caminho_tela_iped)
-    else:
-        print_log("Iped já foi finalizado anteriormente, desta forma não será executado novamente")
+    # 1) IPED
+    # ====================================
+    # Executa IPED
+    sucesso=executa_iped(codigo_tarefa, comando, caminho_destino, caminho_log_iped, caminho_tela_iped)
+    if not sucesso:
+        return
 
+    # Recupera dados do log para utilizar em laudo
+    sucesso=recupera_dados_laudo(codigo_tarefa, caminho_log_iped)
+    if not sucesso:
+        return
 
     # 2) Cálculo de HASH
     # ====================================
-    if (codigo_situacao_tarefa<GIpedHashCalculado):
-        calcula_hash_iped(codigo_tarefa, caminho_destino)
-    else:
-        print_log("Hash já foi calculado anteriormente")
-
-    die('ponto723')
-
+    # Calcula hash
+    sucesso=calcula_hash_iped(codigo_tarefa, caminho_destino)
+    if not sucesso:
+        return
 
     # 3) Ajusta ambiente para Multicase
     # =================================
-    if (codigo_situacao_tarefa<GIpedHashCalculado):
-        ajusta_multicase(tarefa, codigo_tarefa, caminho_destino)
-    else:
-        print_log("Multicase já foi executado anteriormente")
+    sucesso=ajusta_multicase(tarefa, codigo_tarefa, caminho_destino)
+    if not sucesso:
+        return
 
 
-    # Para teste, vamos interromper aqui
-    die('ponto677')
-
-    # Atualiza com status de sucesso
-
-
-    # Fork para monitorar andamento
-    # ------------------------------------------------------------------
-    # Em um agente de verdade, aqui teria que fazer um fork
-    # (Utilizar  multiprocessing, ver sapi_cellebrite)
-    # O programa secundário iria invocar o programa externo que
-    # executa a tarefa, e o programa principal se
-    # encarregaria de controlar a execução
-    print_log_dual("Invocando programa ", tipo_iped, " e aguardando resultado")
-    # pid = os.fork()
-    # if pid == 0:
-    # 	print_log_dual("invocado programa: "+comando)
-    # 	# Executa o programa externo e fica esperando o resultado
-    # 	os.system(comando) # Se mata o pai, morre também...melhorar isto
-    # 	print_log_dual("Programa externo encerrou")
-    # 	sys.exit()
-    #
-    # Programa principal controla a execução
-    # ------------------------------------------------------------------
-    # Vamos simular o acompanhamento da execução
-    # É importante escolher algum critério que forneça um indicativo de
-    # progresso relevante.
-    # Na pior das hipóteses, utilizar o tamanho da pasta de destino
-    # Aqui existiria uma loop, finalizado apenas se houve sucesso ou
-    # insucesso
-    random.seed()
-    terminou = False
-    rant = 0
-    while not terminou:
-
-        # Simula andamento/sucesso/insucesso, através de um randômico
-        # para tornar o demo mais realista
-        r = random.randint(1, 100)
-        if (r < rant):
-            # Tem que avançar
-            continue
-        # print r
-        rant = r
-
-        # Está em andamento, atualiza status
-        # É importante que a atualização do status não seja muito intensa
-        # pois isto pode sobrecarregar o servidor
-        # Um intervalo de 3 minutos parece ser uma boa idéia
-        # para as modificações de andamento
-        # Se for finalizado (sucesso ou insucesso), pode atualizar imediatamente
-        if (r <= 89):
-            texto_status = str(r) + "% de progresso"
-            codigo_situacao_tarefa = GEmAndamento
-            sapisrv_atualizar_status_tarefa(
-                codigo_tarefa=codigo_tarefa,
-                codigo_situacao_tarefa=codigo_situacao_tarefa,
-                status=texto_status
-            )
-            # Uma pequena pausa, e continua para a próxima simulação de andamento
-            # Cada simulação deve demorar entre 90 e 100 segundos
-            dormir(100 - r)
-            continue
-
-        # Simula sucesso, 90% de probabilidade no demo
-        if (r >= 90):
-
-            # Para armazenamento de dados para laudo
-            dados_relevantes = dict()
-
-            # Simulação de sucesso, 90% de probabilidade no demo (90 a 99)
-            if (r <= 99):
-                texto_status = "Finalizado com sucesso"
-                codigo_situacao_tarefa = GFinalizadoComSucesso
-
-                # Simulação de hash
-                # A idéia é que cada agente calcule o hash relativo
-                # aos dados da tarefa processada.
-                # No laudo será exibido o conjunto completo de todos os hashes
-                # de todas as tarefas
-                # Uma vez que tanto o cálculo dos hashes como a geração do laudo
-                # são automatizados, não existe desvantagem (exceto algum volume
-                # de dados a mais no laudo) em disponibilizar vários hashes.
-                # E existe uma vantagem potencial, pois quanto maior for a diversidade
-                # de hashes, maior a probabilidade de que algum hash possa ajudar
-                # a resolver alguma dúvida sobre integridade que venha a surgir no futuro
-                texto_random = 'texto_randomico' + str(random.randint(1, 1000))
-                valor_hash = hashlib.md5(texto_random.encode('utf-8')).hexdigest()
-
-                h = dict()
-                h["sapiHashDescricao"] = "Hash do arquivo listaArquivos.csv (gerado por " + arg_tipo + ")"
-                h["sapiHashValor"] = valor_hash
-                h["sapiHashAlgoritmo"] = "MD5"
-                lista_hash = [h]
-
-                # Simula versão do software
-                softwareVersao = "SoftwareX 4.15"
-                if ("iped" in arg_tipo):
-                    softwareVersao = "IPED 3.11"
-                elif ("ief" in arg_tipo):
-                    softwareVersao = "IEF 6.45"
-
-                # O campo sapiSoftwareVersao deve sempre ser informado
-                # Os demais, irão variar de acordo com o software executado
-                # Existe a possibilidade de armazenar outros dados,
-                # que não sejam para laudo, mas no momento não temos
-                # utilidade para este recurso
-                # Logo, a única entrada no dicionário de dados relevantes
-                # será 'laudo'
-                dados_relevantes['laudo'] = {
-                    'sapiSoftwareVersao': softwareVersao,
-                    'sapiItensProcessados': '204572',
-                    'sapiItensComErro': '0',
-                    'sapiHashes': lista_hash
-                }
-
-            else:  # (r==100), Simula falha, 10% de probabilidade
-                texto_status = "Falhou - abortou (simulado)"
-                codigo_situacao_tarefa = GAbortou
-
-            # Se a atualização falhar, fica tentando até conseguir
-            # Se for problema transiente, vai resolver
-            # Caso contrário, algum humano irá mais cedo ou mais tarde intervir
-            while not sapisrv_atualizar_status_tarefa(codigo_tarefa=codigo_tarefa,
-                                                      codigo_situacao_tarefa=codigo_situacao_tarefa,
-                                                      status=texto_status,
-                                                      dados_relevantes=dados_relevantes
-                                                      ):
-                print_log_dual("Falhou atualização de status de sucesso. Tentando novamente")
-                dormir(60)  # Tenta novamente em 1 minuto
-
-            terminou = True  # Abandona loop de verificação de situação
-            print_log_dual("Dormindo após concluir...para dar chance a outros de pegar tarefas...apenas teste")
-            dormir(30)  # Uma pausa apenas para teste..poder consultar sem nenhum agente trabalhando
-            continue
-
-            # Fim do while
+    # Tudo certo, finalizado com sucesso
+    dados_relevantes=dict()
+    dados_relevantes['laudo'] = Gdados_laudo
+    atualizar_status_servidor_loop(codigo_tarefa, GFinalizadoComSucesso, "Tarefa de IPED completamente concluída",
+                                   dados_relevantes)
+    return
 
 
 # ======================================================================
@@ -948,6 +882,17 @@ def executar_uma_tarefa(lista_ipeds):
 # ======================================================================
 
 if __name__ == '__main__':
+
+
+    # caminho_destino = "Memorando_1086-16/item11/item11_extracao_iped/"
+    # partes=caminho_destino.split("/")
+    # subpasta_destino=partes[len(partes)-1]
+    # if subpasta_destino=="":
+    #     subpasta_destino = partes[len(partes) - 2]
+    #
+    # var_dump(subpasta_destino)
+    # die('ponto974')
+
 
     # testes gerais
     # comando='dir'
