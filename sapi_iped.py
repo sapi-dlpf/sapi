@@ -53,11 +53,11 @@ if sys.version_info <= (3, 0):
 # GLOBAIS
 # =======================================================================
 Gprograma = "sapi_iped.py"
-Gversao = "1.0"
+Gversao = "1.1"
 
 # Controle de tempos/pausas
 GtempoEntreAtualizacoesStatus = 180
-GdormirSemServico = 10  # 60
+GdormirSemServico = 60
 GmodoInstantaneo = False
 # GmodoInstantaneo = True
 
@@ -129,9 +129,10 @@ def inicializar():
 
         except Exception as e:
             # Não importa a falha...irá ficar tentanto eternamente
-            print_log_dual("Falhou durante procedimento iniciais: ", str(e))
+            print_log_dual("Falhou durante inicialização: ", str(e))
             dormir(GdormirSemServico)
-            print_log_dual("Tentando inicialização novamente")
+            print_log_dual("Tentando inicializar novamente")
+            continue
 
         # Verifica se máquina corresponde à configuração recebida, ou seja, se todos os programas de IPED
         # que deveriam estar instalados realmente estão instalados
@@ -241,7 +242,11 @@ def armazenar_texto_tarefa(codigo_tarefa, titulo, conteudo):
 
 
 def armazenar_texto_log_iped(codigo_tarefa, caminho_log_iped):
+
     # Le arquivo de log do iped e faz upload
+    if not os.path.exists(caminho_log_iped):
+        print_log("Arquivo de log de IPED não existe, logo, upload não foi efetuado")
+        return
 
     # Por enquanto, vamos ler tudo, mas talvez mais tarde seja melhor sintetizar, removendo informações sem valor
     # que só interesseriam para o desenvolvedor
@@ -262,6 +267,7 @@ def armazenar_texto_log_iped(codigo_tarefa, caminho_log_iped):
 
 
 # Devolve ao servidor uma tarefa
+# Retorna sempre False
 def devolver(codigo_tarefa, texto_status):
 
     erro="Devolvendo [[tarefa:" + codigo_tarefa+ "]] ao servidor (para ser executada por outro agente) em função de ERRO: " + texto_status
@@ -284,7 +290,7 @@ def devolver(codigo_tarefa, texto_status):
     # vamos dormir por um tempo longo
     dormir(3 * 60, "Pausa para dar oportunidade de outro agente pegar tarefa")
 
-    # Retorna false, para uso
+    # Retorna false, para uso pelo chamador
     return False
 
 # Aborta tarefa.
@@ -356,6 +362,7 @@ def acompanhar_iped(codigo_tarefa, caminho_tela_iped):
         if texto_status is not None:
             print_log("IPED status: ",texto_status)
             atualizar_apenas_status(codigo_tarefa, texto_status)
+            print_log("Status atualizado para tarefa [",codigo_tarefa,"] : ", texto_status)
             # Intervalo entre atualizações de status
             dormir(GtempoEntreAtualizacoesStatus, "Dormindo entre atualização de status do IPED")
         else:
@@ -412,8 +419,8 @@ def executa_iped(codigo_tarefa, comando, caminho_destino, caminho_log_iped, cami
         os.makedirs(caminho_destino)
     except Exception as e:
         erro = "Não foi possível criar pasta de destino: " + str(e)
-        # Aborta tarefa
-        return abortar(codigo_tarefa, erro)
+        # Pode ter alguma condição temporária impedindo. Continuar tentando.
+        return devolver(codigo_tarefa, erro)
 
     # Confere se deu certo
     if not os.path.exists(caminho_destino):
@@ -442,6 +449,8 @@ def executa_iped(codigo_tarefa, comando, caminho_destino, caminho_log_iped, cami
         # Registra comando iped na situação
         atualizar_status_servidor_loop(codigo_tarefa, GIpedExecutando, "Chamando IPED: " + comando)
         # Executa comando
+        # Simula um erro de java não instalado
+        # comando=comando.replace("java", "javaX")
         resultado = subprocess.check_output(comando, shell=True, stderr=subprocess.STDOUT, universal_newlines=True)
     except subprocess.CalledProcessError as e:
         # Se der algum erro, não volta nada acima, mas tem como capturar pegando o output da exception
@@ -470,7 +479,9 @@ def executa_iped(codigo_tarefa, comando, caminho_destino, caminho_log_iped, cami
 
     if deu_erro:
         # Aborta tarefa
-        erro = "IPED falhou (retornou exit code de erro) : " + erro_exception
+        erro = "Chamada de IPED falhou (retornou exit code de erro). Analise arquivo de resultado "
+        if erro_exception!="":
+            erro = erro + ": " + erro_exception
         # Tolerância a Falhas: Permite que outro agente execute
         return devolver(codigo_tarefa, erro)
 
@@ -570,10 +581,12 @@ def calcula_hash_iped(codigo_tarefa, caminho_destino):
     return True
 
 
+# Ajuste para execução multicase
 def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
 
     # ------------------------------------------------------------------------------------------------------------------
-    # Ajuste para execução multicase: Copia pasta lib para pasta do memorando
+    # Pasta LIB => Esta pasta contém os programas java e bibliotecas utilizados na pesquisa
+    # Efetua a cópia da pasta lib do item para a pasta raiz (memorando), caso isto já não tenha sido feito anteriormente
     # ------------------------------------------------------------------------------------------------------------------
 
     # Determina caminho para a pasta lib, a qual deve ficar na pasta de memorando
@@ -609,10 +622,133 @@ def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
         return abortar(codigo_tarefa, erro)
 
     # ------------------------------------------------------------------------------------------------------------------
-    # Ajuste para execução multicase: Cria arquivo bat "ferramenta_pesquisa.bat"
+    # Pasta CONF => Copia a pasta conf do item para a raiz (memorando), caso isto ainda não tenha sido feito
+    # A rigor, cada item pode ter uma configuração indepenente, logo existe um problema conceitual aqui.
+    # Mas como todos são rodados pelo sistema, isto não deve dar diferença
+    # ------------------------------------------------------------------------------------------------------------------
+    caminho_conf = caminho_memorando + "conf"
+
+    # Se pasta conf não existe, cria pasta, copiando da pasta de processamento de IPED do item
+    if not os.path.exists(caminho_conf):
+        try:
+            caminho_conf_do_item = caminho_destino + "/indexador/conf"
+            print_log("Copiando conf do item [" + caminho_conf_do_item + "] " +
+                      " para conf da pasta raiz [" + caminho_conf + "], para rodar multicase")
+            shutil.copytree(caminho_conf_do_item, caminho_conf)
+        except Exception as e:
+            erro = "Não foi possível copiar conf do item para conf da pasta raiz: " + str(e)
+            # Neste caso, aborta tarefa, pois este erro deve ser analisado
+            return abortar(codigo_tarefa, erro)
+
+    # Confere se conf existe
+    if os.path.exists(caminho_conf):
+        print_log("Encontrada pasta [" + caminho_conf + "]: ok")
+    else:
+        erro = "Situação inesperada: Pasta [" + caminho_conf + "] não existe"
+        # Neste caso, aborta tarefa, pois este erro deve ser analisado
+        return abortar(codigo_tarefa, erro)
+
+    # ------------------------------------------------------------------------------------------------------------------
+    # Gera arquivo contendo as listas de pasta dos itens, para ser utilizado na opção multicase
+    # Este passo sempre é executado e o arquivo é refeito, refletindo o conteúdo completo da pasta
+    # ------------------------------------------------------------------------------------------------------------------
+    arquivo_pastas="iped-itens.txt"
+    caminho_arquivo_pastas = caminho_memorando + arquivo_pastas
+
+    # Recupera lista de pastas
+    lista_pastas=list()
+    for root, subdirs, files in os_walklevel(caminho_memorando, level=1):
+        if ("_iped" in root):
+            # Converte caminho absoluto em relativo
+            # Exemplo:
+            # De    \\gtpi-sto-01\storage\Memorando_1086-16\item11\item11_extracao_iped
+            # para  .\item11\item11_extracao_iped'
+            pasta=".\\" +root.replace(caminho_memorando,'')
+            lista_pastas.append(pasta)
+
+    # Criar/recria arquivo
+    try:
+        print_log("Criando/Atualizando arquivo [" + caminho_arquivo_pastas + "]")
+        # Cria arquivo
+        f = open(caminho_arquivo_pastas, 'w')
+        # Escreve lista de pastas, cada pasta em uma linha
+        f.write("\n".join(lista_pastas))
+        f.close()
+    except Exception as e:
+        erro = "Não foi possível criar arquivo: " + str(e)
+        # Neste caso, aborta tarefa, pois este erro deve ser analisado
+        return abortar(codigo_tarefa, erro)
+
+
+
+    # ------------------------------------------------------------------------------------------------------------------
+    # Cria arquivo bat "ferramenta_pesquisa.bat"
+    # Este será o arquivo que o usuário irá clicar para invocar o IPED multicase
     # ------------------------------------------------------------------------------------------------------------------
     nome_bat = "ferramenta_pesquisa.bat"
-    conteudo_bat='java -jar "lib/iped-search-app.jar" -multicases .'
+
+    conteudo_bat="""
+@echo off
+REM ====================================================================================
+REM SAPI - Carregamento do caso (multicase)
+REM NAO ALTERE ESTE PROGRAMA
+REM
+REM Invoca IPED multicase, carregando todos os itens do arquivo iped_itens
+REM
+REM Instruções para O PCF:
+REM =======================
+REM Caso seja necessário subdividir o caso em várias mídias de destino,
+REM crie arquivos iped_itens.txt para cada subconjunto de itens.
+REM Desta forma, cada mídia carregará os itens correspondentes.
+REM A falha na execução deste procedimento poderá gerar lentidão na carga do caso.
+REM
+REM ====================================================================================
+
+REM Ajusta diretório corrente para a pasta de armazenamento do script
+CD /D %~dp0
+
+REM Verifica ambiente
+echo - Verificando ambiente para execução do IPED.
+
+java -version
+if errorlevel 1 (
+   echo(
+   echo(
+   echo *** ERRO JAVA NAO INSTALADO
+   echo(
+   echo Proceda a instalacao do Java Runtime Environment "JRE",
+   echo disponível gratuitamente no sítio da Internet "http://www.java.com".
+   echo(
+   echo Em caso de dificuldade, solicite apoio ao seu suporte de informática.
+   echo(
+   pause
+   exit /b %errorlevel%
+)
+
+echo Java localizado
+
+java -version 2>&1 | find "1.8" > nul
+if errorlevel 1 (
+   echo(
+   echo *** ERRO: JAVA EM VERSAO INCORRETA. INSTALE JAVA 1.8 ou superior
+   echo(
+   pause
+   exit /b %errorlevel%
+)
+
+echo - Ambiente ok.
+echo - Carregando IPED.
+echo(
+echo ================= IPED (ferramenta_pesquisa.bat) =============================
+echo IMPORTANTE: Mantenha esta janela aberta enquanto estiver utilizando o IPED.
+echo Se você fechar esta janela, o programa de pesquisa (IPED) será finalizado.
+echo Após você encerrar o IPED, esta janela fechará automaticamente.
+echo ===============================================================================
+echo(
+
+java -jar "lib/iped-search-app.jar" -multicases iped-itens.txt
+        """
+
     caminho_bat = caminho_memorando + nome_bat
 
     # Se não existe, cria
@@ -635,6 +771,9 @@ def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
         erro = "Situação inesperada: Arquivo [" + caminho_bat + "] não existe"
         # Neste caso, aborta tarefa, pois este erro deve ser analisado
         return abortar(codigo_tarefa, erro)
+
+
+    die('ponto733')
 
 
     # Tudo certo, ajuste multicase concluído
@@ -697,6 +836,7 @@ def recupera_dados_laudo(codigo_tarefa, caminho_log_iped):
     return True
 
 # Executa uma tarefa de iped que esteja ao alcance do agente
+# Retorna verdadeiro se executou uma tarefa e falso se não executou nada
 def executar_uma_tarefa(lista_ipeds_suportados):
 
     # Inicializa repositório de dados para laudo
@@ -726,7 +866,7 @@ def executar_uma_tarefa(lista_ipeds_suportados):
     # Se não tem nenhuma tarefa disponível, não tem o que fazer
     if tarefa is None:
         print_log_dual("Nenhuma tarefa fornecida. Nada a fazer.")
-        return
+        return False
 
     # Ok, temos trabalho a fazer
     # ------------------------------------------------------------------
@@ -848,25 +988,25 @@ def executar_uma_tarefa(lista_ipeds_suportados):
     # Executa IPED
     sucesso=executa_iped(codigo_tarefa, comando, caminho_destino, caminho_log_iped, caminho_tela_iped)
     if not sucesso:
-        return
+        return False
 
     # Recupera dados do log para utilizar em laudo
     sucesso=recupera_dados_laudo(codigo_tarefa, caminho_log_iped)
     if not sucesso:
-        return
+        return False
 
     # 2) Cálculo de HASH
     # ====================================
     # Calcula hash
     sucesso=calcula_hash_iped(codigo_tarefa, caminho_destino)
     if not sucesso:
-        return
+        return False
 
     # 3) Ajusta ambiente para Multicase
     # =================================
     sucesso=ajusta_multicase(tarefa, codigo_tarefa, caminho_destino)
     if not sucesso:
-        return
+        return False
 
 
     # Tudo certo, finalizado com sucesso
@@ -874,7 +1014,7 @@ def executar_uma_tarefa(lista_ipeds_suportados):
     dados_relevantes['laudo'] = Gdados_laudo
     atualizar_status_servidor_loop(codigo_tarefa, GFinalizadoComSucesso, "Tarefa de IPED completamente concluída",
                                    dados_relevantes)
-    return
+    return True
 
 
 # ======================================================================
@@ -884,6 +1024,8 @@ def executar_uma_tarefa(lista_ipeds_suportados):
 if __name__ == '__main__':
 
 
+    # testes gerais
+
     # caminho_destino = "Memorando_1086-16/item11/item11_extracao_iped/"
     # partes=caminho_destino.split("/")
     # subpasta_destino=partes[len(partes)-1]
@@ -892,34 +1034,6 @@ if __name__ == '__main__':
     #
     # var_dump(subpasta_destino)
     # die('ponto974')
-
-
-    # testes gerais
-    # comando='dir'
-    # comando='java -version'
-    # comando='java' #Executa mas com exit code =1
-    # caminho_origem  ="C:\\teste_iped\\Memorando_1086-16\\item11\\item11_extracao"
-    # caminho_destino ="C:\\teste_iped\\Memorando_1086-16\\item11\\item11_extracao_iped"
-    # comando='java -Xmx24G -jar c:\\iped-basico-3.11\\iped.jar -d ' + caminho_origem + " -o " + caminho_destino
-    # resultado=''
-    # deu_erro=False
-    # print(comando)
-    # try:
-    #     resultado = subprocess.check_output(comando, shell=True, stderr=subprocess.STDOUT, universal_newlines=True)
-    # except subprocess.CalledProcessError as e:
-    #     # Se der algum erro, não volta nada acima, mas tem como capturar pegando o output da exception
-    #     resultado = str(e.output)
-    #     deu_erro=True
-    # except Exception as e:
-    #     # Alguma outra coisa aconteceu...
-    #     print(str(e))
-    #     die('ponto600')
-    #
-    # # java -jar Indexador/lib/iped-search-app.jar
-    # var_dump(deu_erro)
-    # var_dump(resultado)
-    # die('ponto2061')
-
 
 
 
@@ -942,13 +1056,14 @@ if __name__ == '__main__':
 
     # Loop de execução de tarefas.
     # ------------------------------------------------------------------------------------------------------------------
-    # Por enquanto, fica em loop eterno
+    # Por enquanto, fica em loop eterno (usuário tem que abortar manualmente CTR-C)
     # Para a versão 2.0, haverá um mecanismo de cancelamento, através da negação do servidor em dar continuidade ou
     # iniciar tarefas para um determinado agente / programa
     while (True):
-        executar_uma_tarefa(lista_ipeds)
-        # Pausa entre execuções de tarefa
-        dormir(GdormirSemServico)
+        executou=executar_uma_tarefa(lista_ipeds)
+        # Se não executou nada, faz uma pausa entre tarefas
+        if not executou:
+            dormir(GdormirSemServico)
 
     # Finalização do programa
     # -----------------------------------------------------------------------------------------------------------------

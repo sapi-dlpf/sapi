@@ -76,6 +76,7 @@ Gversao_sapilib = "0.7"
 
 # Valores de codigo_situacao_status (para atualizar status de tarefas)
 # --------------------------------------------------------------------
+GManterSituacaoAtual = 0
 GAguardandoPCF = 1
 GSemPastaNaoIniciado = 1
 GAguardandoProcessamento = 5
@@ -83,6 +84,11 @@ GAbortou = 8
 GDespachadoParaAgente = 20
 GPastaDestinoCriada = 30
 GEmAndamento = 40
+GIpedExecutando = 60
+GIpedFinalizado = 62
+GIpedHashCalculado = 65
+GIpedMulticaseAjustado = 68
+
 GFinalizadoComSucesso = 95
 
 # Configuração dos ambientes
@@ -202,7 +208,7 @@ def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambie
             Gparini['servidor_sistema'] = amb['servidor_sistema']
             Gparini['url_base'] = url_base
             # Como token, por equanto será utilizado um valor fixo
-            Gparini['servidor_token'] = 'token_fixo_v1'
+            Gparini['servidor_token'] = 'token_fixo_v0_7'
             # ok
             break
 
@@ -219,9 +225,9 @@ def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambie
 
     # Tudo certo
     Ginicializado = True
-    print_log("Inicializado SAPILIB: agente=", _obter_parini('nome_agente'),
-              "para ambiente=", _obter_parini('nome_ambiente'),
-              "com servidor em: ", _obter_parini('servidor_ip'))
+    print_log("Inicializado SAPILIB: Agente= ", _obter_parini('nome_agente'),
+              " Ambiente= ", _obter_parini('nome_ambiente'),
+              " Servidor=  ", _obter_parini('servidor_ip'))
 
     return
 
@@ -293,7 +299,7 @@ def sapisrv_reportar_erro_cliente(
     # Agente tem que ser tolerante a erros, e ficar tentando sempre.
     # Logo, iremos registrar no log e levantar uma exceção, deixando o chamador decidir o que fazer
     if not sucesso:
-        print_log_dual("sapisrv_reportar_erro_cliente.php", msg_erro)
+        print_log_dual("sapisrv_reportar_erro_cliente.php: ", msg_erro)
         # Não tem tarefa disponível para processamento
         raise SapiExceptionGeral("Não foi possível reportar erro ao servidor")
 
@@ -432,6 +438,35 @@ def sapisrv_atualizar_status_tarefa(codigo_tarefa, codigo_situacao_tarefa, statu
     return (sucesso, msg_erro)
 
 
+
+# Atualiza status da tarefa do sapisrv
+# ----------------------------------------------------------------------------------------------------------------------
+def sapisrv_armazenar_texto(tipo_objeto, codigo_objeto, titulo, conteudo, registrar_log=False):
+    # Parâmetros
+    param = {'tipo_objeto': tipo_objeto,
+             'codigo_objeto': codigo_objeto,
+             'titulo': titulo,
+             'conteudo': conteudo
+             }
+
+    metodo_invocar = 'post'
+
+    # Invoca sapi_srv
+    (sucesso, msg_erro, resultado) = sapisrv_chamar_programa(
+        "sapisrv_armazenar_texto.php", param, registrar_log, metodo=metodo_invocar)
+
+    # Registra em log
+    if registrar_log:
+        if sucesso:
+            print_log_dual("Atualizado texto no servidor: ", titulo)
+        else:
+            # Se der erro, registra no log e prossegue (tolerância a falhas)
+            print_log_dual("Não foi possível atualizar texto no servidor: ", msg_erro)
+
+    # Retorna se teve ou não sucesso, e caso negativo a mensagem de erro
+    return (sucesso, msg_erro)
+
+
 # Invoca Sapi server (sapisrv)
 # ----------------------------------------------------------------------------------------------------------------------
 def sapisrv_chamar_programa(programa, parametros, abortar_insucesso=False, registrar_log=False, metodo='get'):
@@ -439,7 +474,8 @@ def sapisrv_chamar_programa(programa, parametros, abortar_insucesso=False, regis
     # Por equanto, vamos utilizar como token a versão da sapilib
     # Posteriormente, quando houver validação do software, substituir por algo mais elaborado
     parametros['execucao_nome_agente'] = _obter_parini('nome_agente')
-    parametros['programa'] = _obter_parini('programa')
+    parametros['execucao_programa'] = _obter_parini('programa')
+    parametros['execucao_programa_versao'] = _obter_parini('programa_versao')
     parametros['token'] = _obter_parini('servidor_token')
 
     # xxx
@@ -447,7 +483,7 @@ def sapisrv_chamar_programa(programa, parametros, abortar_insucesso=False, regis
         if metodo == 'get':
             return _sapisrv_chamar_programa_get(programa, parametros, registrar_log)
         elif metodo == 'post':
-            return _sapisrv_chamar_programa_post(programa, parametros, abortar_insucesso, registrar_log)
+            return _sapisrv_chamar_programa_post(programa, parametros, registrar_log)
         else:
             erro_fatal("sapisrv_chamar_programa: Método inválido: ", metodo)
     except BaseException as e:
@@ -733,7 +769,6 @@ def sapisrv_post_sucesso(programa, parametros):
         print_tela_log("Erro inesperado reportado por: ", programa, " via post")
         print_tela_log(d["msg_erro"])
         print("Parâmetros utilizados")
-        var_dump(parametros)
         raise SapiExceptionGeral("Operação interrompida")
 
     # Tudo certo
@@ -1098,6 +1133,18 @@ def converte_bytes_humano(size, precision=1):
         suffix_index += 1  # increment the index of the suffix
         size /= 1024.0  # apply the division
     return "%.*f%s" % (precision, size, suffixes[suffix_index])
+
+
+# Navega em uma pasta até o nível (level) de profundidade definido
+def os_walklevel(some_dir, level=1):
+    some_dir = some_dir.rstrip(os.path.sep)
+    assert os.path.isdir(some_dir)
+    num_sep = some_dir.count(os.path.sep)
+    for root, dirs, files in os.walk(some_dir):
+        yield root, dirs, files
+        num_sep_this = root.count(os.path.sep)
+        if num_sep + level <= num_sep_this:
+            del dirs[:]
 
 
 # Retorna True se existe storage montado no ponto_montagem
