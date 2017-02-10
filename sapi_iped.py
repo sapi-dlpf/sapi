@@ -53,7 +53,7 @@ if sys.version_info <= (3, 0):
 # GLOBAIS
 # =======================================================================
 Gprograma = "sapi_iped.py"
-Gversao = "1.1"
+Gversao = "1.3"
 
 # Controle de tempos/pausas
 GtempoEntreAtualizacoesStatus = 180
@@ -63,6 +63,7 @@ GmodoInstantaneo = False
 
 #
 Gconfiguracao = dict()
+Gcaminho_pid="sapi_iped_pid.txt"
 
 # Dados para laudo
 Gdados_laudo = None
@@ -103,7 +104,7 @@ def dormir(tempo, rotulo=None):
 # Procedimento de inicialização
 # Durante estes procedimento será determinado se comunicação a com servidor está ok,
 # se este programa está habilitado para operar com o servidor, etc
-# Existe um mecanismo para determinar automaticamente se será atulizado o servidor de desenvolvimento ou produção
+# Existe um mecanismo para determinar automaticamente se será atualizado o servidor de desenvolvimento ou produção
 # (ver documentação da função). Caso prefira definir manualmente, adicione ambiente='desenv' (ou 'prod')
 # O nome do agente também é determinado por default através do hostname.
 # ---------------------------------------------------------------------------------------------------------------------
@@ -584,22 +585,60 @@ def calcula_hash_iped(codigo_tarefa, caminho_destino):
 # Ajuste para execução multicase
 def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
 
-    # ------------------------------------------------------------------------------------------------------------------
-    # Pasta LIB => Esta pasta contém os programas java e bibliotecas utilizados na pesquisa
-    # Efetua a cópia da pasta lib do item para a pasta raiz (memorando), caso isto já não tenha sido feito anteriormente
-    # ------------------------------------------------------------------------------------------------------------------
-
-    # Determina caminho para a pasta lib, a qual deve ficar na pasta de memorando
-    # Exemplo:
-    # caminho_destino = "Memorando_1086-16/item11/item11_extracao_iped"
-    # pasta_item = "item11"
-    # caminho_lib = "Memorando_1086-16/lib"
+    # Ajusta caminho de destino
+    caminho_destino = caminho_destino + "\\"
 
     # Extraí pasta do memorando
     # Localiza pasta do item no caminho de destino
     inicio_pasta_item = caminho_destino.find(tarefa["pasta_item"])
     caminho_memorando = caminho_destino[0:inicio_pasta_item]
-    caminho_lib = caminho_memorando + "lib"
+
+    # ------------------------------------------------------------------------------------------------------------------
+    # O iped multicase possui a seguinte estrutura:
+    # Memorando_xxxx_xx
+    #   + multicase
+    #     + indexador
+    #       + lib
+    #       + conf
+    #       + Ferramenta de Pesquisa.exe
+    #       + iped-itens.txt
+    # ------------------------------------------------------------------------------------------------------------------
+
+    caminho_iped_multicase = caminho_memorando + "multicase\\"
+    caminho_indexador = caminho_iped_multicase + "indexador\\"
+
+    try:
+        if not os.path.exists(caminho_iped_multicase):
+            os.makedirs(caminho_iped_multicase)
+
+        if not os.path.exists(caminho_indexador):
+            os.makedirs(caminho_indexador)
+    except Exception as e:
+        erro = "Não foi possível criar estrutura de pasta para multicase " + str(e)
+        # Neste caso, aborta tarefa, pois este erro deve ser analisado
+        return abortar(codigo_tarefa, erro)
+
+    # Confere criação de pasta
+    if os.path.exists(caminho_iped_multicase):
+        print_log("Encontrada pasta [" + caminho_iped_multicase + "]: ok")
+    else:
+        erro = "Situação inesperada: Pasta [" + caminho_iped_multicase + "] não existe"
+        # Neste caso, aborta tarefa, pois este erro deve ser analisado
+        return abortar(codigo_tarefa, erro)
+
+    if os.path.exists(caminho_indexador):
+        print_log("Encontrada pasta [" + caminho_indexador + "]: ok")
+    else:
+        erro = "Situação inesperada: Pasta [" + caminho_indexador + "] não existe"
+        # Neste caso, aborta tarefa, pois este erro deve ser analisado
+        return abortar(codigo_tarefa, erro)
+
+
+    # ------------------------------------------------------------------------------------------------------------------
+    # Pasta LIB => Esta pasta contém os programas java e bibliotecas utilizados na pesquisa
+    # Efetua a cópia da pasta lib do item para a pasta do iped multicase, caso isto já não tenha sido feito anteriormente
+    # ------------------------------------------------------------------------------------------------------------------
+    caminho_lib = caminho_indexador + "lib"
 
     # Se pasta lib não existe, cria pasta, copiando da pasta de processamento de IPED do item
     if not os.path.exists(caminho_lib):
@@ -622,11 +661,11 @@ def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
         return abortar(codigo_tarefa, erro)
 
     # ------------------------------------------------------------------------------------------------------------------
-    # Pasta CONF => Copia a pasta conf do item para a raiz (memorando), caso isto ainda não tenha sido feito
+    # Pasta CONF => Copia a pasta conf do item para a pasta do iped multicase, caso isto ainda não tenha sido feito
     # A rigor, cada item pode ter uma configuração indepenente, logo existe um problema conceitual aqui.
     # Mas como todos são rodados pelo sistema, isto não deve dar diferença
     # ------------------------------------------------------------------------------------------------------------------
-    caminho_conf = caminho_memorando + "conf"
+    caminho_conf = caminho_indexador + "conf"
 
     # Se pasta conf não existe, cria pasta, copiando da pasta de processamento de IPED do item
     if not os.path.exists(caminho_conf):
@@ -648,12 +687,35 @@ def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
         # Neste caso, aborta tarefa, pois este erro deve ser analisado
         return abortar(codigo_tarefa, erro)
 
+
+
+    # ------------------------------------------------------------------------------------------------------------------
+    # Arquivo Ferramenta de Pesquisa.exe => Copia do item para a pasta do iped multicase
+    # ------------------------------------------------------------------------------------------------------------------
+    nome_arquivo="Ferramenta de pesquisa.exe"
+    caminho_de = caminho_destino + nome_arquivo
+    caminho_para = caminho_iped_multicase + nome_arquivo
+    try:
+        shutil.copy(caminho_de, caminho_para)
+    except Exception as e:
+        erro = "Não foi possível copiar [" + caminho_de + "] para [" + caminho_para +"] : " + str(e)
+        # Neste caso, aborta tarefa, pois este erro deve ser analisado
+        return abortar(codigo_tarefa, erro)
+
+    # Confere se copiou ok
+    if os.path.isfile(caminho_para):
+        print_log("Encontrado arquivo [" + caminho_para + "]: ok")
+    else:
+        erro = "Situação inesperada: Arquivo [" + caminho_para + "] não existe"
+        # Neste caso, aborta tarefa, pois este erro deve ser analisado
+        return abortar(codigo_tarefa, erro)
+
     # ------------------------------------------------------------------------------------------------------------------
     # Gera arquivo contendo as listas de pasta dos itens, para ser utilizado na opção multicase
     # Este passo sempre é executado e o arquivo é refeito, refletindo o conteúdo completo da pasta
     # ------------------------------------------------------------------------------------------------------------------
     arquivo_pastas="iped-itens.txt"
-    caminho_arquivo_pastas = caminho_memorando + arquivo_pastas
+    caminho_arquivo_pastas = caminho_iped_multicase + arquivo_pastas
 
     # Recupera lista de pastas
     lista_pastas=list()
@@ -662,8 +724,8 @@ def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
             # Converte caminho absoluto em relativo
             # Exemplo:
             # De    \\gtpi-sto-01\storage\Memorando_1086-16\item11\item11_extracao_iped
-            # para  .\item11\item11_extracao_iped'
-            pasta=".\\" +root.replace(caminho_memorando,'')
+            # para  ..\item11\item11_extracao_iped'
+            pasta="..\\" +root.replace(caminho_memorando,'')
             lista_pastas.append(pasta)
 
     # Criar/recria arquivo
@@ -690,64 +752,16 @@ def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
     conteudo_bat="""
 @echo off
 REM ====================================================================================
-REM SAPI - Carregamento do caso (multicase)
-REM NAO ALTERE ESTE PROGRAMA
-REM
-REM Invoca IPED multicase, carregando todos os itens do arquivo iped_itens
-REM
-REM Instruções para O PCF:
-REM =======================
-REM Caso seja necessário subdividir o caso em várias mídias de destino,
-REM crie arquivos iped_itens.txt para cada subconjunto de itens.
-REM Desta forma, cada mídia carregará os itens correspondentes.
-REM A falha na execução deste procedimento poderá gerar lentidão na carga do caso.
-REM
+REM SAPI - Carregamento do caso no iped, modo multicase
 REM ====================================================================================
 
-REM Ajusta diretório corrente para a pasta de armazenamento do script
+REM Ajusta diretório corrente para a pasta de armazenamento do multicase
 CD /D %~dp0
+CD multicase
 
-REM Verifica ambiente
-echo - Verificando ambiente para execução do IPED.
-
-java -version
-if errorlevel 1 (
-   echo(
-   echo(
-   echo *** ERRO JAVA NAO INSTALADO
-   echo(
-   echo Proceda a instalacao do Java Runtime Environment "JRE",
-   echo disponível gratuitamente no sítio da Internet "http://www.java.com".
-   echo(
-   echo Em caso de dificuldade, solicite apoio ao seu suporte de informática.
-   echo(
-   pause
-   exit /b %errorlevel%
-)
-
-echo Java localizado
-
-java -version 2>&1 | find "1.8" > nul
-if errorlevel 1 (
-   echo(
-   echo *** ERRO: JAVA EM VERSAO INCORRETA. INSTALE JAVA 1.8 ou superior
-   echo(
-   pause
-   exit /b %errorlevel%
-)
-
-echo - Ambiente ok.
-echo - Carregando IPED.
-echo(
-echo ================= IPED (ferramenta_pesquisa.bat) =============================
-echo IMPORTANTE: Mantenha esta janela aberta enquanto estiver utilizando o IPED.
-echo Se você fechar esta janela, o programa de pesquisa (IPED) será finalizado.
-echo Após você encerrar o IPED, esta janela fechará automaticamente.
-echo ===============================================================================
-echo(
-
-java -jar "lib/iped-search-app.jar" -multicases iped-itens.txt
-        """
+REM Executa Ferramenta de Pesquisa, passando os parâmetros para multicase
+"Ferramenta de Pesquisa.exe" -multicases iped-itens.txt
+"""
 
     caminho_bat = caminho_memorando + nome_bat
 
@@ -773,8 +787,7 @@ java -jar "lib/iped-search-app.jar" -multicases iped-itens.txt
         return abortar(codigo_tarefa, erro)
 
 
-    die('ponto733')
-
+    die('ponto789')
 
     # Tudo certo, ajuste multicase concluído
     atualizar_status_servidor_loop(codigo_tarefa, GIpedMulticaseAjustado, "Ajuste multicase efetuado")
@@ -1017,12 +1030,70 @@ def executar_uma_tarefa(lista_ipeds_suportados):
     return True
 
 
+def procura_pid_python(pid_prog):
+
+    # Verifica se processo ainda está rodando
+    print_log("Procurando por pid [", pid_prog, "] que esteja rodando python")
+    a = os.popen("tasklist").readlines()
+    for x in a:
+        nome_processo = x[0:28]
+        pid = x[28:34]
+        pid = pid.strip()
+        if not pid.isdigit():
+            # Se não é número, despreza
+            continue
+
+        # Se números de processo coincidem,
+        # e trata-se de um programa python (para garantir que o pid não foi reutiliza por alguma outra coisa)
+        # Isto aqui não é um teste perfeito, mas considerando o cenário de execução, deve funcionar sem problemas
+        if (int(pid) == int(pid_prog)):
+            print_log("pid alvo localizado: ", pid, " - ", nome_processo)
+            if ("python" in nome_processo):
+                # ok, encontrado e rodando python
+                print_log("Ok, processo rodando python")
+                return True
+            else:
+                print_log(
+                    "Processo NÃO está rodando python. Provavelmente foi reutilizado pelo SO.")
+                return False
+
+
+    # Não achou
+    return False
+
+# Se encontrar, retorna verdadeiro
+def existe_outra_instancia_rodando(caminho_arquivo_pid):
+
+    # Verifica se já está rodando
+    if os.path.isfile(caminho_arquivo_pid):
+        # Recupera pid armazenado no arquivo
+        f = open(caminho_arquivo_pid, "r")
+        pid_prog = f.readline().strip()
+        f.close()
+        if not pid_prog.isdigit():
+            # Isto não deveria acontecer.
+            # Neste caso, vamos ignorar, pois se abortar, não vai rodar nunca
+            print_log("AVISO: PID armazenado em [", caminho_arquivo_pid, "] armazenado não contém número: [", pid_prog, "]")
+        else:
+            if procura_pid_python(pid_prog):
+                print_log("Este programa já está rodando, no processo [", pid_prog, "]")
+                return True
+
+    # Não está rodando
+    # Grava pid em arquivo, para teste de simultaneidade
+    # ------------------------------------------------------------------------
+    f = open(caminho_arquivo_pid, "w")
+    f.write(str(os.getpid()))
+    f.close()
+
+    #
+    return False
+
 # ======================================================================
 # Rotina Principal 
 # ======================================================================
 
 if __name__ == '__main__':
-
 
     # testes gerais
 
@@ -1046,6 +1117,12 @@ if __name__ == '__main__':
     cls()
     print(Gprograma, "Versão", Gversao)
     print()
+
+    # Verifica se programa já está rodando (outra instância)
+    if existe_outra_instancia_rodando(Gcaminho_pid):
+        print_log("Finalizando execução, pois só pode haver uma única instância deste programa")
+        sys.exit(0)
+
 
     # Inicialização do programa
     # -----------------------------------------------------------------------------------------------------------------
