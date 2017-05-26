@@ -15,8 +15,15 @@
 #  - Atualização do servidor da situação da tarefa
 # Histórico:
 #  - v1.0 : Inicial
+#  - v1.5 : Tratamento para versão de IPED desatualizado. Neste caso, encerra programa
+#           para permitir que entre em execução o programa de atualização
+#           O programa também é encerrado sempre quando não existe nenhuma tarefa a ser efetuada,
+#           ou quando ocorrem erros não previstos,
+#           visando aproveitar este intervalo atualizar a versão, deixando o programa mais tolerante a falhas.
 # ======================================================================================================================
 # TODO:
+# - Limpar pasta indexador no final da execução (IPED não está conseguindo limpar)
+# - Rodar como serviço e/ou tarefa agendada do windows (talvez seja melhor a segunda, pois faz restart)
 # ======================================================================================================================
 
 # ======================================================================
@@ -52,8 +59,8 @@ if sys.version_info <= (3, 0):
 # =======================================================================
 # GLOBAIS
 # =======================================================================
-Gprograma = "sapi_iped.py"
-Gversao = "1.3"
+Gprograma = "sapi_iped"
+Gversao = "1.5.2"
 
 # Controle de tempos/pausas
 GtempoEntreAtualizacoesStatus = 180
@@ -65,6 +72,8 @@ GmodoInstantaneo = False
 Gconfiguracao = dict()
 Gcaminho_pid="sapi_iped_pid.txt"
 
+GnomeProgramaInterface="IPED-SearchApp.exe"
+
 # Dados para laudo
 Gdados_laudo = None
 
@@ -75,7 +84,7 @@ Gdados_laudo = None
 
 # Para código produtivo, o comando abaixo deve ser substituído pelo
 # código integral de sapi.py, para evitar dependência
-from sapilib_0_7 import *
+from sapilib_0_7_2 import *
 
 
 # **********************************************************************
@@ -87,17 +96,38 @@ from sapilib_0_7 import *
 # Funções auxiliares
 # ======================================================================
 
+
 # Faz um pausa por alguns segundos
 # Dependendo de parâmetro, ignora a pausa
 def dormir(tempo, rotulo=None):
     texto="Dormindo por " + str(tempo) + " segundos"
     if rotulo is not None:
         texto = rotulo + ": " + texto
-    print_log_dual(texto)
+    print_log(texto)
     if (not GmodoInstantaneo):
         time.sleep(tempo)
     else:
-        print_log_dual("Sem pausa...deve ser usado apenas para debug...modo instantâneo (ver GmodoInstantaneo)")
+        print_log("Sem pausa...deve ser usado apenas para debug...modo instantâneo (ver GmodoInstantaneo)")
+
+
+def reinicia_sapi_iped():
+
+    print_log("Reiniciando sapi_iped.py")
+    args = sys.argv[:]
+    args.insert(0, sys.executable)
+
+    #if sys.platform == 'win32':
+    #    args = ['"%s"' % arg for arg in args]
+
+    # Escreve o que quer que esteja pendente
+    sys.stdout.flush()
+
+    print_log('Reiniciando => %s' % ' '.join(args))
+    var_dump(sys.executable)
+    var_dump(args)
+    die('ponto125')
+
+    os.execv(sys.executable, args)
 
 
 # Inicialização do agente
@@ -111,53 +141,59 @@ def dormir(tempo, rotulo=None):
 def inicializar():
     global Gconfiguracao
 
+    # Lista de ipeds disponíveis para execução
     lista_ipeds_ok = list()
 
-    # Fica em loop até obter alguma conclusão sobre a inicialização,
-    # pois o servidor pode momentaneamente não estar disponível (problema de rede por exemplo)
-    while True:
+    try:
+        # Efetua inicialização
+        # Neste ponto, se a versão do sapi_iped estiver desatualizada será gerado uma exceção
+        print_log("Efetuando inicialização")
+        sapisrv_inicializar(Gprograma, Gversao)  # Outros parâmetros: nome_agente='xxxx', ambiente='desenv'
 
-        try:
-            print_log_dual("Efetuando inicialização")
-            sapisrv_inicializar(Gprograma, Gversao)  # Outros parâmetros: nome_agente='xxxx', ambiente='desenv'
-            print_log_dual("Inicialização efetuada")
+        # Obtendo arquivo de configuração
+        print_log("Obtendo configuração")
+        Gconfiguracao = sapisrv_obter_configuracao_cliente(Gprograma)
+        print_log(Gconfiguracao)
 
-            # Obtendo arquivo de configuração
-            print_log_dual("Obtendo configuração")
-            Gconfiguracao = sapisrv_obter_configuracao_cliente(Gprograma)
-            print_log_dual("Configuração obtida")
-            print_log_dual(Gconfiguracao)
+    except SapiExceptionVersaoDesatualizada:
+        # Se versão do sapi_iped está desatualizada, irá tentar se auto atualizar
+        print_log("sapi_iped desatualizado, será necessário atualização")
+        return None
 
-        except Exception as e:
-            # Não importa a falha...irá ficar tentanto eternamente
-            print_log_dual("Falhou durante inicialização: ", str(e))
-            dormir(GdormirSemServico)
-            print_log_dual("Tentando inicializar novamente")
-            continue
+    except Exception as e:
+        # Para outras exceçõs, irá ficar tentanto eternamente
+        print_log("Falhou durante inicialização: ", str(e))
+        # Colocar isto aqui em uma função....
+        # Talvez já jogando no log também...
+        exc_type, exc_value, exc_traceback = sys.exc_info()
+        traceback.print_exception(exc_type, exc_value, exc_traceback,
+                                  limit=2, file=sys.stdout)
+        return None
 
-        # Verifica se máquina corresponde à configuração recebida, ou seja, se todos os programas de IPED
-        # que deveriam estar instalados realmente estão instalados
-        for t in Gconfiguracao["tipo_tarefa"]:
-            tipo = Gconfiguracao["tipo_tarefa"][t]
-            pasta_programa = tipo["pasta_programa"]
-            if os.path.exists(pasta_programa):
-                print_log_dual("Pasta de iped ", pasta_programa, " localizada")
-                lista_ipeds_ok.append(t)
-            else:
-                erro = "Não foi localizada pasta de iped: " + pasta_programa
-                reportar_erro(erro)
 
-        if len(lista_ipeds_ok) == 0:
-            erro = "Nenhum IPED habilitado nesta máquina"
-            reportar_erro(erro)
-            # Vamos dormir por um bom tempo (60 minutos), pois este erro não deve ser corrigido tão cedo
-            dormir(60 * 60)
-            continue
+    # Verifica se máquina corresponde à configuração recebida, ou seja, se todos os programas de IPED
+    # que deveriam estar instalados realmente estão instalados
+    for t in Gconfiguracao["tipo_tarefa"]:
+        tipo = Gconfiguracao["tipo_tarefa"][t]
+        pasta_programa = tipo["pasta_programa"]
+        if os.path.exists(pasta_programa):
+            #print_log("Pasta de iped ", pasta_programa, " localizada")
+            lista_ipeds_ok.append(t)
         else:
-            # Tudo bem, prossegue (mesmo que nem todos os ipeds estejam ativos)
-            break
+            erro = "Não foi localizada pasta de iped: " + pasta_programa
+            reportar_erro(erro)
 
-    # Retorna a lista de opções de execução de iped disponíveis nesta máquina
+    if len(lista_ipeds_ok) == 0:
+        # Como não achou IPED, provavelmente está configurado no servidor
+        # para que seja utilizado uma nova versão
+        # Tenta atualizar sapi_iped para sanar o problema
+        tentar_atualizar_sapi_iped=True
+        erro = "Nenhum IPED (na versão correta) encontrado nesta máquina"
+        reportar_erro(erro)
+        return None
+
+
+    # Ok, tudo certo, retorna a lista opções de execução de iped disponíveis nesta máquina
     return lista_ipeds_ok
 
 
@@ -171,7 +207,7 @@ def solicita_tarefas(lista_tipos, storage=None):
             log += " para storage =[" + storage + "]"
         else:
             log += " para qualquer storage"
-        print_log_dual(log)
+        print_log(log)
 
         # Requisita tarefa
         (disponivel, tarefa) = sapisrv_obter_iniciar_tarefa(tipo, storage=storage)
@@ -202,7 +238,7 @@ def atualizar_status_servidor_loop(codigo_tarefa, codigo_situacao_tarefa, texto_
             atualizou = True
         except Exception as e:
             atualizou = False
-            print_log_dual("Falhou atualização de situação para tarefa [", codigo_tarefa, "]. Tentando novamente")
+            print_log("Falhou atualização de situação para tarefa [", codigo_tarefa, "]. Tentando novamente")
             dormir(60)  # Tenta novamente em 1 minuto
 
         # Encerra se conseguiu atualizar
@@ -235,7 +271,7 @@ def armazenar_texto_tarefa(codigo_tarefa, titulo, conteudo):
                                       titulo=titulo,
                                       conteudo=conteudo
                                       ):
-        print_log_dual("Falhou upload de texto para tarefa [", codigo_tarefa, "]. Tentando novamente")
+        print_log("Falhou upload de texto para tarefa [", codigo_tarefa, "]. Tentando novamente")
         dormir(60)  # Tenta novamente em 1 minuto
 
     # Ok, conseguiu atualizar
@@ -312,7 +348,7 @@ def abortar(codigo_tarefa, texto_status):
     atualizar_status_servidor_loop(codigo_tarefa, codigo_situacao_tarefa, texto_status)
 
     # Ok
-    print_log_dual("Execução da tarefa abortada")
+    print_log("Execução da tarefa abortada")
 
     return False
 
@@ -321,16 +357,16 @@ def abortar(codigo_tarefa, texto_status):
 def reportar_erro(erro):
     try:
         # Registra no log (local)
-        print_log_dual("ERRO: ", erro)
+        print_log("ERRO: ", erro)
 
         # Reportanto ao servidor, para registrar no log do servidor
         sapisrv_reportar_erro_cliente(erro)
-        print_log_dual("Erro reportado ao servidor")
+        print_log("Erro reportado ao servidor")
 
     except Exception as e:
         # Se não conseguiu reportar ao servidor, deixa para lá
         # Afinal, já são dois erros seguidos (pode ser que tenha perdido a rede)
-        print_log_dual("Não foi possível reportar o erro ao servidor: ", str(e))
+        print_log("Não foi possível reportar o erro ao servidor: ", str(e))
 
 
 # Acompanha a execução do IPED e atualiza o status da tarefa
@@ -692,7 +728,7 @@ def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
     # ------------------------------------------------------------------------------------------------------------------
     # Arquivo Ferramenta de Pesquisa.exe => Copia do item para a pasta do iped multicase
     # ------------------------------------------------------------------------------------------------------------------
-    nome_arquivo="Ferramenta de pesquisa.exe"
+    nome_arquivo=GnomeProgramaInterface
     caminho_de = caminho_destino + nome_arquivo
     caminho_para = caminho_iped_multicase + nome_arquivo
     try:
@@ -760,9 +796,14 @@ CD /D %~dp0
 CD multicase
 
 REM Executa Ferramenta de Pesquisa, passando os parâmetros para multicase
-"Ferramenta de Pesquisa.exe" -multicases iped-itens.txt
+"xxx_programa_interface.exe" -multicases iped-itens.txt
 """
 
+    # Troca o nome do programa do executavel
+    conteudo_bat=conteudo_bat.replace("xxx_programa_interface.exe", GnomeProgramaInterface)
+
+
+    # Caminho para bat
     caminho_bat = caminho_memorando + nome_bat
 
     # Se não existe, cria
@@ -786,8 +827,6 @@ REM Executa Ferramenta de Pesquisa, passando os parâmetros para multicase
         # Neste caso, aborta tarefa, pois este erro deve ser analisado
         return abortar(codigo_tarefa, erro)
 
-
-    die('ponto789')
 
     # Tudo certo, ajuste multicase concluído
     atualizar_status_servidor_loop(codigo_tarefa, GIpedMulticaseAjustado, "Ajuste multicase efetuado")
@@ -860,15 +899,15 @@ def executar_uma_tarefa(lista_ipeds_suportados):
     outros_storages = True
     tarefa = None
     if Gconfiguracao["storage_unico"] != "":
-        print_log_dual("Este agente trabalha apenas com storage=", Gconfiguracao["storage_unico"])
+        print_log("Este agente trabalha apenas com storage=", Gconfiguracao["storage_unico"])
         tarefa = solicita_tarefas(lista_ipeds_suportados, Gconfiguracao["storage_unico"])
         outros_storages = False
     elif Gconfiguracao["storage_preferencial"] != "":
-        print_log_dual("Este agente trabalha com storage preferencial=", Gconfiguracao["storage_preferencial"])
+        print_log("Este agente trabalha com storage preferencial=", Gconfiguracao["storage_preferencial"])
         tarefa = solicita_tarefas(lista_ipeds_suportados, Gconfiguracao["storage_preferencial"])
         outros_storages = True
     else:
-        print_log_dual("Este agente trabalha com qualquer storage")
+        print_log("Este agente trabalha com qualquer storage")
         outros_storages = True
 
     # Se ainda não tem tarefa, e agente trabalha com outros storages, solicita para qualquer storage
@@ -878,15 +917,13 @@ def executar_uma_tarefa(lista_ipeds_suportados):
 
     # Se não tem nenhuma tarefa disponível, não tem o que fazer
     if tarefa is None:
-        print_log_dual("Nenhuma tarefa fornecida. Nada a fazer.")
+        print_log("Nenhuma tarefa fornecida. Nada a fazer.")
         return False
 
     # Ok, temos trabalho a fazer
     # ------------------------------------------------------------------
     codigo_tarefa = tarefa["codigo_tarefa"]  # Identificador único da tarefa
     codigo_situacao_tarefa = int(tarefa["codigo_situacao_tarefa"])
-
-    # var_dump(tarefa);  die('ponto340')
 
     # Verifica se é uma retomada de tarefa, ou seja,
     # uma tarefa que foi iniciada mas que não foi concluída
@@ -896,9 +933,9 @@ def executar_uma_tarefa(lista_ipeds_suportados):
 
     # Indicativo de início
     if retomada:
-        print_log_dual("Retomando tarefa interrompida: ", codigo_tarefa)
+        print_log("Retomando tarefa interrompida: ", codigo_tarefa)
     else:
-        print_log_dual("Iniciando tarefa: ", codigo_tarefa)
+        print_log("Iniciando tarefa: ", codigo_tarefa)
 
     # Para ver o conjunto completo, descomentar a linha abaixo
     # var_dump(Gconfiguracao)
@@ -907,13 +944,11 @@ def executar_uma_tarefa(lista_ipeds_suportados):
     # Teste de devolução
     #texto_status="teste de devolução"
     #return devolver(codigo_tarefa, texto_status)
-    #die('ponto712')
 
     # Teste abortar
     #texto_status="teste de abotar"
     #return abortar(codigo_tarefa, texto_status)
 
-    # die('ponto298')
 
     # Montar storage
     # ------------------------------------------------------------------
@@ -923,7 +958,7 @@ def executar_uma_tarefa(lista_ipeds_suportados):
         erro = "Acesso ao storage [" + ponto_montagem + "] falhou"
         # Talvez seja um problema de rede (trasiente)
         reportar_erro(erro)
-        print_log_dual("Problema insolúvel neste momento, mas possivelmente transiente")
+        print_log("Problema insolúvel neste momento, mas possivelmente transiente")
         # Devolve para ser executada por outro agente
         return devolver(codigo_tarefa, erro)
 
@@ -933,17 +968,17 @@ def executar_uma_tarefa(lista_ipeds_suportados):
     # Neste ponto, seria importante verificar se esta origem está ok
     # Ou seja, se existe o arquivo ou pasta de origem
     caminho_origem = ponto_montagem + tarefa["caminho_origem"]
-    print_log_dual("Caminho de origem (", caminho_origem, "): localizado")
+    print_log("Caminho de origem (", caminho_origem, "): localizado")
 
     if os.path.isfile(caminho_origem):
-        print_log_dual("Arquivo de origem encontrado no storage")
+        print_log("Arquivo de origem encontrado no storage")
     elif os.path.exists(caminho_origem):
-        print_log_dual("Pasta de origem encontrada no storage")
+        print_log("Pasta de origem encontrada no storage")
     else:
         # Se não existe nem arquivo nem pasta, tem algo muito errado aqui
         # Aborta esta tarefa para que PCF possa analisar
         erro = "Caminho de origem ["+ caminho_origem + "] não encontrado no storage"
-        print_log_dual(erro)
+        print_log(erro)
         # Abortando tarefa, pois tem algo errado aqui.
         # Não adianta ficar retentando nesta condição
         return abortar(codigo_tarefa, erro)
@@ -958,7 +993,6 @@ def executar_uma_tarefa(lista_ipeds_suportados):
     # ------------------------------------------------------------------------------------------------------------------
     # var_dump(Gconfiguracao)
     # var_dump(tarefa)
-    # die('ponto402')
 
     # Prepara parâmetros para execução das subatarefas do IPED
     # ========================================================
@@ -993,7 +1027,6 @@ def executar_uma_tarefa(lista_ipeds_suportados):
     # comando='java -Xmx24G -jar c:\\iped-basico-3.11\\iped.jar -d ' + caminho_origem + " -o " + caminho_destino
 
     # var_dump(comando)
-    # die('ponto415')
 
 
     # 1) IPED
@@ -1093,10 +1126,45 @@ def existe_outra_instancia_rodando(caminho_arquivo_pid):
 # Rotina Principal 
 # ======================================================================
 
+def main():
+    # Salva parâmetros da linhas de comando
+
+    # Processa parâmetros logo na entrada, para garantir que configurações relativas a saída sejam respeitads
+    sapi_processar_parametros_usuario()
+
+    # Cabeçalho inicial do programa
+    # ------------------------------------------------------------------------------------------------------------------
+    # Verifica se programa já está rodando (outra instância)
+    if existe_outra_instancia_rodando(Gcaminho_pid):
+        print("Já existe uma instância deste programa rodando. Abortando execução, pois só pode haver uma única instância deste programa")
+        sys.exit(0)
+
+
+    # Inicialização do programa
+    # -----------------------------------------------------------------------------------------------------------------
+    print_log(" ===== INÍCIO ", Gprograma, " - (Versao " + Gversao + ")")
+
+    while True:
+        lista_ipeds = inicializar()
+        if lista_ipeds is None or len(lista_ipeds)==0:
+            # Requer atualização para continuar
+            # Interrompe o loop, e finaliza
+            break
+
+        executou = executar_uma_tarefa(lista_ipeds)
+        if not executou:
+            # Se não tem atividade, faz uma pausa para evitar sobrecarregar o servidor com requisições
+            dormir(GdormirSemServico)
+
+
+    # Finalização do programa
+    # -----------------------------------------------------------------------------------------------------------------
+    print_log("===== FIM SAPI - ", Gprograma, " (Versao " + Gversao + ")")
+
+
 if __name__ == '__main__':
 
     # testes gerais
-
     # caminho_destino = "Memorando_1086-16/item11/item11_extracao_iped/"
     # partes=caminho_destino.split("/")
     # subpasta_destino=partes[len(partes)-1]
@@ -1104,45 +1172,6 @@ if __name__ == '__main__':
     #     subpasta_destino = partes[len(partes) - 2]
     #
     # var_dump(subpasta_destino)
-    # die('ponto974')
 
+    main()
 
-
-    # Todas as mensagens do log serão exibidas também na tela
-    ligar_log_dual()
-
-    # Cabeçalho inicial do programa
-    # ------------------------------------------------------------------------------------------------------------------
-    print()
-    cls()
-    print(Gprograma, "Versão", Gversao)
-    print()
-
-    # Verifica se programa já está rodando (outra instância)
-    if existe_outra_instancia_rodando(Gcaminho_pid):
-        print_log("Finalizando execução, pois só pode haver uma única instância deste programa")
-        sys.exit(0)
-
-
-    # Inicialização do programa
-    # -----------------------------------------------------------------------------------------------------------------
-    print_log_dual('Iniciando ', Gprograma, ' - ', Gversao)
-    lista_ipeds = inicializar()
-    # var_dump(lista_ipeds)
-    # die('ponto591')
-
-    # Loop de execução de tarefas.
-    # ------------------------------------------------------------------------------------------------------------------
-    # Por enquanto, fica em loop eterno (usuário tem que abortar manualmente CTR-C)
-    # Para a versão 2.0, haverá um mecanismo de cancelamento, através da negação do servidor em dar continuidade ou
-    # iniciar tarefas para um determinado agente / programa
-    while (True):
-        executou=executar_uma_tarefa(lista_ipeds)
-        # Se não executou nada, faz uma pausa entre tarefas
-        if not executou:
-            dormir(GdormirSemServico)
-
-    # Finalização do programa
-    # -----------------------------------------------------------------------------------------------------------------
-    print_ok()
-    print_log_dual("FIM SAPI - ", Gprograma, " (Versao " + Gversao + ")")

@@ -15,9 +15,15 @@
 #
 # Histórico:
 #  - v1.0 : Inicial
+#  - v1.3 (2017-05-16 Ronaldo): Ajuste para sapilib_0_7_1
+#  - v1.4 (2017-05-17 Ronaldo):
+#    Substituição de variáveis por blocos em respostas aos quesitos
+#  - v1.5 (2017-05-22 Ronaldo):
+#    sapi_lib_0_7_2 que efetua checagem de versão de programa
 # =======================================================================
 # TODO: 
-# - 
+# - Se laudo já foi concluído, desprezar o que está em cache (o mesmo
+#   problema ocorre no sapi_cellebrite e todos os clientes que tem cache)
 # =======================================================================
 #
 #
@@ -34,6 +40,7 @@ import tempfile
 import shutil
 import zipfile
 
+
 # Verifica se está rodando versão correta de Python
 # ====================================================================================================
 if sys.version_info <= (3, 0):
@@ -45,7 +52,7 @@ if sys.version_info <= (3, 0):
 # GLOBAIS
 # =======================================================================
 Gprograma = "sapi_laudo"
-Gversao = "1.0"
+Gversao = "1.4"
 
 # Para gravação de estado
 Garquivo_estado = Gprograma + "v" + Gversao.replace('.', '_') + ".sapi"
@@ -53,6 +60,7 @@ Garquivo_estado = Gprograma + "v" + Gversao.replace('.', '_') + ".sapi"
 # Base de dados (globais)
 GdadosGerais = dict()  # Dicionário com dados gerais
 Gitens = list()  # Lista de itens
+Gmodelo_configuracao = list() # Dados coletados do modelo
 
 # Diversos sem persistência
 Gicor = 1
@@ -87,7 +95,7 @@ GsapiRespostas  = 'sapiRespostas'
 GsapiEntrega    = 'sapiEntrega'
 
 # Debug
-Gverbose = True  # Aumenta a exibição de detalhes
+Gverbose = False  # Aumenta a exibição de detalhes (para debug)
 
 # **********************************************************************
 # PRODUCAO DEPLOYMENT AJUSTAR
@@ -95,7 +103,7 @@ Gverbose = True  # Aumenta a exibição de detalhes
 
 # Para código produtivo, o comando abaixo deve ser substituído pelo
 # código integral de sapi_xxx.py, para evitar dependência
-from sapilib_0_6 import *
+from sapilib_0_7_2 import *
 
 # **********************************************************************
 # PRODUCAO
@@ -848,6 +856,7 @@ def carrega_blocos(base):
     bloco_fim = "SapiBlocoFim"
     q = 0
     lista_par = list()
+    erros=list()
     for d in lista_p:
         q += 1
         # var_dump(d)
@@ -870,9 +879,10 @@ def carrega_blocos(base):
 
             # Verifica estado
             if (bloco_iniciado):
-                print_tela_log("Bloco [", nome_bloco, "] foi iniciado mas não foi concluído (", bloco_fim, ")")
-                # Fracasso
-                return (False, {})
+                msg_erro = "Bloco ["+nome_bloco+"] foi iniciado mas não foi concluído ("+bloco_fim+")"
+                erros.append(msg_erro)
+                continue
+
             bloco_iniciado = True
 
             # Extrai nome do bloco, e converte para minusculas
@@ -884,10 +894,9 @@ def carrega_blocos(base):
             # print("bloco Inicio:", nome_bloco)
             # Verifica se bloco já existe
             if dblocos.get(nome_bloco, None) is not None:
-                print_tela_log("Bloco [", nome_bloco, "] está duplicado")
-                print(texto)
-                # Fracasso
-                return (False, {})
+                msg_erro="Bloco ["+nome_bloco+"] está duplicado"
+                erros.append(msg_erro)
+                continue
 
             # Inicia bloco
             print_log("Bloco [", nome_bloco, "] iniciado em parágrafo:", q)
@@ -903,10 +912,9 @@ def carrega_blocos(base):
         if (texto.lower()[:len(bloco_fim)] == bloco_fim.lower()):
 
             if (not bloco_iniciado):
-                print_tela_log(
-                    "- Bloco finalizado em ser iniciado. Procure no texto por um '" + bloco_fim + "' sobrando")
-                # Fracasso
-                return (False, {})
+                msg_erro = "Bloco finalizado sem ser iniciado. Procure no texto por um '" + bloco_fim + "' sobrando"
+                erros.append(msg_erro)
+                continue
 
             print_log("Finalizando carregamento de bloco [", nome_bloco, "] em parágrafo:", q, ". Bloco contém ",
                       len(lista_par), " parágrafos")
@@ -927,7 +935,17 @@ def carrega_blocos(base):
             # Remove parágrafo
             pai.remove(paragrafo)
 
-    # die('ponto1063')
+    #var_dump(erros)
+    #die('ponto1063')
+
+    # Verifica se ocorreram erros
+    if len(erros)>0:
+        for msg_erro in erros:
+            msg_erro="ERRO: "+msg_erro
+            print_tela_log(msg_erro)
+        # Finaliza com Fracasso
+        return (False, {})
+
 
     # Terminou, tudo certo
     return (True, dblocos)
@@ -1633,6 +1651,13 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     # Um comentário é um parágrafo iniciado por #
     odt_remove_comentarios(odt_raiz)
 
+    #var_dump(Gmodelo_configuracao)
+    if ("MODELO_VERSAO_2_0" not in Gmodelo_configuracao):
+        print_tela_log(
+            "ERRO => Este programa requer um modelo de laudo padrão SAPI, com versão maior ou igual a 2.0. Gere o modelo correto no SisCrim")
+        return
+
+
     # odt_dump(odt_raiz)
     # die('ponto1434')
 
@@ -1734,7 +1759,41 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
         print_tela_log("ERRO: Não encontrado parágrafo onde se localiza '" + GsapiRespostas + "'")
         return
 
+    # Por fim, substitui os parágrafos das respostas aos quesitos
     odt_substituir_paragrafo_por_lista(paragrafo_substituir_sapi_respostas, odt_raiz, lista_par_respostas)
+
+
+    #var_dump(lista_par_respostas)
+
+    # --------------------------------------------------------------------
+    # Substitui campos variáveis por blocos com mesmo nome
+    # ------------------------------------------------------------------
+    print()
+    print("Passo 3A: Substituição de variáveis por blocos de parágrafos")
+    print("------------------------------------------------------------")
+
+    (sucesso, lista_cv) = odt_recupera_lista_campos_variaveis_sapi(odt_raiz)
+    for campo in lista_cv:
+        nome_campo_variavel = campo['name'].lower()
+        # print(nome_campo_variavel)
+
+        # Verifica se existe bloco com nome igual à da variável
+        if dblocos.get(nome_campo_variavel, None) is None:
+            # Não existe bloco com o nome de campo variável. Despreza variável.
+            continue
+
+        # Recupera lista de blocos do parágrafo
+        lista_par_bloco = odt_clonar_bloco(nome_campo_variavel, dblocos)
+
+        # Localiza parágrafo pai onde está localizado a variável
+        # uma vez que o parágrafo (inteiro) será substituido pelo conjunto de parágrafos do bloco
+        # Atenção: Isto impede que um parágrafo contenha mais de uma variável
+        paragrafo_substituir = odt_busca_ancestral_com_tipo(campo['pai'], raiz=odt_raiz,
+                                                                     tipo='p')
+
+        odt_substituir_paragrafo_por_lista(paragrafo_substituir, odt_raiz, lista_par_bloco)
+
+        print("- Substituido variável "+nome_campo_variavel+" por bloco correspondente")
 
     # ------------------------------------------------------------------
     # Substitui textos gerais do corpo do laudo
@@ -1803,7 +1862,6 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     # ------------------------------------------------------------------------------------------------------------------
     # Substitui sapiEntrega
     # ------------------------------------------------------------------------------------------------------------------
-    # yyyy
 
     cv_sapi_entrega = odt_localiza_campo_variavel(lista_cv_office_text, GsapiEntrega)
     if (cv_sapi_entrega is None):
@@ -1811,7 +1869,7 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
             "AVISO: No modelo não existe campo (", + GsapiEntrega + "). Substituição não será efetuada.")
     else:
         # --- Início substituição de sapiEntrega
-        var_dump(solicitacao)
+        # var_dump(solicitacao)
         #die('ponto1636')
 
         # Ajusta metodo_entrega
@@ -1828,20 +1886,20 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
         metodo_entrega=partes[0]
         # Remove o prefixo "entrega_"
         metodo_entrega = metodo_entrega.replace("entrega_", "")
-        var_dump(metodo_entrega)
+        #var_dump(metodo_entrega)
 
         # Recupera bloco de parágrafos do método de entrega selecionado
         nome_bloco_entrega = GsapiEntrega + metodo_entrega
-        var_dump(nome_bloco_entrega)
+        #var_dump(nome_bloco_entrega)
 
         # Recupera listas de parágrafos das perguntas e respostas
         lista_par_entrega = odt_clonar_bloco(nome_bloco_entrega, dblocos)
-        var_dump(lista_par_entrega)
+        #var_dump(lista_par_entrega)
 
         # Substitui bloco de parágrafo
         paragrafo_substituir_sapi_entrega = odt_busca_ancestral_com_tipo(cv_sapi_entrega['pai'], raiz=odt_raiz,
                                                                            tipo='p')
-        var_dump(paragrafo_substituir_sapi_entrega)
+        #var_dump(paragrafo_substituir_sapi_entrega)
         if (paragrafo_substituir_sapi_entrega is None):
             print_tela_log("ERRO: Não encontrado parágrafo onde se localiza '" + GsapiEntrega + "'")
             return
@@ -1985,7 +2043,6 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
             print_centralizado(" ERRO ")
             print("- Neste laudo existe material de destino")
             print("- Contudo, o método de entrega selecionado não é através de 'Material de destino'")
-            print("- Contudo, não foi localizado nenhum material de destino na lista de materiais devolvidos")
             print("- Revise o método de entrega e/ou material de destino vinculado ao laudo")
             return
 
@@ -2191,6 +2248,7 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
 
 
 def odt_remove_comentarios(base):
+    global Gmodelo_configuracao
     #
     # Remove todos os comentários do documento gerado
     # Um comentário é um parágrafo iniciado por #
@@ -2204,6 +2262,10 @@ def odt_remove_comentarios(base):
         if len(texto) >= 1 and (texto[0] == "#"):
             pai = p["pai"]
             pai.remove(paragrafo)
+            if len(texto) >= 3 and texto[1]=='@':
+                #Linha de configuração do modelo
+                Gmodelo_configuracao.append(texto)
+
 
 
 def gera_novo_odt(odt_raiz, caminho_arquivo_saida_odt):
@@ -2445,6 +2507,9 @@ def exibir_situacao():
               "materiais que não estão prontos para laudo (coluna 'Pronto'), pois ainda possuem tarefas pendentes")
         print("  Enquanto esta condição persistir, não será possível efetuar a geração de laudo (*gl)")
         print("- Em caso de dúvida, consulte o setec3")
+    else:
+        print("- Para gerar laudo, utilize comando *GL")
+
 
     return
 
@@ -2617,12 +2682,13 @@ def obter_itens():
             programa="sapisrv_obter_itens_laudo.php",
             parametros={'codigo_solicitacao_exame_siscrim': codigo_solicitacao_exame_siscrim,
                         'codigo_laudo': codigo_laudo}
+            #,registrar_log = True
         )
 
         # Tem que ter ao menos um item vinculado
         if (len(itens) == 0):
             print()
-            print("ERRO: Este laudo NÃO tem nenhum material vinculado. Corrija no SisCrim.")
+            print("ERRO: Este laudo NÃO possui nenhum material vinculado que tenha sido processado no SAPI. Verifique no SAPI (itens processados) e no Laudo no SisCrim (materiais vinculados ao laudo).")
             print()
             continue
 
@@ -2783,6 +2849,9 @@ die('ponto1174')
 
 if __name__ == '__main__':
 
+    # Salva parâmetros da linhas de comando
+    parser = OptionParser()
+
     # Cabeçalho inicial do programa
     # ------------------------------------------------------------------------------------------------------------------
     print()
@@ -2800,7 +2869,7 @@ if __name__ == '__main__':
     # Inicialização de sapilib
     # -----------------------------------------------------------------------------------------------------------------
     print_log('Iniciando ', Gprograma, ' - ', Gversao)
-    sapisrv_inicializar(Gprograma, Gversao)
+    sapisrv_inicializar_ok(Gprograma, Gversao, parser)
 
     # Carrega o estado anterior, se houver. Caso contrário, solicita dados para utilização do programa
     # -----------------------------------------------------------------------------------------------------------------
@@ -2826,12 +2895,6 @@ if __name__ == '__main__':
             sys.exit(0)
     # Salva estado atual
     salvar_estado()
-
-    # Apenas em teste...para ir direto
-    # debug
-    # ============= Reabilitar após revisão de sapilib 0.6
-    # gerarLaudo()
-    # die('ponto1304')
 
     # Processamento
     # ---------------------------

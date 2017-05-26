@@ -70,7 +70,7 @@ Gtarefas = []  # Lista de tarefas
 
 # Controle de tempos/pausas
 GtempoEntreAtualizacoesStatus = 180
-GdormirSemServico = 15
+GdormirSemServico = 60
 GmodoInstantaneo=False
 #GmodoInstantaneo = True
 

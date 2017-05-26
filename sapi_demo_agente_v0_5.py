@@ -1,4 +1,6 @@
 ﻿# -*- coding: utf-8 -*-
+# ===== PYTHON 3 ======
+#
 # =======================================================================
 # SAPI - Sistema de Apoio a Procedimentos de Informática
 # 
@@ -14,8 +16,6 @@
 #  - Simula sucesso e insucesso
 #
 #
-# Python: 3.0
-# 
 # Histórico:
 #  - v0.1 : Inicial
 #  - v0.3 : Convertido para python3
@@ -23,6 +23,7 @@
 #           - Alterada função sapisrv_obter_iniciar_tarefa
 #           - Conversão para durante desenvolvimento utilizar import sapi
 #  - v0.5: Atualização de dados relevantes (json)
+#  - V0.6: Utiliza sapilib_0_6 que tem melhorias de tolerância falha
 # =======================================================================
 
 # ======================================================================

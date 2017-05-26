@@ -46,6 +46,8 @@
 #           2) Utilizar funções de alto nível sapisrv_obter_iniciar_tarefa e sapisrv_atualizar_tarefa de sapilib
 #              ao invés das funções atualmente definidas dentro do próprio código do programa.
 #   0.6.1 - Ajustado para nas chamadas ao servidor passar também o programa de execução
+#   0.7   - Melhoria na tolerância a falhas, exibindo mensagens explicativas dos problemas.
+#   0.7.2 - Tratamento para execução em background.
 #
 # *********************************************************************************************************************
 # *********************************************************************************************************************
@@ -67,14 +69,22 @@ import subprocess
 import http.client
 import socket
 import tkinter
+import traceback
 from tkinter import filedialog
+import ssl
+from optparse import OptionParser
+
+
+# Desativa a verificação de ceritificado no SSL
+ssl._create_default_https_context = ssl._create_unverified_context
 
 
 # ---------- Constantes (na realidade variáveis Globais) ------------
-Gversao_sapilib = "0.6.1"
+Gversao_sapilib = "0.7.2"
 
 # Valores de codigo_situacao_status (para atualizar status de tarefas)
 # --------------------------------------------------------------------
+GManterSituacaoAtual = 0
 GAguardandoPCF = 1
 GSemPastaNaoIniciado = 1
 GAguardandoProcessamento = 5
@@ -82,6 +92,11 @@ GAbortou = 8
 GDespachadoParaAgente = 20
 GPastaDestinoCriada = 30
 GEmAndamento = 40
+GIpedExecutando = 60
+GIpedFinalizado = 62
+GIpedHashCalculado = 65
+GIpedMulticaseAjustado = 68
+
 GFinalizadoComSucesso = 95
 
 # Configuração dos ambientes
@@ -99,16 +114,21 @@ Gconf_ambiente['desenv'] = {
 # --- Produção ---
 Gconf_ambiente['prod'] = {
     'nome_ambiente': 'PRODUCAO',
-    'servidor_protocolo': 'http',
+    'servidor_protocolo': 'https',
     'ips': ['10.41.84.5', '10.41.84.5'],
-    'servidor_porta': 80,
+    'servidor_porta': 443,
     'servidor_sistema': 'setec3'
 }
+
 
 # Definido durante inicializacao
 # --------------------------------
 Ginicializado = False
 Gparini = dict()  # Parâmetros de inicialização
+
+
+# Controle de mensagens/log
+GlogDual = False
 
 
 # =====================================================================================================================
@@ -120,6 +140,50 @@ Gparini = dict()  # Parâmetros de inicialização
 # Caso novos parâmetros sejam incluídos, serão opcionais.
 # =====================================================================================================================
 
+# Liga log dual, fazendo com que todas as mensagens de log sejam exibidas também em tela
+# Isto faz com que qualquer print_log (e não apenas o print_log_dual) exiba a saída em tela,
+# além de escrever no log
+def ligar_log_dual():
+    global GlogDual
+    GlogDual = True
+
+# Desliga log_dual. print_log irá gravar apenas no log.
+# Apenas chamadas explícitas à função print_log_dual exibirão a saida no log e na tela.
+def desligar_log_dual():
+    global GlogDual
+    GlogDual = False
+
+
+# Processa parâmetros de chamada
+def sapi_processar_parametros_usuario():
+
+    # Atualiza estas globais
+    global Gparini
+
+    parser = OptionParser()
+
+    if parser:
+        parser.add_option("-d", "--debug",
+                          action="store_true", dest="debug")
+        parser.add_option("-b", "--background",
+                          action="store_true", dest="background")
+        (options, args) = parser.parse_args()
+        # print(options)
+        Gparini['background'] = False
+        if options.background:
+            Gparini['background'] = True
+
+        if options.debug:
+            Gparini['debug'] = True
+
+        # Feedback dos parâmetros selecionados
+        if options.background:
+            print_log_dual(
+                "--background: Entrando em modo background. Saída normal será armazenada apenas em log. Erros fatais poderão ser exibidos na saída padrão.")
+        if options.debug:
+            Gparini['debug'] = True
+            print_log_dual("--debug: Entrando em modo de debug (--debug)")
+
 
 # Função de inicialização para utilização do sapisrv:
 # - nome_programa (obrigatório) : Nome do programa em execução
@@ -128,14 +192,20 @@ Gparini = dict()  # Parâmetros de inicialização
 # - ambiente : 'desenv' ou 'prod'
 #              Default: 'desenv' se houver arquivo 'desenvolvimento_nao_excluir.txt' na pasta. Caso contrário, 'prod'
 # ----------------------------------------------------------------------------------------------------------------------
-def sapisrv_inicializar(nome_programa, versao, nome_agente=None, ambiente=None):
+def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambiente=None):
     # Atualiza estas globais
     global Ginicializado
     global Gparini
 
+    #print("ponto171")
+    #var_dump(parser)
+
     # Se já foi inicializado, despreza, pois só pode haver uma inicialização por execução
     if Ginicializado:
         return
+
+    # Processa parâmetros do usuário, caso isto ainda não tenha sido feito
+    sapi_processar_parametros_usuario()
 
     # Nome do programa
     if nome_programa is None:
@@ -155,11 +225,15 @@ def sapisrv_inicializar(nome_programa, versao, nome_agente=None, ambiente=None):
         nome_agente = socket.gethostbyaddr(socket.gethostname())[0]
     Gparini['nome_agente'] = nome_agente
 
+    # Pasta de execução do programa
+    pasta_execucao=os.path.abspath(os.path.dirname(sys.argv[0]))
+    Gparini['pasta_execucao'] = pasta_execucao
+
     # Ambiente
     if ambiente is None:
         # Verifica se na pasta que está sendo executado existe arquivo desenvolvimento_nao_excluir.txt
         # Se existir, aceita isto como um sinalizador que está rodando em ambiente de desenvolvimento
-        arquivo_desenvolvimento = 'desenvolvimento_nao_excluir.txt'
+        arquivo_desenvolvimento = Gparini['pasta_execucao']+"/"+'desenvolvimento_nao_excluir.txt'
         if os.path.isfile(arquivo_desenvolvimento):
             ambiente = 'desenv'
 
@@ -185,13 +259,20 @@ def sapisrv_inicializar(nome_programa, versao, nome_agente=None, ambiente=None):
             Gparini['servidor_sistema'] = amb['servidor_sistema']
             Gparini['url_base'] = url_base
             # Como token, por equanto será utilizado um valor fixo
-            Gparini['servidor_token'] = 'token_fixo_v1'
+            Gparini['servidor_token'] = 'token_fixo_v0_7'
             # ok
             break
 
     if not conectou:
         # Gera execeção, para deixar chamador decidir o que fazer
         raise SapiExceptionFalhaComunicacao("Nenhum servidor respondeu.")
+
+    # Inicializado
+    Ginicializado = True
+    print_log("Inicializado SAPILIB: Agente= ", _obter_parini('nome_agente'),
+              " Ambiente= ", _obter_parini('nome_ambiente'),
+              " Servidor=  ", _obter_parini('servidor_ip'))
+
 
     # Verifica se versão do programa está habilitada a rodar, através de chamada ao servidor
     # Todo: Implementar verificações no servidor (agente, programa/versão)
@@ -200,11 +281,37 @@ def sapisrv_inicializar(nome_programa, versao, nome_agente=None, ambiente=None):
     # raise SapiExceptionAgenteDesautorizado("Máquina com ip 10.41.58.58 não autorizada para executar tal programa")
     # raise SapiExceptionProgramaDesautorizado("Este programa xxxx na versão zzz não está autorizado")
 
-    # Tudo certo
-    Ginicializado = True
-    print_log("Inicializado SAPILIB: agente=", _obter_parini('nome_agente'),
-              "para ambiente=", _obter_parini('nome_ambiente'),
-              "com servidor em: ", _obter_parini('servidor_ip'))
+    try:
+        (sucesso, msg_erro, resultado) = sapisrv_chamar_programa(
+            programa="sapisrv_solicitar_acesso.php",
+            parametros = {}
+        )
+    except BaseException as e:
+        print_log("Erro na verificação na obtenção de acesso ao servidor: " + str(e))
+        raise
+
+    # Chamada respondida com falha
+    if not sucesso:
+        print_log_dual("sapisrv_solicitar_acesso.php: ", msg_erro)
+        raise SapiExceptionGeral("Solicitação de acesso falhou")
+
+    # Armazena servidor de deployment
+    Gparini["storage_deployment"] = resultado.get('storage_deployment', None)
+
+    # Trata acesso negado
+    if (resultado['acesso_concedido']==0):
+        print_log(resultado['explicacao'])
+        tipo_erro=resultado['tipo_erro']
+        if tipo_erro=='VersaoDesatualizada':
+            raise SapiExceptionVersaoDesatualizada(resultado['explicacao'] + ". Baixe versão atualizada do SETEC3")
+        elif tipo_erro == 'ProgramaDesautorizado':
+            raise SapiExceptionProgramaDesautorizado(resultado['explicacao'])
+        elif tipo_erro=='AgenteDesautorizado':
+            raise SapiExceptionAgenteDesautorizado(resultado['explicacao'])
+        erro_fatal('Erro fatal: Resposta inesperada de servidor')
+
+    #if modo_debug():
+    #    die('ponto230')
 
     return
 
@@ -212,33 +319,123 @@ def sapisrv_inicializar(nome_programa, versao, nome_agente=None, ambiente=None):
 # Função de inicialização para utilização do sapisrv
 # Se ocorrer algum erro, ABORTA
 # ----------------------------------------------------------------------------------------------------------------------
-def sapisrv_inicializar_ok(*args):
+def sapisrv_inicializar_ok(*args, **kwargs):
+
     try:
-        sapisrv_inicializar(*args)
-
-    except SapiExceptionFalhaComunicacao as e:
-        # Aborta
-        print_tela_log("Falha na comunicação: ", e)
-        print("Para mais detalhes consulte o arquivo de log (sapi_log.txt)")
-        sys.exit(1)
-
-    except SapiExceptionProgramaDesautorizado as e:
-        # Aborta
-        print_tela_log("Programa/versão não foi autorizado pelo servidor: ", e)
-        print("Verifique no SETEC3 qual o programa/versão indicado para a tarefa a ser executada")
-        sys.exit(1)
-
-    except SapiExceptionAgenteDesautorizado as e:
-        # Aborta
-        print_tela_log("Agente (máquina) desautorizado: ", e)
-        print("Assegure-se de estar utilizando uma máquina homologada")
-        sys.exit(1)
+        sapisrv_inicializar(*args, **kwargs)
 
     except BaseException as e:
-        # Qualquer outra coisa: Aborta
-        print_tela_log("Erro na inicialização: " + str(e))
-        print("Para mais detalhes consulte o arquivo de log (sapi_log.txt)")
+        print_log("Problema 314: " + str(e))
+        #print_log_dual('Exceção: ', sys.exc_info()[0].__name__,
+        #      ' no arquivo: ', os.path.basename(sys.exc_info()[2].tb_frame.f_code.co_filename),
+        #      ' linha : ', sys.exc_info()[2].tb_lineno)
+        exc_type, exc_value, exc_traceback = sys.exc_info()
+        traceback.print_exception(exc_type, exc_value, exc_traceback,
+                                  limit=2, file=sys.stdout)
+
         sys.exit(1)
+
+
+# Função de inicialização para utilização do sapisrv
+# ----------------------------------------------------------------------------------------------------------------------
+def sapisrv_inicializar(*args, **kwargs):
+
+    #print("ponto329")
+    #var_dump(args)
+    #var_dump(kwargs)
+
+    try:
+        _sapisrv_inicializar_internal(*args, **kwargs)
+
+    except SapiExceptionFalhaComunicacao as e:
+        # Exibe erro e passa para cima
+        print_tela_log("Falha na comunicação: ", e)
+        raise SapiExceptionFalhaComunicacao
+
+    # Mais tarde talvez seja interessante passar esta exceção para cima,
+    # para dar chance do programa se auto atualizar
+    #except SapiExceptionVersaoDesatualizada as e:
+    #    raise SapiExceptionVersaoDesatualizada
+
+    except SapiExceptionAgenteDesautorizado as e:
+        # Exibe erro e passa para cima
+        print_log("Agente (máquina) desautorizado: ", e)
+        #print("Assegure-se de estar utilizando uma máquina homologada")
+        raise
+
+    except BaseException as e:
+        # Exibe erro e passa para cima
+        print_tela_log("Problema 354: " + str(e))
+        #print_tela_log('Exceção: ', sys.exc_info()[0].__name__,
+        #      ' no arquivo: ', os.path.basename(sys.exc_info()[2].tb_frame.f_code.co_filename),
+        #      ' linha : ', sys.exc_info()[2].tb_lineno)
+        raise
+
+# Reporta ao servidor um erro ocorrido no cliente
+# Parâmetros:
+#   programa: Nome do programa
+#   ip (opcional): IP da máquina
+def sapisrv_reportar_erro_cliente(
+        erro
+):
+    # Lista de parâmetros
+    param = dict()
+    param['erro'] = erro
+
+    # Invoca sapi_srv
+    (sucesso, msg_erro, configuracao) = sapisrv_chamar_programa(
+        "sapisrv_reportar_erro_cliente.php",
+        param,
+        abortar_insucesso=False,
+        registrar_log=True
+    )
+
+    # Chamada respondida com falha
+    # Talvez seja um erro intermitente.
+    # Agente tem que ser tolerante a erros, e ficar tentando sempre.
+    # Logo, iremos registrar no log e levantar uma exceção, deixando o chamador decidir o que fazer
+    if not sucesso:
+        print_log_dual("sapisrv_reportar_erro_cliente.php: ", msg_erro)
+        # Não tem tarefa disponível para processamento
+        raise SapiExceptionGeral("Não foi possível reportar erro ao servidor")
+
+    # Não tem o que retornar
+    return True
+
+
+# Obtem a configuração de um programa cliente
+# Parâmetros:
+#   programa: Nome do programa
+#   ip (opcional): IP da máquina
+def sapisrv_obter_configuracao_cliente(
+        programa,
+        ip=None
+):
+    # Lista de parâmetros
+    param = dict()
+    param['programa'] = programa
+    if (ip is not None):
+        param['ip'] = ip
+
+    # Invoca sapi_srv
+    (sucesso, msg_erro, configuracao) = sapisrv_chamar_programa(
+        "sapisrv_obter_configuracao_cliente.php",
+        param,
+        abortar_insucesso=False,
+        registrar_log=True
+    )
+
+    # Chamada respondida com falha
+    # Talvez seja um erro intermitente.
+    # Agente tem que ser tolerante a erros, e ficar tentando sempre.
+    # Logo, iremos registrar no log e levantar uma exceção, deixando o chamador decidir o que fazer
+    if not sucesso:
+        print_log_dual("sapisrv_obter_configuracao_cliente.php", msg_erro)
+        # Não tem tarefa disponível para processamento
+        raise SapiExceptionGeral("Não foi possível obter configuração")
+
+    # Configuração obtida com sucesso
+    return configuracao
 
 
 # Obtem e inicia (atômico) uma tarefa de um certo tipo (iped-ocr, ief, etc)
@@ -275,8 +472,8 @@ def sapisrv_obter_iniciar_tarefa(
             registrar_log=True
         )
     except BaseException as e:
-        print_log_dual("Exception na chamada do sapisrv_chamar_programa: ", e)
-        print_log_dual("Presumindo falha de rede. Continuando para tentar novamente mais tarde")
+        print_log_dual("Exception na chamada do sapisrv_obter_iniciar_tarefa.php: ", e)
+        print_log_dual("Presumindo erro intermitente. Continuando para tentar novamente mais tarde")
         return (False, None)
 
     # Chamada respondida com falha
@@ -298,6 +495,10 @@ def sapisrv_obter_iniciar_tarefa(
     else:
         # Retornou uma tarefa para processamento
         return (True, resultado["tarefa"])
+
+
+
+
 
 
 # Atualiza status da tarefa do sapisrv
@@ -333,6 +534,35 @@ def sapisrv_atualizar_status_tarefa(codigo_tarefa, codigo_situacao_tarefa, statu
     return (sucesso, msg_erro)
 
 
+
+# Atualiza status da tarefa do sapisrv
+# ----------------------------------------------------------------------------------------------------------------------
+def sapisrv_armazenar_texto(tipo_objeto, codigo_objeto, titulo, conteudo, registrar_log=False):
+    # Parâmetros
+    param = {'tipo_objeto': tipo_objeto,
+             'codigo_objeto': codigo_objeto,
+             'titulo': titulo,
+             'conteudo': conteudo
+             }
+
+    metodo_invocar = 'post'
+
+    # Invoca sapi_srv
+    (sucesso, msg_erro, resultado) = sapisrv_chamar_programa(
+        "sapisrv_armazenar_texto.php", param, registrar_log, metodo=metodo_invocar)
+
+    # Registra em log
+    if registrar_log:
+        if sucesso:
+            print_log_dual("Atualizado texto no servidor: ", titulo)
+        else:
+            # Se der erro, registra no log e prossegue (tolerância a falhas)
+            print_log_dual("Não foi possível atualizar texto no servidor: ", msg_erro)
+
+    # Retorna se teve ou não sucesso, e caso negativo a mensagem de erro
+    return (sucesso, msg_erro)
+
+
 # Invoca Sapi server (sapisrv)
 # ----------------------------------------------------------------------------------------------------------------------
 def sapisrv_chamar_programa(programa, parametros, abortar_insucesso=False, registrar_log=False, metodo='get'):
@@ -340,15 +570,25 @@ def sapisrv_chamar_programa(programa, parametros, abortar_insucesso=False, regis
     # Por equanto, vamos utilizar como token a versão da sapilib
     # Posteriormente, quando houver validação do software, substituir por algo mais elaborado
     parametros['execucao_nome_agente'] = _obter_parini('nome_agente')
-    parametros['programa'] = _obter_parini('programa')
+    parametros['execucao_programa'] = _obter_parini('programa')
+    parametros['execucao_programa_versao'] = _obter_parini('programa_versao')
     parametros['token'] = _obter_parini('servidor_token')
 
-    if metodo == 'get':
-        return _sapisrv_chamar_programa_get(programa, parametros, abortar_insucesso, registrar_log)
-    elif metodo == 'post':
-        return _sapisrv_chamar_programa_post(programa, parametros, abortar_insucesso, registrar_log)
-    else:
-        erro_fatal("sapisrv_chamar_programa: Método inválido: ", metodo)
+    # xxx
+    try:
+        if metodo == 'get':
+            return _sapisrv_chamar_programa_get(programa, parametros, registrar_log)
+        elif metodo == 'post':
+            return _sapisrv_chamar_programa_post(programa, parametros, registrar_log)
+        else:
+            erro_fatal("sapisrv_chamar_programa: Método inválido: ", metodo)
+    except BaseException as e:
+        if abortar_insucesso:
+            # As mensagens explicativas do erro já foram impressas
+            erro_fatal("sapisrv_chamar_programa: Abortando após erro (abortar_insucesso=True)")
+        else:
+            print_log("sapisrv_chamar_programa: Repassando exception para chamador")
+            raise
 
 # Invoca Sapi server (sapisrv), contando com sucesso.
 # Se ocorrer uma exceção, será exibido mensagem e abortado.
@@ -389,8 +629,19 @@ class SapiExceptionProgramaDesautorizado(Exception):
     pass
 
 
+class SapiExceptionVersaoDesatualizada(Exception):
+    pass
+
+
 class SapiExceptionAgenteDesautorizado(Exception):
     pass
+
+
+class SapiExceptionGeral(Exception):
+    pass
+
+
+
 
 
 # Testa se cliente tem comunicação com servidor
@@ -462,7 +713,7 @@ def processar_resultado_ok(resultado, referencia=""):
         print_tela_log("===== Fim da pagina =========")
         print_tela_log("Erro: ", str(e))
         print_tela_log("Verifique programa sapisrv")
-        sys.exit(1)
+        raise SapiExceptionGeral("Operação interrompida")
 
     # Processa pagina resultante em formato JSON
     try:
@@ -480,7 +731,7 @@ def processar_resultado_ok(resultado, referencia=""):
         print_tela_log("===== Fim da pagina =========")
         print_tela_log("Erro: ", str(e))
         print_tela_log("Verifique programa sapisrv")
-        sys.exit(1)
+        raise SapiExceptionGeral("Operação interrompida")
 
     # Tudo certo
     return d
@@ -492,23 +743,21 @@ def processar_resultado_ok(resultado, referencia=""):
 
 # Invoca Sapi server (sapisrv) utilizando GET
 # ----------------------------------------------------------------------------------------------------------------------
-def _sapisrv_chamar_programa_get(programa, parametros, abortar_insucesso=False, registrar_log=False):
+def _sapisrv_chamar_programa_get(programa, parametros, registrar_log=False):
     # Monta URL
     parametros_formatados = urllib.parse.urlencode(parametros)
     url = _obter_parini('url_base') + programa + "?" + parametros_formatados
 
     # Registra em log
-    if (registrar_log):
+    if modo_debug():
+        # Se estiver em debug, mostra na tela também
         print_log_dual(url)
+    elif registrar_log:
+        # Registra apenas no log
+        print_log(url)
 
-    if (abortar_insucesso):
-        # Chama função que efetua tratamento de insucesso
-        # Se houver insucesso, será abortado
-        retorno = _sapisrv_get_sucesso(url)
-    else:
-        # Função normal de chamada do sapisrv.
-        # Sucesso ou insucesso será tratado pelo chamador
-        retorno = _sapisrv_get(url)
+    #retorno = _sapisrv_get_sucesso(url) # Isto aqui estava errado...chamando sucesso, mas tratando erro...sem sentido
+    retorno = sapisrv_get_ok(url)
 
     # Ajusta sucesso para booleano
     sucesso = False
@@ -524,7 +773,6 @@ def _sapisrv_chamar_programa_get(programa, parametros, abortar_insucesso=False, 
 
 
 # Chama sapisrv, esperando sucesso como resultado
-# Se o retorno não for sucesso, aborta com erro fatal
 # ----------------------------------------------------------------------
 def _sapisrv_get_sucesso(url):
     # Chama servico
@@ -534,9 +782,9 @@ def _sapisrv_get_sucesso(url):
     if (d["sucesso"] == "0"):
         print_tela_log("Erro inesperado reportado por: ", url)
         print_tela_log(d["msg_erro"])
-        sys.exit(1)
+        raise SapiExceptionGeral("Operação interrompida")
 
-    # Tudo certo
+    # Retorna resultado
     return d
 
 
@@ -552,7 +800,8 @@ def sapisrv_get_ok(url):
         print_tela_log("Nao foi possivel conectar com:", url)
         print_tela_log("Erro: ", str(e))
         print_tela_log("Verifique configuracao de rede")
-        sys.exit(1)
+        # Gera exception para interromper execução de comando
+        raise SapiExceptionGeral("Operação interrompida")
 
     referencia = "GET => " + url
 
@@ -562,7 +811,9 @@ def sapisrv_get_ok(url):
 # Chama Sapi server (sapisrv) com get
 # Se ocorrer algum erro, simplesmente deixa subir
 # ----------------------------------------------------------------------
-def _sapisrv_get(url):
+def _sapisrv_get_deprecated(url):
+    # Substitui por mecanismo de repasse de exeção para o chamador
+
     # Chama url e le pagina resultante
     # conecta no servidor e envia URL (GET)
     f = urllib.request.urlopen(url)
@@ -585,16 +836,11 @@ def _sapisrv_get(url):
 
 # Invoca Sapi server (sapisrv) utilizando POST
 # ----------------------------------------------------------------------
-def _sapisrv_chamar_programa_post(programa, parametros, abortar_insucesso=False, registrar_log=False):
-    if (registrar_log):
+def _sapisrv_chamar_programa_post(programa, parametros, registrar_log=False):
+    if (registrar_log or modo_debug()):
         print_log_dual("Chamada POST para", programa)
 
-    if (abortar_insucesso):
-        # Se houver insucesso, será abortado
-        retorno = sapisrv_post_sucesso(programa, parametros)
-    else:
-        # Sucesso ou insucesso será tratado pelo chamador
-        retorno = sapisrv_post(programa, parametros)
+    retorno = sapisrv_post_sucesso(programa, parametros)
 
     # Ajusta sucesso para booleano
     sucesso = False
@@ -606,7 +852,7 @@ def _sapisrv_chamar_programa_post(programa, parametros, abortar_insucesso=False,
     dados = retorno["dados"]
 
     # Registra resultado no log
-    if (registrar_log):
+    if (registrar_log or modo_debug()):
         if sucesso:
             print_log_dual("Servidor respondeu com sucesso")
         else:
@@ -627,9 +873,7 @@ def sapisrv_post_sucesso(programa, parametros):
     if (d["sucesso"] == "0"):
         print_tela_log("Erro inesperado reportado por: ", programa, " via post")
         print_tela_log(d["msg_erro"])
-        print("Parâmetros utilizados")
-        var_dump(parametros)
-        sys.exit(1)
+        raise SapiExceptionGeral("Operação interrompida")
 
     # Tudo certo
     return d
@@ -645,7 +889,7 @@ def sapisrv_post_ok(programa, parametros):
         print_tela_log("Falha na chamada de ", programa, " com POST")
         print_tela_log("Erro: ", str(e))
         print_tela_log("Verifique configuracao de rede")
-        sys.exit(1)
+        raise SapiExceptionGeral("Operação Interrompida")
 
     # Monta referência para exibição de erro
     referencia = "POST em " + programa
@@ -657,7 +901,8 @@ def sapisrv_post_ok(programa, parametros):
 
 # Invoca Sapi server (sapisrv) com post
 # ----------------------------------------------------------------------
-def sapisrv_post(programa, parametros):
+def sapisrv_post_deprecated(programa, parametros):
+    # Substitui por retorno do exception para o chamador
     resultado = _post(programa, parametros)
 
     # Processa e devolve resultado, sem tratamento de erro
@@ -674,7 +919,13 @@ def _post(programa, parametros):
     parametros_formatados = urllib.parse.urlencode(parametros)
 
     # Efetua conexão com servidor
-    conn = http.client.HTTPConnection(_obter_parini('servidor_ip'), port=_obter_parini('servidor_porta'))
+    protocolo=_obter_parini('servidor_protocolo')
+    if protocolo=='https':
+        # HTTPS
+        conn = http.client.HTTPSConnection(_obter_parini('servidor_ip'), port=_obter_parini('servidor_porta'))
+    else:
+        # HTTP simples
+        conn = http.client.HTTPConnection(_obter_parini('servidor_ip'), port=_obter_parini('servidor_porta'))
 
     # Parâmetros para POST
     headers = {"Content-type": "application/x-www-form-urlencoded",
@@ -682,14 +933,12 @@ def _post(programa, parametros):
     url_parcial = "/" + _obter_parini('servidor_sistema') + "/" + programa
 
     # Envia POST
-    # conn.request("POST", "/setec3_dev/teste_post.php", parametrosFormatados, headers)
     conn.request("POST", url_parcial, parametros_formatados, headers)
     resultado = conn.getresponse()
 
     dados_resposta = resultado.read()
 
     return dados_resposta
-
 
 # =====================================================================================================================
 #
@@ -748,6 +997,19 @@ def concatena_args(*arg):
 
     return s
 
+# Retorna verdadeiro se está em modo background
+# Neste modo, não exibe a saída regular na console (stdout)
+# Apenas em situações críticas (programa abortado) o resultado sairá na console (stdout ou stderr)
+def modo_background():
+    background=Gparini.get('background', False)
+    #var_dump(background)
+    #die('ponto984')
+    return background
+
+def modo_debug():
+    debug=Gparini.get('debug', False)
+    return debug
+
 
 # Paleativo para resolver problema de utf-8 no Windows
 # e esta confusão de unicode no python
@@ -779,9 +1041,9 @@ def print_ok(*arg):
     print(*arg)
 
 
-# Grava em arquivo de log
+# Grava apenas em arquivo de log
 # ----------------------------------------------------------------------
-def print_log(*arg):
+def _print_log_apenas(*arg):
     # Monta linha para gravação no log
     pid = os.getpid()
     hora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -799,19 +1061,32 @@ def print_log(*arg):
     return linha
 
 
+# Grava em arquivo de log
+# ----------------------------------------------------------------------
+def print_log(*arg):
+    if (GlogDual):
+        # Grava no arquivo de log e exibe na tela também
+        print_log_dual(*arg)
+    else:
+        # Exibe apenas na tela
+        _print_log_apenas(*arg)
+
+
 # Grava no arquivo de log e exibe também na tela
 # ----------------------------------------------------------------------
 def print_log_dual(*arg):
-    linha = print_log(*arg)
-    print(linha)
+    linha = _print_log_apenas(*arg)
+    if not modo_background():
+        print_ok(linha)
 
 
 # Exibe mensagem recebida na tela
 # e também grava no log
 # ----------------------------------------------------------------------
 def print_tela_log(*arg):
-    print_ok(*arg)
-    print_log(*arg)
+    if not modo_background():
+        print_ok(*arg)
+    _print_log_apenas(*arg)
 
 
 # Exibe mensagem recebida em destino variável,
@@ -983,6 +1258,18 @@ def converte_bytes_humano(size, precision=1):
     return "%.*f%s" % (precision, size, suffixes[suffix_index])
 
 
+# Navega em uma pasta até o nível (level) de profundidade definido
+def os_walklevel(some_dir, level=1):
+    some_dir = some_dir.rstrip(os.path.sep)
+    assert os.path.isdir(some_dir)
+    num_sep = some_dir.count(os.path.sep)
+    for root, dirs, files in os.walk(some_dir):
+        yield root, dirs, files
+        num_sep_this = root.count(os.path.sep)
+        if num_sep + level <= num_sep_this:
+            del dirs[:]
+
+
 # Retorna True se existe storage montado no ponto_montagem
 # =============================================================
 def storage_montado(ponto_montagem):
@@ -1083,6 +1370,7 @@ def acesso_storage_windows(conf_storage, utilizar_ip=False):
     ponto_montagem = caminho_storage + "\\"
     # print_log_dual(ponto_montagem)
     arquivo_controle = ponto_montagem + 'storage_sapi_nao_excluir.txt'
+
 
     # print_ok(arquivo_controle)
     # die('ponto531')

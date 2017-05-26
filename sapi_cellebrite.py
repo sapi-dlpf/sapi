@@ -16,7 +16,11 @@
 #  - Atualização do servidor da situação da tarefa
 # Histórico:
 #  - v1.0 : Inicial
+#  - Ajuste para versão de sapilib_0_7_1 que trata https
 # ======================================================================================================================
+# Todo:
+# - Se memorando já foi concluido, desprezar o que está em cache (caso contrário da erro)
+#
 # TODO: Como garantir que a cópia foi efetuada com sucesso? Hashes?
 # TODO: XML está quase do tamanho do PDF (em alguns casos, fica bem grande).
 #       Criar opção para excluir do destino? Excluir sempre?
@@ -36,6 +40,7 @@ import shutil
 import tempfile
 import multiprocessing
 
+
 # Verifica se está rodando versão correta de Python
 # ====================================================================================================
 if sys.version_info <= (3, 0):
@@ -47,7 +52,8 @@ if sys.version_info <= (3, 0):
 # GLOBAIS
 # =======================================================================
 Gprograma = "sapi_cellebrite"
-Gversao = "1.0"
+Gversao = "1.3"
+Gparser = None # Parser da linha de comando
 
 # Para gravação de estado
 Garquivo_estado = Gprograma + "v" + Gversao.replace('.', '_') + ".sapi"
@@ -94,7 +100,7 @@ Gmenu_comandos['cmd_geral'] = ["*sg", "*tt", "*qq"]
 
 # Para código produtivo, o comando abaixo deve ser substituído pelo
 # código integral de sapi_lib_xxx.py, para evitar dependência
-from sapilib_0_6 import *
+from sapilib_0_7_2 import *
 
 # **********************************************************************
 # PRODUCAO 
@@ -1298,7 +1304,7 @@ def efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevant
                   copia_background):
 
     # Inicializa sapilib, pois pode estar sendo executando em background (outro processo)
-    sapisrv_inicializar(Gprograma, Gversao)
+    sapisrv_inicializar(Gprograma, Gversao, Gparser)
 
     # Define qual o tipo de saída das mensagens de processamento
     somente_log = 'log'
@@ -1462,7 +1468,7 @@ def efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevant
 def acompanhar_copia(tipo_print, codigo_tarefa, caminho_destino):
 
     # Inicializa sapilib, pois pode estar sendo executando em background (outro processo)
-    sapisrv_inicializar(Gprograma, Gversao)
+    sapisrv_inicializar(Gprograma, Gversao, Gparser)
 
     print_var(tipo_print, "Processo de acompanhamento de tarefa: Vivo")
 
@@ -1893,8 +1899,8 @@ def obter_memorando_tarefas():
         print('%2d  %10s  %s' % (q, protocolo_ano, d["identificacao"]))
 
     print()
-    print("Estas são as solicitações de exames desta matrícula que possuem tarefas SAPI.")
-    print("Se a solicitação de exame que você procura, primeiramente defina tarefas SAPI no SETEC3.")
+    print("Estas são as solicitações de exames que foram iniciadas no SAPI.")
+    print("Se a solicitação de exame que você procura não está na lista, entre no SETEC3:Perícia:SAPI.")
     # print("type(lista_solicitacoes)=",type(lista_solicitacoes))
 
     # Usuário escolhe a solicitação de exame de interesse
@@ -2076,6 +2082,9 @@ def posicionar_item(n):
 
 if __name__ == '__main__':
 
+    # Salva parâmetros da linhas de comando
+    Gparser = OptionParser()
+
     # # Teste de problema de codificação para console
     # # Não remova isto aqui, pois não tenho certeza se este assunto foi definitivamente resolvido
     # outro=dict()
@@ -2130,7 +2139,7 @@ if __name__ == '__main__':
     # Inicialização de sapilib
     # -----------------------------------------------------------------------------------------------------------------
     print_log('Iniciando ', Gprograma , ' - ', Gversao)
-    sapisrv_inicializar(Gprograma, Gversao)
+    sapisrv_inicializar_ok(Gprograma, Gversao, Gparser)
 
     # Carrega o estado anterior
     # -----------------------------------------------------------------------------------------------------------------
