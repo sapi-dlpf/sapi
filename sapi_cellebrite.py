@@ -52,8 +52,7 @@ if sys.version_info <= (3, 0):
 # GLOBAIS
 # =======================================================================
 Gprograma = "sapi_cellebrite"
-Gversao = "1.3"
-Gparser = None # Parser da linha de comando
+Gversao = "1.7.2"
 
 # Para gravação de estado
 Garquivo_estado = Gprograma + "v" + Gversao.replace('.', '_') + ".sapi"
@@ -80,8 +79,8 @@ Gmenu_comandos['comandos'] = {
            '\nPara simplificar, pode-se digitar apenas o sequencial (ex: 4)',
 
     # Comandos relacionados com um item
-    '*cr': 'Copia pasta de relatórios (Cellebrite) do computador local para storage, concluindo a tarefa corrente',
-    '*si': 'Verifica situação da tarefa corrente, comparando-a com a situação no servidor',
+    '*cr': 'Verifica a pasta de relatórios do Cellebrite no computador local e em seguida copia para o storage',
+    '*si': 'Compara a situação da tarefa (no SETEC3) com a situação observada no storage',
     '*du': 'Dump: Mostra todas as propriedades de uma tarefa (utilizado para Debug)',
 
     # Comandos gerais
@@ -1114,10 +1113,10 @@ def copia_cellebrite():
     if not (codigo_situacao_tarefa == GAguardandoPCF or codigo_situacao_tarefa == GAbortou):
         # Tarefas com outras situações não são permitidas
         print("Tarefa com situação ", codigo_situacao_tarefa, "-",
-              tarefa['descricao_situacao_tarefa'] + " => Não pode ser processada")
+              tarefa['descricao_situacao_tarefa'] + " NÃO pode ser processada")
         print("Apenas tarefas com situação 'Aguardando ação PCF' ou 'Abortada' podem ser processadas")
         print("Em caso de divergência, efetue em Refresh na lista de tarefas (*SG)")
-        print("Para modificar manualmente a situação da tarefa, consulte tarefa no SETEC3")
+        print("Para efetuar um reprocessamento da tarefa, utilize opção 'Reiniciar' disponível na consulta da tarefa no SETEC3")
         return
 
     # var_dump(tarefa)
@@ -1172,16 +1171,15 @@ def copia_cellebrite():
         print("- Não é possível iniciar cópia de relatório nesta situação.")
         print("- Se o conteúdo atual da pasta de destino não tem utilidade,",
               "autorize a limpeza da pasta (opção abaixo).")
-        print("- Se você entende que os dados na pasta de destino já estão ok,")
-        print("  cancele este comando e simplesmente utilize o comando *si para validar a pasta.")
-        print("  Após a validação com sucesso, o sistema atualizará a situação da tarefa para 'concluído'")
+        print("- Se você entende que os dados na pasta de destino já estão ok, cancele este comando")
+        print("  e em seguida utilize o comando *si para validar a pasta e atualizar a situação da tarefa.")
         print()
         prosseguir = pergunta_sim_nao(
             "< Você realmente deseja excluir a pasta de destino (assegure-se de estar tratando do item correto)?",
             default="n")
         if not prosseguir:
             # Encerra
-            print("- Cancelado: Não é possível executar cópia para pasta de destino existente.")
+            print("- Cancelado pelo usuário.")
             return
         print("- Ok, pasta de destino será excluída durante procedimento de cópia")
         print_log("Usuário solicitou exclusão da pasta de destino: ", caminho_destino)
@@ -1304,7 +1302,7 @@ def efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevant
                   copia_background):
 
     # Inicializa sapilib, pois pode estar sendo executando em background (outro processo)
-    sapisrv_inicializar(Gprograma, Gversao, Gparser)
+    sapisrv_inicializar(Gprograma, Gversao)
 
     # Define qual o tipo de saída das mensagens de processamento
     somente_log = 'log'
@@ -1468,7 +1466,7 @@ def efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevant
 def acompanhar_copia(tipo_print, codigo_tarefa, caminho_destino):
 
     # Inicializa sapilib, pois pode estar sendo executando em background (outro processo)
-    sapisrv_inicializar(Gprograma, Gversao, Gparser)
+    sapisrv_inicializar(Gprograma, Gversao)
 
     print_var(tipo_print, "Processo de acompanhamento de tarefa: Vivo")
 
@@ -1626,7 +1624,7 @@ def _exibir_situacao_item():
 
     (codigo_situacao_tarefa, texto_status, dados_relevantes, erros, avisos) = determinar_situacao_item_cellebrite(explicar=True)
     print()
-    print("- Situacao conforme pasta de destino: ", str(codigo_situacao_tarefa), "-", texto_status)
+    print("- Situação observada no storage         : ", str(codigo_situacao_tarefa), "-", texto_status)
 
     # Se falhou, não tem o que fazer
     if (codigo_situacao_tarefa == -1):
@@ -1651,8 +1649,8 @@ def _exibir_situacao_item():
         return
 
     # Exibe o status da tarefa no servidor
-    print("- Situação reportada pelo servidor  : ",
-          tarefa_servidor["codigo_situacao_tarefa"],
+    print("- Situação no servidor SAPI(SETEC3)     : ",
+                tarefa_servidor["codigo_situacao_tarefa"],
           "-",
           tarefa_servidor["descricao_situacao_tarefa"])
 
@@ -1672,17 +1670,16 @@ def _exibir_situacao_item():
     # Se houver divergência entre situação atual e situação no servidor
     # pergunta se deve atualizar
     print()
-    print('ATENÇÃO: A situação da tarefa no servidor não está coerente com a situação observada na pasta de destino.')
-    print('- Isto ocorre quando o usuário faz uma cópia manual dos dados diretamente para o servidor',
-          'sem utilizar o agente sapi_cellebrite.')
-    print('- Também pode ocorrer esta situação caso tenha havido alguma falha no procedimento')
-    print('  de atualização da situação após a cópia no sapi_cellebrite.')
+    print('ATENÇÃO: A situação da tarefa no servidor (SAPI/SETEC3) não está coerente com a situação observada na pasta de destino do storage.')
+    print('- Isto pode ocorrer caso tenha havido alguma falha no procedimento')
+    print('  de atualização da situação após a cópia no sapi_cellebrite, ou caso tenha sido feita uma cópia manual.')
     print('- Em caso de dúvida, consulte o log sapi_log.txt.')
     print()
-    print('- No caso desta tarefa em particular, para sanar o problema basta efetuar a atualização manual',
-          '(respondendo S na próxima pergunta)')
+    print('- Caso você tenha certeza que os dados armazenados no servidor estão ok,')
+    print('  basta efetuar a atualização do situação (respondendo S na próxima pergunta)')
+    print('- Caso contrário, refaça a cópia (comando *CR)')
     print()
-    atualizar = pergunta_sim_nao("< Atualizar servidor com o status observado? ", default="n")
+    atualizar = pergunta_sim_nao("< Atualizar servidor SAPI com a situação observada? ", default="n")
     if (not atualizar):
         return
 
@@ -1809,6 +1806,13 @@ def carregar_estado():
     global Gtarefas
     global GdadosGerais
 
+    # Por enquanto, não vamos habilitar a carga de estado
+    return
+
+    # Se estiver em ambiente de produção, não efetua o carregamento do estado
+    if not ambiente_desenvolvimento():
+        return
+
     # Não tem arquivo de estado
     if (not os.path.isfile(Garquivo_estado)):
         return
@@ -1900,7 +1904,7 @@ def obter_memorando_tarefas():
 
     print()
     print("Estas são as solicitações de exames que foram iniciadas no SAPI.")
-    print("Se a solicitação de exame que você procura não está na lista, entre no SETEC3:Perícia:SAPI.")
+    print("Se a solicitação de exame que você procura não está na lista, confira situação no SETEC3 => Perícia => SAPI.")
     # print("type(lista_solicitacoes)=",type(lista_solicitacoes))
 
     # Usuário escolhe a solicitação de exame de interesse
@@ -2080,48 +2084,7 @@ def posicionar_item(n):
 # Rotina Principal 
 # ======================================================================
 
-if __name__ == '__main__':
-
-    # Salva parâmetros da linhas de comando
-    Gparser = OptionParser()
-
-    # # Teste de problema de codificação para console
-    # # Não remova isto aqui, pois não tenho certeza se este assunto foi definitivamente resolvido
-    # outro=dict()
-    # outro["1"]=["primeiro string", "segundo string", 123]
-    # outro["2"]="qualquer coisa com acentuação"
-    #
-    # d=dict()
-    # d['comp1']='xyz'
-    # d['comp2']='Tania 😉😘' #Não tem suporte para cp850
-    # d['comp3']=outro
-    #
-    # (sanitizado, qtd_alteracoes) = sanitiza_utf8_console(d)
-    # var_dump(sanitizado)
-    # print(qtd_alteracoes)
-    # print(exibir_dados_laudo(d))
-    #
-    # die('ponto2068')
-
-    # GdadosGerais["data_hora_ultima_atualizacao_status"] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    # var_dump(GdadosGerais["data_hora_ultima_atualizacao_status"])
-    # die('ponto2061')
-
-    # Desvia para um certo ponto, para teste
-    # --------------------------------------
-
-    # Sintetizar arquivo
-    # sintetizar_arquivo_xml("Relatório.xml", "parcial.xml")
-    # die('ponto1908')
-
-    # Desvia para um certo ponto, para teste
-    # Chama validacao de xml
-    # (resultado_teste, dados_teste, erros_teste, avisos_teste) = validar_arquivo_xml("parcial.xml", numero_item="12",
-    #                                                                                 explicar=True)
-    # print(resultado_teste)
-    # exibir_dados_laudo(dados_teste['laudo'])
-    # die('ponto1936')
-
+def main():
     # Cabeçalho inicial do programa
     # ------------------------------------------------------------------------------------------------------------------
     print()
@@ -2135,11 +2098,12 @@ if __name__ == '__main__':
     print("  configure o buffer de tela e tamanho de janela com largura mínima de 130 caracteres.")
     print("- Recomenda-se também trabalhar com a janela na altura máxima disponível do monitor.")
     print()
+    print("Aguarde conexão com servidor...")
 
     # Inicialização de sapilib
     # -----------------------------------------------------------------------------------------------------------------
     print_log('Iniciando ', Gprograma , ' - ', Gversao)
-    sapisrv_inicializar_ok(Gprograma, Gversao, Gparser)
+    sapisrv_inicializar_ok(Gprograma, Gversao)
 
     # Carrega o estado anterior
     # -----------------------------------------------------------------------------------------------------------------
@@ -2229,3 +2193,47 @@ if __name__ == '__main__':
     # Finaliza
     print()
     print("FIM SAPI - Cellebrite (Versão ", Gversao, ")")
+
+
+
+if __name__ == '__main__':
+
+    # # Teste de problema de codificação para console
+    # # Não remova isto aqui, pois não tenho certeza se este assunto foi definitivamente resolvido
+    # outro=dict()
+    # outro["1"]=["primeiro string", "segundo string", 123]
+    # outro["2"]="qualquer coisa com acentuação"
+    #
+    # d=dict()
+    # d['comp1']='xyz'
+    # d['comp2']='Tania 😉😘' #Não tem suporte para cp850
+    # d['comp3']=outro
+    #
+    # (sanitizado, qtd_alteracoes) = sanitiza_utf8_console(d)
+    # var_dump(sanitizado)
+    # print(qtd_alteracoes)
+    # print(exibir_dados_laudo(d))
+    #
+    # die('ponto2068')
+
+    # GdadosGerais["data_hora_ultima_atualizacao_status"] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    # var_dump(GdadosGerais["data_hora_ultima_atualizacao_status"])
+    # die('ponto2061')
+
+    # Desvia para um certo ponto, para teste
+    # --------------------------------------
+
+    # Sintetizar arquivo
+    # sintetizar_arquivo_xml("Relatório.xml", "parcial.xml")
+    # die('ponto1908')
+
+    # Desvia para um certo ponto, para teste
+    # Chama validacao de xml
+    # (resultado_teste, dados_teste, erros_teste, avisos_teste) = validar_arquivo_xml("parcial.xml", numero_item="12",
+    #                                                                                 explicar=True)
+    # print(resultado_teste)
+    # exibir_dados_laudo(dados_teste['laudo'])
+    # die('ponto1936')
+
+    main()
+

@@ -60,7 +60,7 @@ if sys.version_info <= (3, 0):
 # GLOBAIS
 # =======================================================================
 Gprograma = "sapi_iped"
-Gversao = "1.5.2"
+Gversao = "1.7.4-3.12.4"
 
 # Controle de tempos/pausas
 GtempoEntreAtualizacoesStatus = 180
@@ -157,19 +157,35 @@ def inicializar():
 
     except SapiExceptionVersaoDesatualizada:
         # Se versão do sapi_iped está desatualizada, irá tentar se auto atualizar
-        print_log("sapi_iped desatualizado, será necessário atualização")
+        print_log("sapi_iped desatualizado. Encerrando para efetuar atualização")
+        # Ao retornar None, o chamador entenderá que tem que atualizar o sapi_iped, e encerrará a execução
         return None
 
-    except Exception as e:
+    except SapiExceptionProgramaDesautorizado:
+        # Servidor sapi pode não estar respondendo (banco de dados inativo)
+        # Logo, encerra e aguarda uma nova oportunidade
+        print_log("AVISO: Não foi possível obter acesso (ver mensagens anteriores). Encerrando programa")
+        # Ao retornar None, o chamador encerrará a execução
+        return None
+
+    except SapiExceptionFalhaComunicacao:
+        # Se versão do sapi_iped está desatualizada, irá tentar se auto atualizar
+        print_log("Comunição com servidor falhou. Vamos encerrar e aguardar atualização, pois pode ser algum defeito no cliente")
+        # Ao retornar None, o chamador entenderá que tem que atualizar o sapi_iped, e encerrará a execução
+        return None
+
+    except BaseException as e:
         # Para outras exceçõs, irá ficar tentanto eternamente
-        print_log("Falhou durante inicialização: ", str(e))
+        #print_log("[168]: Exceção sem tratamento específico. Avaliar se deve ser tratada: ", str(e))
         # Colocar isto aqui em uma função....
         # Talvez já jogando no log também...
-        exc_type, exc_value, exc_traceback = sys.exc_info()
-        traceback.print_exception(exc_type, exc_value, exc_traceback,
-                                  limit=2, file=sys.stdout)
+        #exc_type, exc_value, exc_traceback = sys.exc_info()
+        #traceback.print_exception(exc_type, exc_value, exc_traceback,
+        #                          limit=2, file=sys.stdout)
+        trc_string=traceback.format_exc()
+        print_log("[168]: Exceção abaixo sem tratamento específico. Avaliar se deve ser tratada")
+        print_log(trc_string)
         return None
-
 
     # Verifica se máquina corresponde à configuração recebida, ou seja, se todos os programas de IPED
     # que deveriam estar instalados realmente estão instalados
@@ -324,8 +340,8 @@ def devolver(codigo_tarefa, texto_status):
     print_log("Tarefa devolvida")
 
     # Para garantir que a tarefa devolvida não será pega por este mesmo agente logo em seguida,
-    # vamos dormir por um tempo longo
-    dormir(3 * 60, "Pausa para dar oportunidade de outro agente pegar tarefa")
+    # vamos dormir um pouco
+    dormir(60, "Pausa para dar oportunidade de outro agente pegar tarefa")
 
     # Retorna false, para uso pelo chamador
     return False
@@ -520,7 +536,16 @@ def executa_iped(codigo_tarefa, comando, caminho_destino, caminho_log_iped, cami
         if erro_exception!="":
             erro = erro + ": " + erro_exception
         # Tolerância a Falhas: Permite que outro agente execute
-        return devolver(codigo_tarefa, erro)
+        # return devolver(codigo_tarefa, erro)
+
+        # Como o IPED falhou, é possível que haja algum problema com a instalação do IPED,
+        # a qual seria corrigida pela atualização do IPED
+        # Desta forma, devolve a tarefa
+        # e em seguida encerra o programa, para que seja atualizado
+        devolver(codigo_tarefa, erro)
+        # Encerra sapi_iped
+        print_log("Em função do erro do IPED, programa será encerrado para permitir atualização")
+        os._exit(1)
 
     # Se não deu erro (exit code), espera-se que o IPED tenha chegado até o final normalmente
     # Para confirmar isto, confere se existe o string abaixo
@@ -1063,65 +1088,6 @@ def executar_uma_tarefa(lista_ipeds_suportados):
     return True
 
 
-def procura_pid_python(pid_prog):
-
-    # Verifica se processo ainda está rodando
-    print_log("Procurando por pid [", pid_prog, "] que esteja rodando python")
-    a = os.popen("tasklist").readlines()
-    for x in a:
-        nome_processo = x[0:28]
-        pid = x[28:34]
-        pid = pid.strip()
-        if not pid.isdigit():
-            # Se não é número, despreza
-            continue
-
-        # Se números de processo coincidem,
-        # e trata-se de um programa python (para garantir que o pid não foi reutiliza por alguma outra coisa)
-        # Isto aqui não é um teste perfeito, mas considerando o cenário de execução, deve funcionar sem problemas
-        if (int(pid) == int(pid_prog)):
-            print_log("pid alvo localizado: ", pid, " - ", nome_processo)
-            if ("python" in nome_processo):
-                # ok, encontrado e rodando python
-                print_log("Ok, processo rodando python")
-                return True
-            else:
-                print_log(
-                    "Processo NÃO está rodando python. Provavelmente foi reutilizado pelo SO.")
-                return False
-
-
-    # Não achou
-    return False
-
-# Se encontrar, retorna verdadeiro
-def existe_outra_instancia_rodando(caminho_arquivo_pid):
-
-    # Verifica se já está rodando
-    if os.path.isfile(caminho_arquivo_pid):
-        # Recupera pid armazenado no arquivo
-        f = open(caminho_arquivo_pid, "r")
-        pid_prog = f.readline().strip()
-        f.close()
-        if not pid_prog.isdigit():
-            # Isto não deveria acontecer.
-            # Neste caso, vamos ignorar, pois se abortar, não vai rodar nunca
-            print_log("AVISO: PID armazenado em [", caminho_arquivo_pid, "] armazenado não contém número: [", pid_prog, "]")
-        else:
-            if procura_pid_python(pid_prog):
-                print_log("Este programa já está rodando, no processo [", pid_prog, "]")
-                return True
-
-    # Não está rodando
-    # Grava pid em arquivo, para teste de simultaneidade
-    # ------------------------------------------------------------------------
-    f = open(caminho_arquivo_pid, "w")
-    f.write(str(os.getpid()))
-    f.close()
-
-    #
-    return False
-
 # ======================================================================
 # Rotina Principal 
 # ======================================================================
@@ -1131,6 +1097,11 @@ def main():
 
     # Processa parâmetros logo na entrada, para garantir que configurações relativas a saída sejam respeitads
     sapi_processar_parametros_usuario()
+
+    # Se não estiver em modo background (opção do usuário),
+    # liga modo dual, para exibir saída na tela e no log
+    if not modo_background():
+        ligar_log_dual()
 
     # Cabeçalho inicial do programa
     # ------------------------------------------------------------------------------------------------------------------

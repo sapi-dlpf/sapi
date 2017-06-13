@@ -72,6 +72,7 @@ import tkinter
 import traceback
 from tkinter import filedialog
 import ssl
+import shutil
 from optparse import OptionParser
 
 
@@ -124,6 +125,7 @@ Gconf_ambiente['prod'] = {
 # Definido durante inicializacao
 # --------------------------------
 Ginicializado = False
+Gparametros_usuario_ja_processado = False
 Gparini = dict()  # Parâmetros de inicialização
 
 
@@ -159,14 +161,21 @@ def sapi_processar_parametros_usuario():
 
     # Atualiza estas globais
     global Gparini
+    global Gparametros_usuario_ja_processado
+
+    # Só processa os parâmetros do usuário uma vez
+    if Gparametros_usuario_ja_processado:
+        return
 
     parser = OptionParser()
 
     if parser:
         parser.add_option("-d", "--debug",
-                          action="store_true", dest="debug")
+                          action="store_true", dest="debug", help=None)
         parser.add_option("-b", "--background",
-                          action="store_true", dest="background")
+                          action="store_true", dest="background", help="Mensagens serão gravadas apenas em log")
+        parser.add_option("-l", "--log",
+                          action="store", dest="log", help="Arquivo para registro de log")
         (options, args) = parser.parse_args()
         # print(options)
         Gparini['background'] = False
@@ -176,6 +185,9 @@ def sapi_processar_parametros_usuario():
         if options.debug:
             Gparini['debug'] = True
 
+        if options.log:
+            Gparini['log'] = options.log
+
         # Feedback dos parâmetros selecionados
         if options.background:
             print_log_dual(
@@ -184,6 +196,7 @@ def sapi_processar_parametros_usuario():
             Gparini['debug'] = True
             print_log_dual("--debug: Entrando em modo de debug (--debug)")
 
+    Gparametros_usuario_ja_processado = True
 
 # Função de inicialização para utilização do sapisrv:
 # - nome_programa (obrigatório) : Nome do programa em execução
@@ -201,8 +214,10 @@ def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambie
     #var_dump(parser)
 
     # Se já foi inicializado, despreza, pois só pode haver uma inicialização por execução
-    if Ginicializado:
-        return
+    # Desabilitado: Deixa inicializar sempre, pois programas de execução continua
+    # como o sapi_iped necessitam verificar se houve alguma mudança de versão para se atualizarem
+    #if Ginicializado:
+    #    return
 
     # Processa parâmetros do usuário, caso isto ainda não tenha sido feito
     sapi_processar_parametros_usuario()
@@ -223,6 +238,8 @@ def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambie
     if nome_agente is None:
         # Default
         nome_agente = socket.gethostbyaddr(socket.gethostname())[0]
+    # Sanitiza
+    nome_agente=nome_agente.replace(".dpfsrpr","")
     Gparini['nome_agente'] = nome_agente
 
     # Pasta de execução do programa
@@ -288,12 +305,12 @@ def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambie
         )
     except BaseException as e:
         print_log("Erro na verificação na obtenção de acesso ao servidor: " + str(e))
-        raise
+        raise SapiExceptionProgramaDesautorizado('Não foi possível concluir solicitação de acesso')
 
     # Chamada respondida com falha
     if not sucesso:
         print_log_dual("sapisrv_solicitar_acesso.php: ", msg_erro)
-        raise SapiExceptionGeral("Solicitação de acesso falhou")
+        raise SapiExceptionProgramaDesautorizado('Não foi possível concluir solicitação de acesso')
 
     # Armazena servidor de deployment
     Gparini["storage_deployment"] = resultado.get('storage_deployment', None)
@@ -303,7 +320,7 @@ def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambie
         print_log(resultado['explicacao'])
         tipo_erro=resultado['tipo_erro']
         if tipo_erro=='VersaoDesatualizada':
-            raise SapiExceptionVersaoDesatualizada(resultado['explicacao'] + ". Baixe versão atualizada do SETEC3")
+            raise SapiExceptionVersaoDesatualizada(resultado['explicacao'] + ". Baixe versão atualizada do SETEC3.")
         elif tipo_erro == 'ProgramaDesautorizado':
             raise SapiExceptionProgramaDesautorizado(resultado['explicacao'])
         elif tipo_erro=='AgenteDesautorizado':
@@ -324,16 +341,29 @@ def sapisrv_inicializar_ok(*args, **kwargs):
     try:
         sapisrv_inicializar(*args, **kwargs)
 
-    except BaseException as e:
-        print_log("Problema 314: " + str(e))
-        #print_log_dual('Exceção: ', sys.exc_info()[0].__name__,
-        #      ' no arquivo: ', os.path.basename(sys.exc_info()[2].tb_frame.f_code.co_filename),
-        #      ' linha : ', sys.exc_info()[2].tb_lineno)
-        exc_type, exc_value, exc_traceback = sys.exc_info()
-        traceback.print_exception(exc_type, exc_value, exc_traceback,
-                                  limit=2, file=sys.stdout)
+    except SapiExceptionVersaoDesatualizada:
+        print_tela_log("Efetue atualização do programa e execute novamente")
+        os._exit(1)
 
-        sys.exit(1)
+    except SapiExceptionFalhaComunicacao as e:
+        os._exit(1)
+
+    except SapiExceptionAgenteDesautorizado as e:
+        os._exit(1)
+
+    except SystemExit as e:
+        # Se programa solicitou encerramento através de system.Exit, simplesmente encerra
+        print_log("Programa solicitou encerramento (SystemExit): " + str(e))
+        os._exit(1)
+
+    except BaseException as e:
+        # Qualquer outra coisa
+        trc_string=traceback.format_exc()
+        print_log("[314]: Exceção abaixo sem tratamento específico. Avaliar se deve ser tratada")
+        print_log(trc_string)
+
+
+        os._exit(1)
 
 
 # Função de inicialização para utilização do sapisrv
@@ -344,32 +374,28 @@ def sapisrv_inicializar(*args, **kwargs):
     #var_dump(args)
     #var_dump(kwargs)
 
+    # Simulando exceção, para testar o tratamento na rotina superior
+    #5/0
+    #raise SapiExceptionFalhaComunicacao("Apenas teste")
+
     try:
         _sapisrv_inicializar_internal(*args, **kwargs)
 
     except SapiExceptionFalhaComunicacao as e:
         # Exibe erro e passa para cima
-        print_tela_log("Falha na comunicação: ", e)
+        print_tela_log("[383] Falha na comunicação: ", e)
         raise SapiExceptionFalhaComunicacao
 
-    # Mais tarde talvez seja interessante passar esta exceção para cima,
-    # para dar chance do programa se auto atualizar
-    #except SapiExceptionVersaoDesatualizada as e:
-    #    raise SapiExceptionVersaoDesatualizada
+    except SapiExceptionVersaoDesatualizada as e:
+        print_tela_log("[360]: " + str(e))
+        raise SapiExceptionVersaoDesatualizada
 
     except SapiExceptionAgenteDesautorizado as e:
         # Exibe erro e passa para cima
-        print_log("Agente (máquina) desautorizado: ", e)
+        print_log("[369]: Agente (máquina) desautorizado: ", e)
         #print("Assegure-se de estar utilizando uma máquina homologada")
-        raise
+        raise SapiExceptionAgenteDesautorizado
 
-    except BaseException as e:
-        # Exibe erro e passa para cima
-        print_tela_log("Problema 354: " + str(e))
-        #print_tela_log('Exceção: ', sys.exc_info()[0].__name__,
-        #      ' no arquivo: ', os.path.basename(sys.exc_info()[2].tb_frame.f_code.co_filename),
-        #      ' linha : ', sys.exc_info()[2].tb_lineno)
-        raise
 
 # Reporta ao servidor um erro ocorrido no cliente
 # Parâmetros:
@@ -613,6 +639,11 @@ def obter_ambiente():
     return _obter_parini('nome_ambiente')
 
 
+def ambiente_desenvolvimento():
+    if obter_ambiente()=='DESENVOLVIMENTO':
+        return True
+    return False
+
 # ----------------------------------------------------------------------------------------------------------------------
 # Funções de BAIXO Nível. Utilize o mínimo necessário, pois podem sofrer alterações sem aviso.
 # As funções de baixo nível NÃO tem prefixo 'sapisrv'
@@ -677,7 +708,7 @@ def testa_comunicacao_servidor_sapi(url_base):
 def assegura_inicializacao():
     if not Ginicializado:
         erro_fatal("Faltou invocar função sapisrv_inicializar. Revise seu código")
-        sys.exit(1)
+        os._exit(1)
 
     # Tudo certo
     return
@@ -808,27 +839,6 @@ def sapisrv_get_ok(url):
     return processar_resultado_ok(resultado, referencia)
 
 
-# Chama Sapi server (sapisrv) com get
-# Se ocorrer algum erro, simplesmente deixa subir
-# ----------------------------------------------------------------------
-def _sapisrv_get_deprecated(url):
-    # Substitui por mecanismo de repasse de exeção para o chamador
-
-    # Chama url e le pagina resultante
-    # conecta no servidor e envia URL (GET)
-    f = urllib.request.urlopen(url)
-    resultado = f.read()
-
-    # O resultado vem em 'bytes', exigindo uma conversão explícita para UTF8
-    resultado = resultado.decode('utf-8')
-
-    # Carrega json.
-    # Se houver algum erro de parsing, irá ser tratado no exception do chamador
-    d = json.loads(resultado)
-
-    # Tudo certo
-    return d
-
 
 # =====================================================================================================================
 # POST
@@ -899,18 +909,6 @@ def sapisrv_post_ok(programa, parametros):
     return processar_resultado_ok(resultado, referencia)
 
 
-# Invoca Sapi server (sapisrv) com post
-# ----------------------------------------------------------------------
-def sapisrv_post_deprecated(programa, parametros):
-    # Substitui por retorno do exception para o chamador
-    resultado = _post(programa, parametros)
-
-    # Processa e devolve resultado, sem tratamento de erro
-    resultado = resultado.decode('utf-8')
-    d = json.loads(resultado)
-
-    return d
-
 
 # Efetua o post
 # ----------------------------------------------------------------------
@@ -950,14 +948,14 @@ def erro_fatal(*args):
     sys.stdout.write("Sapi Erro Fatal: ")
     print_ok(*args)
     print_ok("Para maiores informações, consulte o arquivo de log (sapi_log.txt)")
-    sys.exit(1)
+    os._exit(1)
 
 
 # Aborta programa
 # ----------------------------------------------------------------------
 def die(s):
     print(s)
-    sys.exit(1)
+    os._exit(1)
 
 
 # Dump "bonitinho" de uma variável
@@ -1053,7 +1051,12 @@ def _print_log_apenas(*arg):
 
     linha = "[" + str(pid) + "] : " + hora + " : " + concatena_args(*arg)
 
-    with codecs.open("sapi_log.txt", 'a', "utf-8") as sapi_log:
+
+    arquivo_log=Gparini.get('log',None)
+    if arquivo_log is None:
+        arquivo_log="sapi_log.txt"
+
+    with codecs.open(arquivo_log, 'a', "utf-8") as sapi_log:
         sapi_log.write(linha + "\r\n")
 
     sapi_log.close()
@@ -1111,7 +1114,7 @@ def if_print_ok(exibir, *arg):
     if type(exibir) != bool:
         print("Chamada inválida para if_print_ok, sem parâmetro de condição")
         print("Argumento: ", exibir, *arg)
-        sys.exit()
+        os._exit(1)
 
     # O primeiro elemento deve ser um booleano
     # Se o primeiro parâmetro não for verdadeiro, não faz nada
@@ -1159,7 +1162,7 @@ def esta_rodando_linux():
     # posix)
     # Por enquanto vamos abortar aqui, e ir refinando o código
     print_ok("Sistema operacional desconhecido : ", os.name)
-    sys.exit(1)
+    os._exit(1)
 
 
 # Verifica se usuário tem direito de root
@@ -1270,6 +1273,22 @@ def os_walklevel(some_dir, level=1):
             del dirs[:]
 
 
+# Efetua uma cópia do diretorio de origem para o diretório de destino,
+# mesclando
+# Ou seja, se o diretorio de destino já existe, os novos arquivos/pastas do diretório de origem
+# serão adicionados no diretório de destino
+def adiciona_diretorio(src, dst):
+    if not os.path.exists(dst):
+        os.makedirs(dst)
+    for item in os.listdir(src):
+        s = os.path.join(src, item)
+        d = os.path.join(dst, item)
+        if os.path.isdir(s):
+            adiciona_diretorio(s, d)
+        else:
+            shutil.copy2(s, d)
+
+
 # Retorna True se existe storage montado no ponto_montagem
 # =============================================================
 def storage_montado(ponto_montagem):
@@ -1307,7 +1326,7 @@ def acesso_storage_linux(ponto_montagem, conf_storage):
     # Não deveria falhar em condições normais
     # Talvez falhe se estiver sem root
     if not os.path.exists(ponto_montagem):
-        print_ok("Criação de pasta para ponto de montagem [", ponto_montagem, "] falhou")
+        print_tela_log("Criação de pasta para ponto de montagem [", ponto_montagem, "] falhou")
         return False
 
     # Verifica se arquivo de controle existe no storage
@@ -1335,10 +1354,10 @@ def acesso_storage_linux(ponto_montagem, conf_storage):
         # Tudo certo, montou
         return True
     else:
-        print_ok(comando)
-        print_ok("Após montagem de storage, não foi encontrado arquivo de controle[", arquivo_controle, "]")
-        print_ok("Ou montagem do storage falhou, ou storage não possui o arquivo de controle.")
-        print_ok("Se for este o caso, inclua na raiz o arquivo de controle com qualquer conteúdo.")
+        # print_tela_log(comando)
+        print_tela_log("Após montagem de storage, não foi encontrado arquivo de controle[", arquivo_controle, "]")
+        print_tela_log("Ou montagem do storage falhou, ou storage não possui o arquivo de controle.")
+        print_tela_log("Se for este o caso, inclua na raiz o arquivo de controle com qualquer conteúdo.")
         return False
 
 
@@ -1384,14 +1403,14 @@ def acesso_storage_windows(conf_storage, utilizar_ip=False):
             return True, ponto_montagem, ""
         else:
             # Falha
-            # die('ponto610')
             print_ok("Storage está montado em " + caminho_storage)
             print_ok("Contudo o mesmo não contém arquivo [" + arquivo_controle + "]")
             print_ok("Isto pode indicar que o storage não foi montado com sucesso, ou que está corrompido")
             return False, ponto_montagem, "Storage sem arquivo de controle"
 
     # Ainda não está montado
-    print_ok("- Montando storage em: " + caminho_storage)
+    if not modo_background():
+        print_ok("- Aguarde conexão com storage: " + caminho_storage)
 
     # Conecta no share do storage, utilizando net use.
     # Exemplo:
@@ -1404,8 +1423,8 @@ def acesso_storage_windows(conf_storage, utilizar_ip=False):
         " " + conf_storage["senha"]
     )
 
-    print_ok("Conectando com storage")
-    print_ok(comando)
+    #print_ok("Conectando com storage")
+    #print_ok(comando)
     subprocess.call(comando, shell=True)
 
     # Verifica se montou
@@ -1424,6 +1443,72 @@ def acesso_storage_windows(conf_storage, utilizar_ip=False):
 
     # Sucesso: Montado e confirmado ok
     return True, ponto_montagem, ""
+
+
+# Controle de concorrência
+# para garantir que existe apenas uma instância de um progrma rodando (por exemplo: sapi_iped)
+def procura_pid_python(pid_prog):
+
+    # Verifica se processo ainda está rodando
+    print_log("Procurando por pid [", pid_prog, "] que esteja rodando python")
+    a = os.popen("tasklist").readlines()
+    for x in a:
+        nome_processo = x[0:28]
+        pid = x[28:34]
+        pid = pid.strip()
+        if not pid.isdigit():
+            # Se não é número, despreza
+            continue
+
+        # Se números de processo coincidem,
+        # e trata-se de um programa python (para garantir que o pid não foi reutiliza por alguma outra coisa)
+        # Isto aqui não é um teste perfeito, mas considerando o cenário de execução, deve funcionar sem problemas
+        if (int(pid) == int(pid_prog)):
+            print_log("pid alvo localizado: ", pid, " - ", nome_processo)
+            if ("python" in nome_processo):
+                # ok, encontrado e rodando python
+                print_log("Ok, processo rodando python")
+                return True
+            else:
+                print_log(
+                    "Processo NÃO está rodando python. Provavelmente foi reutilizado pelo SO.")
+                return False
+
+
+    # Não achou
+    print_log("Neste PID não está rodando python")
+    return False
+
+# Se encontrar, retorna verdadeiro
+def existe_outra_instancia_rodando(caminho_arquivo_pid):
+
+    # Verifica se já está rodando
+    if os.path.isfile(caminho_arquivo_pid):
+        # Recupera pid armazenado no arquivo
+        f = open(caminho_arquivo_pid, "r")
+        pid_prog = f.readline().strip()
+        f.close()
+        if not pid_prog.isdigit():
+            # Isto não deveria acontecer.
+            # Neste caso, vamos ignorar, pois se abortar, não vai rodar nunca
+            print_log("AVISO: PID armazenado em [", caminho_arquivo_pid, "] armazenado não contém número: [", pid_prog, "]")
+        else:
+            if procura_pid_python(pid_prog):
+                print_log("Este programa já está rodando, no processo [", pid_prog, "]")
+                return True
+            else:
+                print_log("Tudo bem. Não existe outra instância rodando. Pode prosseguir")
+
+    # Não está rodando
+    # Grava pid em arquivo, para teste de simultaneidade
+    # ------------------------------------------------------------------------
+    f = open(caminho_arquivo_pid, "w")
+    f.write(str(os.getpid()))
+    f.close()
+
+    #
+    return False
+
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Funções relacinadas com a interface em linha de comando (console)
@@ -1621,6 +1706,6 @@ def tk_get_clipboard():
 
 # *********************************************************************************************************************
 # *********************************************************************************************************************
-#                  FINAL DO SAPI_LIB
+#                  FINAL DO SAPILIB
 # *********************************************************************************************************************
 # *********************************************************************************************************************

@@ -52,7 +52,7 @@ if sys.version_info <= (3, 0):
 # GLOBAIS
 # =======================================================================
 Gprograma = "sapi_laudo"
-Gversao = "1.4"
+Gversao = "1.7.1"
 
 # Para gravação de estado
 Garquivo_estado = Gprograma + "v" + Gversao.replace('.', '_') + ".sapi"
@@ -1371,25 +1371,49 @@ def parse_quesitos_respostas(dblocos):
         # Sumariza o texto dos quesitos, pegando um parte do texto de cada parágrafo
         qtd_quesitos = 0
         for p in dblocos[nome_bloco_quesitos]:
-            # Ajusta string
+
+            debug_on=False
+            #if 'cac_10' in nome_bloco_quesitos:
+            #    debug_on=True
+
             texto = odt_obtem_texto_total_paragrafo(p)
+            if debug_on:
+                odt_dump(p)
             # Ajusta e sintetiza
             # texto = filtra_apenas_ascii(texto)
             (texto, qtd_alteracoes) = console_sanitiza_utf8(texto)
+            if texto.strip()=='':
+                # Despreza linha em branco
+                continue
 
-            # print(texto)
-            parte_inicial = texto[0:32].strip(' .')
-            parte_inicial = parte_inicial + '.' * (34 - len(parte_inicial)) + " "
-            # print(len(parte_inicial))
+            #print(texto)
+            #parte_inicial = texto[0:100].strip(' .')
+            parte_inicial = texto[0:125]
+            #parte_inicial = parte_inicial + '.' * (102 - len(parte_inicial)) + " "
+            #print(len(parte_inicial))
+            if len(texto)>100:
+                parte_inicial=parte_inicial + "..."
+
             # Adiciona ao texto resumo
-            resumo_quesitos = resumo_quesitos + parte_inicial
+            resumo_quesitos = resumo_quesitos + parte_inicial + "\n"
+
             qtd_quesitos += 1
+
+
+        # Remove ? do início e do final
+        resumo_quesitos = resumo_quesitos.strip('\n')
+        resumo_quesitos = resumo_quesitos.strip('?')
+
+        if debug_on:
+            print(resumo_quesitos)
+            die('ponto1400')
 
         dados_quesitacao = dict()
         dados_quesitacao["resumo_quesitos"] = resumo_quesitos
         dados_quesitacao["quantidade_quesitos"] = qtd_quesitos
         dados_quesitacao["nome_bloco_quesitos"] = nome_bloco_quesitos
         dados_quesitacao["nome_bloco_respostas"] = nome_bloco_respostas
+
 
         # Dá uma filtrada em caracteres de separação,
         # para o nome da quesitação ficar mais adequados
@@ -1488,14 +1512,22 @@ def usuario_escolhe_quesitacao(quesitos_respostas):
         print(qtd_opcoes, "=> ", "Qtd. quesitos:", int(quantidade_quesitos), "  Nome da quesitação:", nome_quesito)
         print_centralizado("")
         # Imprime o resumo de três quesitos por linha
-        tam_linha = 105
-        for i in range(0, len(resumo_quesitos), tam_linha):
-            print("  ", resumo_quesitos[i:i + tam_linha])
+        #tam_linha = 105
+        #for i in range(0, len(resumo_quesitos), tam_linha):
+        #    print("  ", resumo_quesitos[i:i + tam_linha])
+        print(resumo_quesitos)
+        print()
 
     # Solicita o número de sequencia da quesitação
     while True:
         pergunta = "< Escolha a quesitação, entrando com o número de sequencia da lista acima (1 a " + str(
             qtd_opcoes) + "): "
+        print()
+        print("Dica: Na lista acima, as quesitações estão ordenadas por número de quesitos")
+        print("O texto exibido é só uma referência, e PODE APRESENTAR ALGUMAS DISTORÇOES em relação ao texto realmente contido no modelo.")
+        print("Não se preocupe se alguns caracteres estiverem diferentes, ou mesmo se houver omissão de palavras nas frase.")
+        print("Isto ocorre em função de algumas complexidades no parse do ODT. No laudo gerado, a quesitação estará ok.")
+        print("Escolha a que mais se aproxima da quesitação da solicitação.")
         print()
         seq = input(pergunta)
         seq = seq.strip()
@@ -1652,11 +1684,11 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     odt_remove_comentarios(odt_raiz)
 
     #var_dump(Gmodelo_configuracao)
+    print(Gmodelo_configuracao)
     if ("MODELO_VERSAO_2_0" not in Gmodelo_configuracao):
         print_tela_log(
-            "ERRO => Este programa requer um modelo de laudo padrão SAPI, com versão maior ou igual a 2.0. Gere o modelo correto no SisCrim")
+            "ERRO => Este programa requer um modelo de laudo padrão SAPI com versão igual a 2.0. Gere o modelo correto no SisCrim")
         return
-
 
     # odt_dump(odt_raiz)
     # die('ponto1434')
@@ -2261,11 +2293,37 @@ def odt_remove_comentarios(base):
         # Se começa por #, remove
         if len(texto) >= 1 and (texto[0] == "#"):
             pai = p["pai"]
-            pai.remove(paragrafo)
             if len(texto) >= 3 and texto[1]=='@':
                 #Linha de configuração do modelo
+                texto=texto.replace('#@','')
+                texto=texto.strip()
                 Gmodelo_configuracao.append(texto)
+                # Não remove parâmetro de configuração
+                continue
 
+            # Remove
+            pai.remove(paragrafo)
+
+
+def odt_remove_apos_fim_laudo(base):
+    #
+    # Remove todos os comentários do documento gerado
+    # Um comentário é um parágrafo iniciado por #
+    lista_paragrafos = odt_recupera_lista_paragrafos(base)
+
+    fim_laudo_encontrado = False
+    for p in lista_paragrafos:
+        paragrafo = p["elemento"]
+        texto = odt_obtem_texto_total_paragrafo(paragrafo)
+
+        # Se começa por #, remove
+        if len(texto) >= 1 and (texto[0] == "#"):
+            if "@FIM_LAUDO" in texto:
+                fim_laudo_encontrado = True
+
+        if fim_laudo_encontrado:
+            pai = p["pai"]
+            pai.remove(paragrafo)
 
 
 def gera_novo_odt(odt_raiz, caminho_arquivo_saida_odt):
@@ -2273,6 +2331,9 @@ def gera_novo_odt(odt_raiz, caminho_arquivo_saida_odt):
     # Remove todos os comentários do documento gerado
     # Um comentário é um parágrafo iniciado por #
     odt_remove_comentarios(odt_raiz)
+
+    # Remove qualquer coisa apos tag de finalização de laudo
+    odt_remove_apos_fim_laudo(odt_raiz)
 
     # Gravar arquivo odt com conteúdo modificado
     # ------------------------------------------------------------------
@@ -2508,7 +2569,7 @@ def exibir_situacao():
         print("  Enquanto esta condição persistir, não será possível efetuar a geração de laudo (*gl)")
         print("- Em caso de dúvida, consulte o setec3")
     else:
-        print("- Para gerar laudo, utilize comando *GL")
+        print("- Para gerar laudo, gere o modelo de laudo padrão SAPI no SISCRIM e em seguida *qqutilize comando *GL")
 
 
     return
@@ -2537,6 +2598,13 @@ def carregar_estado():
     # Irá atualizar as duas variáveis relacionadas com estado
     global Gitens
     global GdadosGerais
+
+    # Por enquanto, não vamos habilitar a carga de estado
+    return
+
+    # Se estiver em ambiente de produção, não efetua o carregamento do estado
+    if not ambiente_desenvolvimento():
+        return
 
     # Não tem arquivo de estado
     if (not os.path.isfile(Garquivo_estado)):
@@ -2847,11 +2915,7 @@ die('ponto1174')
 # Rotina Principal
 # ======================================================================
 
-if __name__ == '__main__':
-
-    # Salva parâmetros da linhas de comando
-    parser = OptionParser()
-
+def main():
     # Cabeçalho inicial do programa
     # ------------------------------------------------------------------------------------------------------------------
     print()
@@ -2869,7 +2933,7 @@ if __name__ == '__main__':
     # Inicialização de sapilib
     # -----------------------------------------------------------------------------------------------------------------
     print_log('Iniciando ', Gprograma, ' - ', Gversao)
-    sapisrv_inicializar_ok(Gprograma, Gversao, parser)
+    sapisrv_inicializar_ok(Gprograma, Gversao)
 
     # Carrega o estado anterior, se houver. Caso contrário, solicita dados para utilização do programa
     # -----------------------------------------------------------------------------------------------------------------
@@ -2961,3 +3025,9 @@ if __name__ == '__main__':
     # Finaliza
     print()
     print("FIM ", Gprograma, " (Versão ", Gversao, ")")
+
+
+if __name__ == '__main__':
+
+    main()
+
