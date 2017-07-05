@@ -16,7 +16,9 @@
 #  - Atualização do servidor da situação da tarefa
 # Histórico:
 #  - v1.0 : Inicial
-#  - Ajuste para versão de sapilib_0_7_1 que trata https
+#  - v1.7: Ajuste para versão de sapilib_0_7_1 que trata https
+#  - v1.8: Ajustes para sapilib (controle de timeout e retentativas)
+#          Diversas pequenas melhorias no funcionamento do programa (ver release.txt)
 # ======================================================================================================================
 # Todo:
 # - Se memorando já foi concluido, desprezar o que está em cache (caso contrário da erro)
@@ -52,7 +54,7 @@ if sys.version_info <= (3, 0):
 # GLOBAIS
 # =======================================================================
 Gprograma = "sapi_cellebrite"
-Gversao = "1.7.2"
+Gversao = "1.8.1"
 
 # Para gravação de estado
 Garquivo_estado = Gprograma + "v" + Gversao.replace('.', '_') + ".sapi"
@@ -80,18 +82,20 @@ Gmenu_comandos['comandos'] = {
 
     # Comandos relacionados com um item
     '*cr': 'Verifica a pasta de relatórios do Cellebrite no computador local e em seguida copia para o storage',
+    '*at': 'Aborta a execução da tarefa',
     '*si': 'Compara a situação da tarefa (no SETEC3) com a situação observada no storage',
     '*du': 'Dump: Mostra todas as propriedades de uma tarefa (utilizado para Debug)',
 
     # Comandos gerais
     '*sg': 'Efetua Refresh da situação das tarefas. ',
+    '*el': 'Exibe log desta instância do sapi_cellebrite (para ver outros logs, verifique diretamente na pasta). ',
     '*tt': 'Troca memorando',
     '*qq': 'Finaliza'
 }
 
 Gmenu_comandos['cmd_navegacao'] = ["+", "-", "*ir"]
-Gmenu_comandos['cmd_item'] = ["*cr", "*si"]
-Gmenu_comandos['cmd_geral'] = ["*sg", "*tt", "*qq"]
+Gmenu_comandos['cmd_item'] = ["*cr", "*si", "*at"]
+Gmenu_comandos['cmd_geral'] = ["*sg", "*tt", "*el", "*qq"]
 
 # **********************************************************************
 # PRODUCAO DEPLOYMENT AJUSTAR
@@ -99,7 +103,7 @@ Gmenu_comandos['cmd_geral'] = ["*sg", "*tt", "*qq"]
 
 # Para código produtivo, o comando abaixo deve ser substituído pelo
 # código integral de sapi_lib_xxx.py, para evitar dependência
-from sapilib_0_7_2 import *
+from sapilib_0_8 import *
 
 # **********************************************************************
 # PRODUCAO 
@@ -425,17 +429,20 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
         if_print_ok(explicar, "#", mensagem)
     d_aquis_geral['reportVersion'] = report_version
 
-    # Nome do projeto
+
+    # # Nome do projeto
     name = a.get('name', None)
-    if (numero_item not in name):
-        # Se o nome do projeto está fora do padrão, emite apenas um aviso
-        mensagem = ("Nome do projeto (" + name + ") não contém referência ao item de exame. "
-                    + "Para evitar confusão, recomenda-se que o nome do projeto contenha no seu nome o item de apreensão, "
-                    + "algo como: 'Item" + numero_item + "'")
-        avisos += [mensagem]
-        if_print_ok(explicar, "#", mensagem)
-        # return (False, dados)
     d_aquis_geral['project_name'] = name
+
+    # Acho que isto aqui não está ajudando muito.
+    # Talvez reativar mais tarde
+    # if (numero_item not in name):
+    #     # Se o nome do projeto está fora do padrão, emite apenas um aviso
+    #     mensagem = ("Nome do projeto (" + name + ") não contém referência ao item de exame. "
+    #                 + "\nPara tornar o relatório mais claro para o usuário, recomenda-se que o nome do projeto contenha no seu nome o item de apreensão, "
+    #                 + "algo como: 'Item" + numero_item + "'")
+    #     avisos += [mensagem]
+    #     if_print_ok(explicar, "#", mensagem)
 
     # ------------------------------------------------------------------
     # Valida extrações
@@ -1012,6 +1019,7 @@ def valida_pasta_relatorio_cellebrite(pasta, explicar=False):
     if arquivo_existente(pasta, arquivo):
         erros += ["Encontrado arquivo  '" + arquivo + "'. " +
                   " Isto significa que um procedimento de cópia está em andamento ou foi interrompido. " +
+                  " Assegure que a pasta que você indicou é REALMENTE deste item" +
                   " Se você tem certeza que esta é a pasta correta, corrija a extensão do arquivo para .xml e rode novamente."]
 
     # Para os arquivos abaixo, emite apenas warning se estiverem faltando
@@ -1051,6 +1059,158 @@ def print_centralizado(texto='', tamanho=Glargura_tela, preenchimento='-'):
     print(preenchimento * direita + texto + preenchimento * esquerda)
 
 
+# Exibe dados gerais da tarefa e item, para conferência do usuário
+def exibe_dados_tarefa(tarefa):
+    print()
+    print_centralizado("")
+    print("Tarefa: ", tarefa["codigo_tarefa"])
+    print("Situação: ", tarefa['descricao_situacao_tarefa'] + " : " + tarefa["status_ultimo"])
+    print("Storage: ", tarefa['dados_storage']['maquina_netbios'])
+    print("Pasta da tarefa: ", tarefa['caminho_destino'])
+    if tarefa['status_ultimo_data_hora_atualizacao']!='':
+        print("Última atualização de status: ", tarefa['status_ultimo_data_hora_atualizacao'])
+        print("Tempo desde última atualização de status: ", tarefa['tempo_desde_ultimo_status'])
+    print_centralizado("")
+    print("Item: ", tarefa["dados_item"]["item_apreensao"])
+    print("Material: ", tarefa["dados_item"]["material"])
+    print("Descrição: ", tarefa["dados_item"]["descricao"])
+    print_centralizado("")
+    print()
+
+
+# Recupera dados do sevidor relativo à tarefa marcada como corrente (selecionada pelo usuário)
+def recupera_servidor_tarefa_corrente():
+
+    # Recupera tarefa
+    (tarefa, item) = obter_tarefa_item_corrente()
+
+    # Recupera dados atuais da tarefa do servidor,
+    codigo_tarefa = tarefa["codigo_tarefa"]
+    (sucesso, msg_erro, tarefa) = sapisrv_chamar_programa(
+        "sapisrv_consultar_tarefa.php",
+        {'codigo_tarefa': codigo_tarefa},
+        abortar_insucesso=True
+    )
+
+    # Insucesso. Provavelmente a tarefa não foi encontrada
+    if (not sucesso):
+        # Continua no loop
+        print("Erro: ", msg_erro)
+        print("Efetue refresh na lista de tarefa")
+        return None
+
+    return tarefa
+
+
+
+# Aborta execução de tarefa
+# ----------------------------------------------------------------------
+def abortar_tarefa_item():
+    try:
+        _abortar_tarefa_item()
+    except KeyboardInterrupt:
+        print("Operação interrompida pelo usuário")
+        return
+
+def _abortar_tarefa_item():
+
+    print()
+    print("- Abortar tarefa.")
+
+    # Recupera situação atual da tarefa corrente do servidor
+    # ------------------------------------------------------------------
+    print("- Contactando servidor para obter dados atualizados da tarefa. Aguarde...")
+    tarefa=recupera_servidor_tarefa_corrente()
+    if tarefa is None:
+        return False
+
+    # Exibe dados da tarefa para usuário
+    # ------------------------------------------------------------------
+    exibe_dados_tarefa(tarefa)
+
+    # Verifica se tarefa pode ser abortada
+    # ------------------------------------------------------------------
+    codigo_tarefa = tarefa["codigo_tarefa"]
+    codigo_situacao_tarefa = int(tarefa['codigo_situacao_tarefa'])
+
+    if codigo_situacao_tarefa!=GEmAndamento:
+        # Tarefas com outras situações não são permitidas
+        print("Tarefa com situação ", codigo_situacao_tarefa, "-",
+              tarefa['descricao_situacao_tarefa'] + " NÃO pode ser abortada")
+        print("Apenas tarefas EM ANDAMENTO podem ser abortadas")
+        print("Em caso de divergência, efetue em Refresh na lista de tarefas (*SG)")
+        return
+
+
+    # ------------------------------------------------------------------------------------------------------------------
+    # Ok, está em andamento
+    # Vamos ver se atende as condições para ser abortada
+    # ------------------------------------------------------------------------------------------------------------------
+    print()
+    print("=== Atenção ===")
+    print("- Uma tarefa que está a muito tempo sem atualizar o status pode ter sido interrompida ou estar travada.")
+    print("- Contudo, nem sempre isto é verdade.")
+    print("  Se por algum motivo a tarefa perdeu contato com o SETEC3, ")
+    print("  o seu status não será atualizado, mas a tarefa pode ainda estar rodando,")
+    print("  uma vez que os agentes python do SAPI são tolerantes a falhas de comunição com o servidor.")
+    print("- Antes de abortar a tarefa, assegure-se que a tarefa realmente NÃO ESTÁ rodando. Sugestões:")
+    print("  - Consulte o log com a opção *EL")
+    print("  - Conecte no storage de destino via VNC e verifique se a pasta da tarefa está recebendo novos arquivos")
+    print("  - Em caso de dúvida, AGUARDE para ver se ocorre alguma evolução...")
+
+    # Se tarefa estiver em andamento, e está sem atualização de status a um longo tempo,
+    # isto indica que a mesma deve ter sido interrompida
+    # Neste caso, permite abortar a tarefa
+    tempo_ultimo_status_segundos = int(tarefa['tempo_ultimo_status_segundos'])
+    # Considerando que o tempo normal entre atualizações de status é de 3 minutos
+    # vamos dar aqui uma margem de segurança
+    minimo_minutos=10 #minutos
+    if tempo_ultimo_status_segundos>0 and tempo_ultimo_status_segundos<(minimo_minutos*60):
+        print()
+        print("- Somente é permitido abortar uma tarefa que esteja a mais de ",str(minimo_minutos)," minutos sem atualizar status")
+        print("- Esta tarefa ainda não atende esta condição. Aguarde mais algum tempo.")
+        print("- Comando cancelado por não atender tempo mínimo")
+        return
+
+    # Ok, já passou do tempo mínimo
+    print()
+    print("- Abortar uma tarefa é um procedimento irreversível, e implica em refazer a cópia desde o início")
+    print("- Se você acha que a cópia foi concluída (está tudo no storage), efetue uma conferência via VNC,")
+    print("  e se realmente estiver ok utilize o comando *SI para atualizar o status")
+    print()
+    prosseguir = pergunta_sim_nao("< Deseja realmente abortar esta tarefa?", default="n")
+    if not prosseguir:
+        print("- Cancelado pelo usuário.")
+        return
+
+    # ------------------------------------------------------------------------------------------------------------------
+    # Aborta tarefa
+    # ------------------------------------------------------------------------------------------------------------------
+    # Atualiza que tarefa foi abortada
+    print_log("Usuário comandou (*AT) para tarefa [",codigo_tarefa,"] ser abortada")
+    codigo_situacao_tarefa = GAbortou
+    texto_status = "Abortada por comando do usuário"
+    # Atualiza o status da tarefa com o resultado
+    print_log("Atualizando tarefa com: ", codigo_situacao_tarefa, "-", texto_status)
+    (ok, msg_erro) = sapisrv_atualizar_status_tarefa(
+        codigo_tarefa=codigo_tarefa,
+        codigo_situacao_tarefa=codigo_situacao_tarefa,
+        status=texto_status
+    )
+
+    if (not ok):
+        print()
+        print("- Não foi possível ABORTAR tarefa. Servidor respondeu: ", msg_erro)
+        print("- Comando cancelado")
+        return
+
+    # Sucesso
+    print()
+    print("- Tarefa abortada com sucesso")
+    print("- Para consultar situação atualizada, utilize comando *SG")
+    return
+
+
 # Valida e copia relatórios do UFED/Cellebrite
 # ----------------------------------------------------------------------
 def copia_cellebrite():
@@ -1082,23 +1242,10 @@ def copia_cellebrite():
 
     # var_dump(item["item"])
 
-    # xxx
     # ------------------------------------------------------------------
-    # Exibe dados do item para usuário confirmar
-    # se escolheu o item correto
+    # Exibe dados da tarefa para usuário confirmar
     # ------------------------------------------------------------------
-    print()
-    print_centralizado("")
-    print("Tarefa: ", tarefa["codigo_tarefa"])
-    print("Situação: ", tarefa['descricao_situacao_tarefa'])
-    print("Item: ", tarefa["dados_item"]["item_apreensao"])
-    print("Material: ", tarefa["dados_item"]["material"])
-    print("Descrição: ", tarefa["dados_item"]["descricao"])
-    print_centralizado("")
-    print()
-    # prosseguir=pergunta_sim_nao("Prosseguir para este item? ",default="n")
-    # if (not prosseguir):
-    #    return
+    exibe_dados_tarefa(tarefa)
 
     # ------------------------------------------------------------------
     # Verifica se tarefa tem o tipo certo
@@ -1110,18 +1257,26 @@ def copia_cellebrite():
 
     # Verifica se tarefa possui situação coerente para execução
     codigo_situacao_tarefa = int(tarefa['codigo_situacao_tarefa'])
-    if not (codigo_situacao_tarefa == GAguardandoPCF or codigo_situacao_tarefa == GAbortou):
+    if (codigo_situacao_tarefa == GAguardandoPCF or codigo_situacao_tarefa == GAbortou):
+        # Tudo bem, prossegue
+        prosseguir=True
+    elif codigo_situacao_tarefa==GEmAndamento:
+        #var_dump(tarefa)
+        #die('ponto1124')
+        print("- ATENÇÃO: Esta tarefa já está em andamento: ", codigo_situacao_tarefa, "-",
+              tarefa['descricao_situacao_tarefa'] + " : " + tarefa["status_ultimo"])
+        print("- Última atualização de status: ", tarefa['status_ultimo_data_hora_atualizacao'])
+        print("- Tempo desde última atualização de status: ", tarefa['tempo_desde_ultimo_status'])
+        print("- Se você deseja reiniciar esta tarefa, utilizar primeiramente o comando *AT para abortar.")
+        return
+    else:
         # Tarefas com outras situações não são permitidas
         print("Tarefa com situação ", codigo_situacao_tarefa, "-",
               tarefa['descricao_situacao_tarefa'] + " NÃO pode ser processada")
         print("Apenas tarefas com situação 'Aguardando ação PCF' ou 'Abortada' podem ser processadas")
         print("Em caso de divergência, efetue em Refresh na lista de tarefas (*SG)")
-        print("Para efetuar um reprocessamento da tarefa, utilize opção 'Reiniciar' disponível na consulta da tarefa no SETEC3")
         return
 
-    # var_dump(tarefa)
-    # var_dump(tarefa['codigo_situacao_tarefa'])
-    # die('ponto944')
 
     # ------------------------------------------------------------------
     # Verifica se tarefa está com o status correto
@@ -1138,6 +1293,14 @@ def copia_cellebrite():
         print("Caso seja necessário refazer esta tarefa, utilize a opção de REINICIAR tarefa no SETEC3.")
         return
 
+
+    # -----------------------------------------------------------------
+    # Pasta de destino
+    # -----------------------------------------------------------------
+
+    print("1) Verificando pasta de destino")
+    print("================================")
+
     # -----------------------------------------------------------------
     # Montagem de storage
     # -----------------------------------------------------------------
@@ -1145,8 +1308,10 @@ def copia_cellebrite():
     # Confirma que tem acesso ao storage escolhido
     (sucesso, ponto_montagem, erro) = acesso_storage_windows(tarefa["dados_storage"])
     if not sucesso:
-        erro = "Acesso ao storage [" + ponto_montagem + "] falhou"
-        print(erro)
+        print("Acesso ao storage [" + ponto_montagem + "] ** SEM SUCESSO **")
+        print("Verifique se servidor está acessível (rede) e disponível (ativo)")
+        print("Sugestão: Conecte no servidor via VNC com a conta consulta")
+        print("Importante: Evite fazer uma conexão no share desta máquina com a conta de consulta, pois isto pode impedir o acesso para escrita.")
         return
 
     # Desmonta caminho, separando pasta de arquivo
@@ -1156,9 +1321,8 @@ def copia_cellebrite():
 
     caminho_destino = ponto_montagem + tarefa["caminho_destino"]
 
-    print("- A pasta de origem contendo os dados de relatório do Cellebrite será inicialmente validada.")
-    print("- Estando tudo ok, será efetuada a cópia da pasta de origem para a pasta de destino indica abaixo.")
-    print("- Pasta de destino: ", caminho_destino)
+    print("- Pasta de destino indicada pela tarefa:")
+    print(" ", caminho_destino)
 
     # Verifica se pasta de destino já existe
     # Isto não é permitido
@@ -1168,10 +1332,10 @@ def copia_cellebrite():
         print()
         print("- IMPORTANTE: A pasta de destino JÁ EXISTE")
         print()
-        print("- Não é possível iniciar cópia de relatório nesta situação.")
+        print("- Não é possível iniciar a cópia nesta situação.")
         print("- Se o conteúdo atual da pasta de destino não tem utilidade,",
               "autorize a limpeza da pasta (opção abaixo).")
-        print("- Se você entende que os dados na pasta de destino já estão ok, cancele este comando")
+        print("- Se você entende que os dados na pasta de destino já estão ok (e não devem ser apagados), cancele este comando")
         print("  e em seguida utilize o comando *si para validar a pasta e atualizar a situação da tarefa.")
         print()
         prosseguir = pergunta_sim_nao(
@@ -1186,6 +1350,15 @@ def copia_cellebrite():
 
         # Guarda indicativo que será necessário limpeza da pasta de destino
         limpar_pasta_destino_antes_copiar = True
+    else:
+        print("- Verifique se na pasta de destino exibida acima as informações relativas ao memorando e item estão ok,")
+        print("  pois será assim que ficará na mídia de destino.")
+        print("- IMPORTANTE: Se a estrutura não estiver ok (item errado, por exemplo), cancele comando,")
+        print("  ajuste no SETEC3 e depois retome esta tarefa.")
+        print()
+        prosseguir = pergunta_sim_nao("< Estrutura da pasta está ok?", default="n")
+        if not prosseguir:
+            return
 
     # ------------------------------------------------------------------
     # Seleciona pasta local de relatórios
@@ -1197,9 +1370,11 @@ def copia_cellebrite():
     # Loop para selecionar pasta
     while True:
         print()
-        print("Selecionar pasta de Origem")
-        print("==========================")
-        print("- Na janela gráfica que foi aberta, selecione a pasta de origem.")
+        print("2) Selecionar pasta de origem")
+        print("=============================")
+        print("- A pasta de origem contendo os relatórios do Cellebrite será inicialmente validada.")
+        print("- Estando tudo ok, será efetuada a cópia da pasta de origem para a pasta de destino.")
+        print("- Na janela gráfica que foi aberta, selecione a pasta que contém os relatórios do item.")
         # print("<ENTER> para continuar")
         # input()
 
@@ -1216,9 +1391,38 @@ def copia_cellebrite():
             print("- Cancelado: Nenhuma pasta de origem selecionada.")
             return
 
-        print("- Pasta de origem selecionada: ", caminho_origem)
+        # Se existe o problema de cópia em andamento,
+        # dá opção para renomear
+        arquivo = "Relatório.xml_em_copia"
+        if arquivo_existente(caminho_origem, arquivo):
+            print()
+            print_log("Detectado presença de arquivo xml_em_copia")
+            print("========= ATENÇÃO ======== ")
+            print("- Detectou-se que o procedimento de cópia desta pasta já foi iniciado anteriormente, ")
+            print("  pois existe na pasta um arquivo com nome: ",arquivo)
+            print()
+            print("- Isto é normal se houve uma tentativa de cópia anterior que foi iniciada e interrompida.")
+            print()
+            print("- Caso contrário, algo estranho está acontecendo. Analise cuidadosamente antes de prosseguir.")
+            print("=> Tem certeza que você selecionou a A PASTA CORRETA para o item indicado???")
+            print()
+            print("- Deseja continuar mesmo assim? ")
+            print("  Em caso afirmativo, o arquivo xml_em_copia será renomeado para xml, para permitir o reinício.")
+            prosseguir = pergunta_sim_nao("< Prosseguir?", default="n")
+            if not prosseguir:
+                return
+            print()
+            # Renomeia e prossegue
+            de   = os.path.join(caminho_origem, "Relatório.xml_em_copia")
+            para = os.path.join(caminho_origem, "Relatório.xml")
+            print_log("Usuário indicou que arquivo xml_em_copia deve ser renomeado e cópia deve prosseguir")
+            os.rename(de, para)
+            print_log("Renomeado ", de, " para ", para)
 
         # Verificação básica da pasta, para ver se contém os arquivos típicos
+        print()
+        print("3) Validação da pasta de relatórios")
+        print("===================================")
         (erros, avisos) = valida_pasta_relatorio_cellebrite(pasta=caminho_origem, explicar=True)
         if len(erros) == 0 and len(avisos) == 0:
             # Nenhum erro ou aviso
@@ -1242,7 +1446,8 @@ def copia_cellebrite():
 
     # Verifica se o arquivo XML contido na pasta de origem está ok
     arquivo_xml = caminho_origem + "/Relatório.xml"
-    print("- Validando arquivo XML: ", arquivo_xml)
+    print("- Validando arquivo XML: ")
+    print(" ",arquivo_xml)
     print("- Isto pode demorar alguns minutos, dependendo do tamanho do arquivo. Aguarde...")
     (resultado, dados_relevantes, erros, avisos) = processar_arquivo_xml(arquivo_xml, numero_item=item["item"],
                                                                          explicar=False)
@@ -1252,9 +1457,11 @@ def copia_cellebrite():
             print("* ERRO: ", mensagem)
         return False
 
-    print("- XML válido")
-    print("- Os seguintes dados foram selecionados para utilização em laudo:")
+    print("- XML válido.")
     print()
+    print("4) Conferência de dados extraídos para laudo")
+    print("============================================")
+    print("- Os seguintes dados foram extraídos do relatório xml e serão utilizados no laudo:")
     exibir_dados_laudo(dados_relevantes['laudo'])
 
     # Exibe avisos, se houver
@@ -1266,14 +1473,32 @@ def copia_cellebrite():
         print()
         print_centralizado('')
 
+    print("- Verifique se os dados acima estão coerentes com o material examinado.")
+    print("- Caso algum campo apresente divergência em relação aos relatórios do Cellebrite (PDF por exemplo),")
+    print("  comunique o erro/sugestão de melhoria ao desenvolvedor.")
     print()
-    print("- Verifique os dados acima. Se estiver tudo certo, confirme para iniciar a cópia")
-    prosseguir = pergunta_sim_nao("< Dados acima correspondem ao exame efetuado? ", default="n")
+    prosseguir = pergunta_sim_nao("< Efetuar cópia? ", default="n")
     if not prosseguir:
         return
     #
-    copia_background = pergunta_sim_nao("< Efetuar cópia em background? ", default="n")
+
+    # Antes perguntava se queria fazer cópia em background ou não
+    # O problema é que se for em foreground, não está mostrando nenhum acompanhamento da situação para o usuário
+    # gerando ansiedade.
+    # Logo, é melhor jogar sempre para background e deixar o usuário consultar a situação se quiser.
+    # Vamos deixar este código aqui, caso seja necessário algum debug, pois fica mais complicado fazer debug
+    # em background
+    #
+    # copia_background = pergunta_sim_nao("< Efetuar cópia em background? ", default="n")
+    copia_background = True
+
     if copia_background:
+        print("- Procedimento de cópia iniciado em background.")
+        print("- Você pode continuar trabalhando, inclusive efetuar outras cópias simultaneamente.")
+        print("- Para acompanhar a situação atual, utilize comando *SG")
+        print(
+            "- IMPORTANTE: Não encerre este programa se houver cópias em andamentos, pois as mesmas terão de ser reiniciadas")
+
         proc = multiprocessing.Process(
             target=efetuar_copia,
             args=(caminho_origem, caminho_destino, codigo_tarefa, dados_relevantes, limpar_pasta_destino_antes_copiar,
@@ -1284,11 +1509,9 @@ def copia_cellebrite():
         # permitindo que usuário efetue outras operações
         # Ao término, o usuário será avisado
         print()
-        print("- Cópia iniciada em background. Você será avisado ao término do processamento.")
-        print()
     else:
         # Não é em background
-        print("- Cópia iniciada. Isto pode demorar...Aguarde....")
+        print("- Cópia EM FOREGROUND (DEPRECATED). Isto pode demorar...Aguarde....")
         # Inicia cópia e aguarda o término
         # Neste caso, o usuário terá que aguardar até o término da cópia
         efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevantes,
@@ -1341,27 +1564,35 @@ def efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevant
             texto_status = "Excluindo pasta de destino '" + caminho_destino + "'"
             atualizar_status_tarefa_andamento(codigo_tarefa, texto_status)
             print_var(tipo_print,
-                      "Exclusão de conteúdo atual da pasta de destino '" + caminho_destino + "' em andamento.")
+                      "- Excluindo pasta de destino conforme ordenado '" + caminho_destino )
             shutil.rmtree(caminho_destino, ignore_errors=True)
             texto_status = "Pasta de destino excluída"
             atualizar_status_tarefa_andamento(codigo_tarefa, texto_status)
+            print_var(tipo_print,
+                  "- Excluído com sucesso.")
 
         # 1) Renomear o arquivo XML na pasta de origem (nome temporário)
         # ------------------------------------------------------------------
         print_var(tipo_print,
-                  "Renomeando arquivo ", arquivo_xml_origem, " para " + arquivo_xml_origem_renomeado + ".",
-                  "No final da cópia o nome original será restaurado")
+                  "Renomeando arquivo ", arquivo_xml_origem, " para " + arquivo_xml_origem_renomeado + ".")
+        print_var(tipo_print,"No final da cópia o nome original será restaurado.")
         os.rename(arquivo_xml_origem, arquivo_xml_origem_renomeado)
         print_var(tipo_print, "Renomeado com sucesso")
 
         # 2) Inicia processo para acompanhar a cópia
         # Se a cópia não for em background, não tem este acompanhamento
         if copia_background:
+            texto_status = "Calculando tamanho da pasta de origem"
+            atualizar_status_tarefa_andamento(codigo_tarefa, texto_status)
+
+            tam_pasta_origem=tamanho_pasta(caminho_origem)
+            texto_status = "Pasta de origem com " + converte_bytes_humano(tam_pasta_origem)
+            atualizar_status_tarefa_andamento(codigo_tarefa, texto_status)
+
             p_acompanhar = multiprocessing.Process(target=acompanhar_copia,
-                                                   args=(tipo_print, codigo_tarefa, caminho_destino))
+                                                   args=(tipo_print, codigo_tarefa, caminho_destino, tam_pasta_origem))
             p_acompanhar.start()
-            print_var(tipo_print, "Iniciando processo background para acompanhamento de copia")
-            print_var(tipo_print, "Para acompanhar a situação, utilize o comando *SG")
+
 
         # 2) Efetuar a cópia
         # ------------------------------------------------------------------
@@ -1463,12 +1694,13 @@ def efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevant
 
 
 # Efetua a cópia de uma pasta
-def acompanhar_copia(tipo_print, codigo_tarefa, caminho_destino):
+def acompanhar_copia(tipo_print, codigo_tarefa, caminho_destino, tam_pasta_origem):
 
     # Inicializa sapilib, pois pode estar sendo executando em background (outro processo)
     sapisrv_inicializar(Gprograma, Gversao)
 
     print_var(tipo_print, "Processo de acompanhamento de tarefa: Vivo")
+    print_var(tipo_print, "A cada ",GtempoEntreAtualizacoesStatus," segundos será atualizado o status da cópia")
 
     # Um pequeno delay inicial, para dar tempo da cópia começar
     time.sleep(30)
@@ -1476,10 +1708,12 @@ def acompanhar_copia(tipo_print, codigo_tarefa, caminho_destino):
     # Fica em loop inifito. Será encerrado pelo pai (com terminate)
     while True:
         # Verifica o tamanho atual da pasta de destino
-        tamanho = converte_bytes_humano(tamanho_pasta(caminho_destino))
+        tamanho_copiado=tamanho_pasta(caminho_destino)
+        tamanho_copiado_humano = converte_bytes_humano(tamanho_copiado)
 
         # Atualiza status
-        texto_status = tamanho + " copiados"
+        percentual=(tamanho_copiado/tam_pasta_origem)*100
+        texto_status = tamanho_copiado_humano + " ("+str(round(percentual,1))+"%) copiados"
         print_var(tipo_print, texto_status)
         atualizar_status_tarefa_andamento(codigo_tarefa, texto_status)
 
@@ -1774,12 +2008,56 @@ def exibir_situacao():
             corrente, q, t["codigo_tarefa"], situacao, i["material"], item_descricao))
 
         if (q == Gicor):
+            #print('    ' + "'"*59)
+            #print('    ' + "^")
             print_centralizado()
 
     print()
     print("Dica: Para recuperar a situação atualizada do servidor (Refresh), utilize comando *SG")
 
     return
+
+def print_cabecalho_programa():
+
+    # ambiente de execução
+    ambiente = obter_ambiente()
+    if ambiente == 'PRODUCAO':
+        ambiente = ''
+    else:
+        ambiente = "@" + ambiente
+
+    # Dados identificadores
+    print(GdadosGerais.get("identificacaoObjeto", None), " | ",
+          GdadosGerais.get("data_hora_ultima_atualizacao_status", None), " | ",
+          Gprograma + str(Gversao),
+          ambiente)
+    print_centralizado()
+
+
+# Exibe conteúdo do arquivo de log
+# ----------------------------------------------------------------------
+def exibir_log():
+
+    # Limpa tela e imprime cabeçalho do programa
+    # --------------------------------------------------------------------------------
+    cls()
+    print_cabecalho_programa()
+
+    arquivo_log=obter_nome_arquivo_log()
+
+    #arquivo_log=Gparini.get('log',None)
+    #if arquivo_log is None:
+    #    arquivo_log="sapi_log.txt"
+
+    with codecs.open(arquivo_log, 'r', "utf-8") as sapi_log:
+        print(sapi_log.read())
+
+    sapi_log.close()
+
+    print()
+
+    return
+
 
 
 # Salva situação atual para arquivo
@@ -1868,7 +2146,8 @@ def obter_memorando_tarefas():
         if not matricula.isdigit():
             continue
 
-        print("Consultando servidor, aguarde...")
+        print()
+        print("- Consultando servidor (SETEC3), aguarde...")
         (sucesso, msg_erro, lista_solicitacoes) = sapisrv_chamar_programa(
             "sapisrv_obter_pendencias_pcf.php",
             {'matricula': matricula},
@@ -1899,12 +2178,13 @@ def obter_memorando_tarefas():
         if (q == 1):
             # Cabecalho
             print('%2s  %10s  %s' % ("Sq", "Protocolo", "Documento"))
+            print_centralizado("-")
         protocolo_ano = d["numero_protocolo"] + "/" + d["ano_protocolo"]
         print('%2d  %10s  %s' % (q, protocolo_ano, d["identificacao"]))
 
     print()
-    print("Estas são as solicitações de exames que foram iniciadas no SAPI.")
-    print("Se a solicitação de exame que você procura não está na lista, confira situação no SETEC3 => Perícia => SAPI.")
+    print("- Estas são as solicitações de exames que foram iniciadas no SAPI.")
+    print("- Se a solicitação de exame que você procura não está na lista, confira situação no SETEC3 => Perícia => SAPI.")
     # print("type(lista_solicitacoes)=",type(lista_solicitacoes))
 
     # Usuário escolhe a solicitação de exame de interesse
@@ -2034,57 +2314,12 @@ def posicionar_item(n):
 
 
 # ======================================================================
-# Código para teste
-# ======================================================================
-
-# d={}
-# d['chave1']=10
-# d['chave2']=['abc','def']
-# d['chave3']={'c31': 12.5, 'c32': ['xyz', 'def']}
-
-
-# d_json=json.dumps(d,sort_keys=True)
-# print(d_json)
-# die('ponto2031')
-
-
-# import pyperclip # The name you have the file
-# x = pyperclip.paste()
-# print(x)
-
-# start_time=time.time()
-# time.sleep(5)
-# tempo=time.time()-start_time
-#
-# print("tempo = ", tempo)
-# #print("tempo = ", str(tempo))
-# die('ponto1345')
-# var_dump(tempo)
-
-# pasta='c:/tempr'
-# tamanho=tamanho_pasta(pasta)
-# print(pasta,tamanho, converte_bytes_humano(tamanho))
-#
-# pasta='c:/teste_iped'
-# tamanho=tamanho_pasta(pasta)
-# print(pasta,tamanho, converte_bytes_humano(tamanho))
-#
-# die('ponto1174')
-
-# from teste_modulo import *
-#
-# class teste:
-# 	def f1():
-# 		print("Ok, chamou f1")
-#
-# teste.f1()
-# sys.exit()
-
-# ======================================================================
 # Rotina Principal 
 # ======================================================================
 
 def main():
+
+
     # Cabeçalho inicial do programa
     # ------------------------------------------------------------------------------------------------------------------
     print()
@@ -2099,11 +2334,17 @@ def main():
     print("- Recomenda-se também trabalhar com a janela na altura máxima disponível do monitor.")
     print()
     print("Aguarde conexão com servidor...")
+    print()
 
     # Inicialização de sapilib
     # -----------------------------------------------------------------------------------------------------------------
     print_log('Iniciando ', Gprograma , ' - ', Gversao)
-    sapisrv_inicializar_ok(Gprograma, Gversao)
+    sapisrv_inicializar_ok(Gprograma, Gversao, auto_atualizar=True)
+
+
+    # testes...atalhos
+    #exibir_log()
+    #die('ponto2215')
 
     # Carrega o estado anterior
     # -----------------------------------------------------------------------------------------------------------------
@@ -2116,9 +2357,12 @@ def main():
         if not obter_memorando_tarefas_ok():
             # Se usuário interromper seleção de tarefas
             print("Execução finalizada.")
-            sys.exit()
+            #sys.exit()
+            return
+
     # Salva estado atual
     salvar_estado()
+
 
     # Processamento das tarefas
     # ---------------------------
@@ -2127,6 +2371,8 @@ def main():
     # Recebe comandos
     while (True):
         (comando, argumento) = console_receber_comando(Gmenu_comandos)
+        if comando is None:
+            continue
         if comando == '':
             # Se usuário simplemeste der um <ENTER>, exibe a situação
             exibir_situacao()
@@ -2174,11 +2420,17 @@ def main():
         elif (comando == '*si'):
             exibir_situacao_item()
             continue
+        elif (comando == '*at'):
+            abortar_tarefa_item()
+            continue
 
         # Comandos gerais
         if (comando == '*sg'):
             refresh_tarefas()
             exibir_situacao()
+            continue
+        elif (comando == '*el'):
+            exibir_log()
             continue
         elif (comando == '*tt'):
             if obter_memorando_tarefas_ok():
@@ -2236,4 +2488,7 @@ if __name__ == '__main__':
     # die('ponto1936')
 
     main()
+
+    print("Pressione qualquer tecla para concluir, ou feche a janela")
+    input()
 

@@ -60,7 +60,7 @@ if sys.version_info <= (3, 0):
 # GLOBAIS
 # =======================================================================
 Gprograma = "sapi_iped"
-Gversao = "1.7.4-3.12.4"
+Gversao = "1.7.5"
 
 # Controle de tempos/pausas
 GtempoEntreAtualizacoesStatus = 180
@@ -980,7 +980,7 @@ def executar_uma_tarefa(lista_ipeds_suportados):
     # Confirma que tem acesso ao storage escolhido
     (sucesso, ponto_montagem, erro) = acesso_storage_windows(tarefa["dados_storage"])
     if not sucesso:
-        erro = "Acesso ao storage [" + ponto_montagem + "] falhou"
+        erro = "Acesso ao storage [" + ponto_montagem + "] falhou. Verifique se servidor está acessível (rede) e disponível."
         # Talvez seja um problema de rede (trasiente)
         reportar_erro(erro)
         print_log("Problema insolúvel neste momento, mas possivelmente transiente")

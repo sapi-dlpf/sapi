@@ -52,7 +52,7 @@ if sys.version_info <= (3, 0):
 # GLOBAIS
 # =======================================================================
 Gprograma = "sapi_laudo"
-Gversao = "1.7.1"
+Gversao = "1.7.2"
 
 # Para gravação de estado
 Garquivo_estado = Gprograma + "v" + Gversao.replace('.', '_') + ".sapi"
@@ -2929,11 +2929,13 @@ def main():
     print("  configure o buffer de tela e tamanho de janela com largura mínima de 130 caracteres.")
     print("- Recomenda-se também trabalhar com a janela na altura máxima disponível do monitor.")
     print()
+    print("Aguarde conexão com servidor...")
+    print()
 
     # Inicialização de sapilib
     # -----------------------------------------------------------------------------------------------------------------
     print_log('Iniciando ', Gprograma, ' - ', Gversao)
-    sapisrv_inicializar_ok(Gprograma, Gversao)
+    sapisrv_inicializar_ok(Gprograma, Gversao, auto_atualizar=True)
 
     # Carrega o estado anterior, se houver. Caso contrário, solicita dados para utilização do programa
     # -----------------------------------------------------------------------------------------------------------------
