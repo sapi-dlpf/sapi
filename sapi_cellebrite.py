@@ -41,6 +41,7 @@ import xml.etree.ElementTree as ElementTree
 import shutil
 import tempfile
 import multiprocessing
+import signal
 
 
 # Verifica se está rodando versão correta de Python
@@ -74,7 +75,7 @@ GtempoEntreAtualizacoesStatus = 180  # Tempo normal de produção
 # ------- Definição de comandos aceitos --------------
 Gmenu_comandos = dict()
 Gmenu_comandos['comandos'] = {
-    # Comandos de navegacao
+    # Comandos de navegação
     '+': 'Navega para a tarefa seguinte da lista',
     '-': 'Navega para a tarefa anterior da lista',
     '*ir': 'Posiciona na tarefa com sequencial(Sq) indicado (ex: *ir 4, pula para o quarto item da lista).' +
@@ -82,20 +83,25 @@ Gmenu_comandos['comandos'] = {
 
     # Comandos relacionados com um item
     '*cr': 'Verifica a pasta de relatórios do Cellebrite no computador local e em seguida copia para o storage',
-    '*at': 'Aborta a execução da tarefa',
+    '*at': 'Aborta da tarefa',
     '*si': 'Compara a situação da tarefa (no SETEC3) com a situação observada no storage',
     '*du': 'Dump: Mostra todas as propriedades de uma tarefa (utilizado para Debug)',
 
     # Comandos gerais
     '*sg': 'Efetua Refresh da situação das tarefas. ',
-    '*el': 'Exibe log desta instância do sapi_cellebrite (para ver outros logs, verifique diretamente na pasta). ',
     '*tt': 'Troca memorando',
-    '*qq': 'Finaliza'
+    '*qq': 'Finaliza',
+
+    # Comandos para diagnóstico de problemas
+    '*el': 'Exibe log desta instância do sapi_cellebrite (para ver outros logs, verifique arquivos diretamente na pasta). ',
+    '*dg': 'Liga/desliga modo debug. Este modo incluí mensagens adicionais no log visando facilitar o diagnóstico de problemas'
+
 }
 
 Gmenu_comandos['cmd_navegacao'] = ["+", "-", "*ir"]
 Gmenu_comandos['cmd_item'] = ["*cr", "*si", "*at"]
-Gmenu_comandos['cmd_geral'] = ["*sg", "*tt", "*el", "*qq"]
+Gmenu_comandos['cmd_geral'] = ["*sg", "*tt", "*qq"]
+Gmenu_comandos['cmd_diagnostico'] = ["*el", "*dg"]
 
 # **********************************************************************
 # PRODUCAO DEPLOYMENT AJUSTAR
@@ -244,7 +250,7 @@ def storage_montado(ponto_montagem):
 # Não efetua verificação de erro, afinal este status é apenas informativo
 def atualizar_status_tarefa_andamento(codigo_tarefa, texto_status):
     codigo_situacao_tarefa = GEmAndamento
-    print_log("Atualizando tarefa ", codigo_tarefa, " em andamento com status: ", texto_status)
+    print_log("Tarefa ", codigo_tarefa, "=> atualizado status: ", texto_status)
     (ok, msg_erro) = sapisrv_atualizar_status_tarefa(
         codigo_tarefa=codigo_tarefa,
         codigo_situacao_tarefa=codigo_situacao_tarefa,
@@ -1059,20 +1065,23 @@ def print_centralizado(texto='', tamanho=Glargura_tela, preenchimento='-'):
     print(preenchimento * direita + texto + preenchimento * esquerda)
 
 
+
 # Exibe dados gerais da tarefa e item, para conferência do usuário
 def exibe_dados_tarefa(tarefa):
     print()
     print_centralizado("")
-    print("Tarefa: ", tarefa["codigo_tarefa"])
-    print("Situação: ", tarefa['descricao_situacao_tarefa'] + " : " + tarefa["status_ultimo"])
-    print("Storage: ", tarefa['dados_storage']['maquina_netbios'])
-    print("Pasta da tarefa: ", tarefa['caminho_destino'])
-    if tarefa['status_ultimo_data_hora_atualizacao']!='':
-        print("Última atualização de status: ", tarefa['status_ultimo_data_hora_atualizacao'])
-        print("Tempo desde última atualização de status: ", tarefa['tempo_desde_ultimo_status'])
+    print("Código da tarefa   : ", tarefa["codigo_tarefa"])
+    print("Storage            : ", tarefa['dados_storage']['maquina_netbios'])
+    print("Pasta armazenamento: ", tarefa['caminho_destino'])
+    print("Situação           : ", tarefa['descricao_situacao_tarefa'])
+    if obter_dict_string_ok(tarefa,'status_ultimo')!='':
+        print_centralizado("")
+        print("Último status  : ", obter_dict_string_ok(tarefa,'status_ultimo'))
+        print("Atualizado em  : ", obter_dict_string_ok(tarefa,'status_ultimo_data_hora_atualizacao'))
+        print("Tempo          : ", obter_dict_string_ok(tarefa,'tempo_desde_ultimo_status'), " desde última atualização de status")
     print_centralizado("")
-    print("Item: ", tarefa["dados_item"]["item_apreensao"])
-    print("Material: ", tarefa["dados_item"]["material"])
+    print("Item     : ", tarefa["dados_item"]["item_apreensao"])
+    print("Material : ", tarefa["dados_item"]["material"])
     print("Descrição: ", tarefa["dados_item"]["descricao"])
     print_centralizado("")
     print()
@@ -1147,7 +1156,7 @@ def _abortar_tarefa_item():
     # Vamos ver se atende as condições para ser abortada
     # ------------------------------------------------------------------------------------------------------------------
     print()
-    print("=== Atenção ===")
+    print("******* Atenção *******")
     print("- Uma tarefa que está a muito tempo sem atualizar o status pode ter sido interrompida ou estar travada.")
     print("- Contudo, nem sempre isto é verdade.")
     print("  Se por algum motivo a tarefa perdeu contato com o SETEC3, ")
@@ -1208,6 +1217,11 @@ def _abortar_tarefa_item():
     print()
     print("- Tarefa abortada com sucesso")
     print("- Para consultar situação atualizada, utilize comando *SG")
+    return
+
+
+def intercepta_signal(signal, frame):
+    print('signal interceptado')
     return
 
 
@@ -1321,7 +1335,7 @@ def copia_cellebrite():
 
     caminho_destino = ponto_montagem + tarefa["caminho_destino"]
 
-    print("- Pasta de destino indicada pela tarefa:")
+    print("- Pasta de destino da tarefa no storage:")
     print(" ", caminho_destino)
 
     # Verifica se pasta de destino já existe
@@ -1370,11 +1384,10 @@ def copia_cellebrite():
     # Loop para selecionar pasta
     while True:
         print()
-        print("2) Selecionar pasta de origem")
-        print("=============================")
-        print("- A pasta de origem contendo os relatórios do Cellebrite será inicialmente validada.")
-        print("- Estando tudo ok, será efetuada a cópia da pasta de origem para a pasta de destino.")
-        print("- Na janela gráfica que foi aberta, selecione a pasta que contém os relatórios do item.")
+        print("2) Selecionar pasta de origem (relatórios cellebrite)")
+        print("=====================================================")
+        print("- Na janela gráfica que foi aberta, selecione a pasta que contém os relatórios cellebrite do item.")
+        print("- Os arquivos de relatórios devem estar posicionados imediatamente abaixo da pastas informada.")
         # print("<ENTER> para continuar")
         # input()
 
@@ -1397,17 +1410,15 @@ def copia_cellebrite():
         if arquivo_existente(caminho_origem, arquivo):
             print()
             print_log("Detectado presença de arquivo xml_em_copia")
-            print("========= ATENÇÃO ======== ")
+            print("******* ATENÇÃO *******")
             print("- Detectou-se que o procedimento de cópia desta pasta já foi iniciado anteriormente, ")
             print("  pois existe na pasta um arquivo com nome: ",arquivo)
-            print()
-            print("- Isto é normal se houve uma tentativa de cópia anterior que foi iniciada e interrompida.")
-            print()
+            print("- Isto é normal se houve uma tentativa de cópia anterior que foi interrompida.")
             print("- Caso contrário, algo estranho está acontecendo. Analise cuidadosamente antes de prosseguir.")
             print("=> Tem certeza que você selecionou a A PASTA CORRETA para o item indicado???")
             print()
-            print("- Deseja continuar mesmo assim? ")
-            print("  Em caso afirmativo, o arquivo xml_em_copia será renomeado para xml, para permitir o reinício.")
+            print("- Se você decidir prosseguir, o arquivo xml_em_copia será renomeado para xml, para permitir o reinício.")
+            print()
             prosseguir = pergunta_sim_nao("< Prosseguir?", default="n")
             if not prosseguir:
                 return
@@ -1477,7 +1488,7 @@ def copia_cellebrite():
     print("- Caso algum campo apresente divergência em relação aos relatórios do Cellebrite (PDF por exemplo),")
     print("  comunique o erro/sugestão de melhoria ao desenvolvedor.")
     print()
-    prosseguir = pergunta_sim_nao("< Efetuar cópia? ", default="n")
+    prosseguir = pergunta_sim_nao("< Iniciar cópia? ", default="n")
     if not prosseguir:
         return
     #
@@ -1491,23 +1502,36 @@ def copia_cellebrite():
     #
     # copia_background = pergunta_sim_nao("< Efetuar cópia em background? ", default="n")
     copia_background = True
+    nome_arquivo_log = obter_nome_arquivo_log()
 
     if copia_background:
-        print("- Procedimento de cópia iniciado em background.")
+        print()
+        print("- Ok, procedimento de cópia foi iniciado em background.")
         print("- Você pode continuar trabalhando, inclusive efetuar outras cópias simultaneamente.")
         print("- Para acompanhar a situação atual, utilize comando *SG")
+        print("- Em caso de problema/dúvida, utilize *EL para visualizar o arquivo de log")
         print(
             "- IMPORTANTE: Não encerre este programa se houver cópias em andamentos, pois as mesmas terão de ser reiniciadas")
+
+        # Ignora Interrupção (CTR-C) para permitir que processo filho herde esta propriedade
+        #original_sigint_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
+        original_sigint_handler = signal.signal(signal.SIGINT, intercepta_signal)
+        #var_dump(original_sigint_handler)
+        #die('ponto1514')
 
         proc = multiprocessing.Process(
             target=efetuar_copia,
             args=(caminho_origem, caminho_destino, codigo_tarefa, dados_relevantes, limpar_pasta_destino_antes_copiar,
-                  copia_background))
+                  copia_background, nome_arquivo_log))
         proc.start()
         # Inicia cópia em background
         # O fluxo retona imediatamente para cá, e voltamos para à rotina principal
         # permitindo que usuário efetue outras operações
         # Ao término, o usuário será avisado
+
+        # Retorna tratamento para CTR-C original
+        signal.signal(signal.SIGINT, original_sigint_handler)
+
         print()
     else:
         # Não é em background
@@ -1515,17 +1539,21 @@ def copia_cellebrite():
         # Inicia cópia e aguarda o término
         # Neste caso, o usuário terá que aguardar até o término da cópia
         efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevantes,
-                      limpar_pasta_destino_antes_copiar, copia_background)
+                      limpar_pasta_destino_antes_copiar, copia_background, nome_arquivo_log)
 
     return
 
 
 # Efetua a cópia de uma pasta
 def efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevantes, limpar_pasta_destino_antes_copiar,
-                  copia_background):
+                  copia_background, nome_arquivo_log):
+
+    # Impede interrupção por sigint
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
 
     # Inicializa sapilib, pois pode estar sendo executando em background (outro processo)
-    sapisrv_inicializar(Gprograma, Gversao)
+    # Será utilizado o mesmo arquivo de log da thread pai
+    sapisrv_inicializar(Gprograma, Gversao, nome_arquivo_log=nome_arquivo_log)
 
     # Define qual o tipo de saída das mensagens de processamento
     somente_log = 'log'
@@ -1590,7 +1618,7 @@ def efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevant
             atualizar_status_tarefa_andamento(codigo_tarefa, texto_status)
 
             p_acompanhar = multiprocessing.Process(target=acompanhar_copia,
-                                                   args=(tipo_print, codigo_tarefa, caminho_destino, tam_pasta_origem))
+                                                   args=(tipo_print, codigo_tarefa, caminho_destino, tam_pasta_origem, nome_arquivo_log))
             p_acompanhar.start()
 
 
@@ -1652,8 +1680,9 @@ def efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevant
 
         # Finaliza tarefas em background
         if p_acompanhar is not None:
+            print_var(tipo_print, "Encerrando thread de acompanhamento de copia")
             p_acompanhar.terminate()
-            print_var(tipo_print, "Encerrando processo background para acompanhamento de copia")
+            print_var(tipo_print, "Thread de acompanhamento de copia encerrada")
 
         # Encerra
         return
@@ -1694,12 +1723,15 @@ def efetuar_copia(caminho_origem, caminho_destino, codigo_tarefa, dados_relevant
 
 
 # Efetua a cópia de uma pasta
-def acompanhar_copia(tipo_print, codigo_tarefa, caminho_destino, tam_pasta_origem):
+def acompanhar_copia(tipo_print, codigo_tarefa, caminho_destino, tam_pasta_origem, nome_arquivo_log):
+
+    # Impede interrupção por sigint
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
 
     # Inicializa sapilib, pois pode estar sendo executando em background (outro processo)
-    sapisrv_inicializar(Gprograma, Gversao)
+    sapisrv_inicializar(Gprograma, Gversao, nome_arquivo_log=nome_arquivo_log)
 
-    print_var(tipo_print, "Processo de acompanhamento de tarefa: Vivo")
+    print_var(tipo_print, "Thread de acompanhamento de tarefa ativada")
     print_var(tipo_print, "A cada ",GtempoEntreAtualizacoesStatus," segundos será atualizado o status da cópia")
 
     # Um pequeno delay inicial, para dar tempo da cópia começar
@@ -2042,6 +2074,8 @@ def exibir_log():
     # --------------------------------------------------------------------------------
     cls()
     print_cabecalho_programa()
+    print("Arquivo de log: ",obter_nome_arquivo_log())
+    print_centralizado()
 
     arquivo_log=obter_nome_arquivo_log()
 
@@ -2053,8 +2087,6 @@ def exibir_log():
         print(sapi_log.read())
 
     sapi_log.close()
-
-    print()
 
     return
 
@@ -2148,6 +2180,7 @@ def obter_memorando_tarefas():
 
         print()
         print("- Consultando servidor (SETEC3), aguarde...")
+        print_log("Recuperando solicitações de exame para matrícula: ", matricula)
         (sucesso, msg_erro, lista_solicitacoes) = sapisrv_chamar_programa(
             "sapisrv_obter_pendencias_pcf.php",
             {'matricula': matricula},
@@ -2157,12 +2190,12 @@ def obter_memorando_tarefas():
         # Insucesso....normalmente matricula incorreta
         if (not sucesso):
             # Continua no loop
-            print("Erro: ", msg_erro)
+            print_tela_log("Erro: ", msg_erro)
             continue
 
         # Matricula ok, vamos ver se tem solicitacoes de exame
         if (len(lista_solicitacoes) == 0):
-            print(
+            print_tela_log(
                 "Não existe nenhuma solicitacao de exame com tarefas SAPI para esta matrícula. Verifique no setec3")
             continue
 
@@ -2218,6 +2251,7 @@ def obter_memorando_tarefas():
             solicitacao["numero_protocolo"] + "/" + solicitacao["ano_protocolo"])
         # Para utilização em diveros lugares padronizados
         GdadosGerais["identificacaoObjeto"] = GdadosGerais["identificacaoSolicitacao"]
+        print_log("Usuário escolheu ",GdadosGerais["identificacaoObjeto"])
 
         # print("Selecionado:",solicitacao["identificacao"])
         print("Consultando tarefas para", GdadosGerais["identificacaoSolicitacao"], ". Aguarde...")
@@ -2317,6 +2351,7 @@ def posicionar_item(n):
 # Rotina Principal 
 # ======================================================================
 
+
 def main():
 
 
@@ -2340,11 +2375,6 @@ def main():
     # -----------------------------------------------------------------------------------------------------------------
     print_log('Iniciando ', Gprograma , ' - ', Gversao)
     sapisrv_inicializar_ok(Gprograma, Gversao, auto_atualizar=True)
-
-
-    # testes...atalhos
-    #exibir_log()
-    #die('ponto2215')
 
     # Carrega o estado anterior
     # -----------------------------------------------------------------------------------------------------------------
@@ -2390,9 +2420,28 @@ def main():
                 if not prosseguir_finalizar:
                     continue
 
+                # Eliminando processos filhos que ainda estão ativos
+                print_log("Usuário foi avisado que existem processos rodando, e respondeu que desejava encerrar mesmo assim")
+                lista = multiprocessing.active_children()
+                for i in lista:
+                    print_log("Matando processo: ", i)
+                    i.terminate()
+
+                while True:
+                    # Uma pequen pausa para dar tempo dos processos finalizarem
+                    time.sleep(3)
+                    lista = multiprocessing.active_children()
+                    qtd = len(lista)
+                    if qtd == 0:
+                        print_log("Todos os processos filhos foram eliminados")
+                        break
+                    print_tela_log("Aguardando encerramento de processos (",len(lista),")")
+                    # Aguarda e repete
+                    time.sleep(1)
+
             # Finaliza
             print()
-            print("Programa finalizado por solicitação do usuário")
+            print_tela_log("Programa finalizado por solicitação do usuário")
             break
 
         # Executa os comandos
@@ -2431,6 +2480,14 @@ def main():
             continue
         elif (comando == '*el'):
             exibir_log()
+            continue
+        elif (comando == '*dg'):
+            if modo_debug():
+                desligar_modo_debug()
+                print("- Modo debug foi desligado")
+            else:
+                ligar_modo_debug()
+                print("- Modo debug foi ligado")
             continue
         elif (comando == '*tt'):
             if obter_memorando_tarefas_ok():

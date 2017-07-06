@@ -3,6 +3,7 @@ Sapi_cellebrite 1.8.1:
 - Opção para renomear arquivo xml_em_copia (caso cópia tenha sido interrompida)
 - Comando *AT: Abortar tarefa
 - Comando *EL: Exibe log
+- Comando *DG: Incluir mensagens de debug no log
 - Melhorias nas mensagens e interface para deixar mais intuitivo
 - No término da execução, pede um <ENTER> para permitir maior clareza de funcionamento na console como shortcut, caso ocorra algum erro.
 - Utiliza sapilib 0.8

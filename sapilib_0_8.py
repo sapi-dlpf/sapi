@@ -155,6 +155,13 @@ def desligar_log_dual():
     global GlogDual
     GlogDual = False
 
+def ligar_modo_debug():
+    global Gparini
+    Gparini['debug'] = True
+
+def desligar_modo_debug():
+    global Gparini
+    Gparini['debug'] = False
 
 # Processa parâmetros de chamada
 def sapi_processar_parametros_usuario():
@@ -183,7 +190,7 @@ def sapi_processar_parametros_usuario():
             Gparini['background'] = True
 
         if options.debug:
-            Gparini['debug'] = True
+            ligar_modo_debug()
 
         if options.log:
             Gparini['log'] = options.log
@@ -297,7 +304,9 @@ def atualizar_programa(nome_programa):
 # - ambiente : 'desenv' ou 'prod'
 #              Default: 'desenv' se houver arquivo 'desenvolvimento_nao_excluir.txt' na pasta. Caso contrário, 'prod'
 # ----------------------------------------------------------------------------------------------------------------------
-def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambiente=None, auto_atualizar=False):
+def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambiente=None, auto_atualizar=False,
+                                  nome_arquivo_log=None):
+
     # Atualiza estas globais
     global Ginicializado
     global Gparini
@@ -333,6 +342,10 @@ def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambie
     # Sanitiza
     nome_agente=nome_agente.replace(".dpfsrpr","")
     Gparini['nome_agente'] = nome_agente
+
+    # Nome do arquivo de log
+    if nome_arquivo_log is not None:
+        Gparini['log']=nome_arquivo_log
 
     # Pasta de execução do programa
     pasta_execucao=os.path.abspath(os.path.dirname(sys.argv[0]))
@@ -378,10 +391,10 @@ def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambie
 
     # Inicializado
     Ginicializado = True
-    print_log("Inicializado SAPILIB: Agente= ", _obter_parini('nome_agente'),
-              " Ambiente= ", _obter_parini('nome_ambiente'),
-              " Servidor=  ", _obter_parini('servidor_ip'))
-
+    print_log("Inicializado SAPILIB Agente=", _obter_parini('nome_agente'),
+              " Ambiente=", _obter_parini('nome_ambiente'),
+              " Servidor=", _obter_parini('servidor_ip'),
+              " arquivo_log=", obter_nome_arquivo_log())
 
     # Verifica se versão do programa está habilitada a rodar, através de chamada ao servidor
     # Todo: Implementar verificações no servidor (agente, programa/versão)
@@ -427,9 +440,6 @@ def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambie
         elif tipo_erro=='AgenteDesautorizado':
             raise SapiExceptionAgenteDesautorizado(resultado['explicacao'])
         erro_fatal('Erro fatal: Resposta inesperada de servidor')
-
-    #if modo_debug():
-    #    die('ponto230')
 
     return
 
@@ -481,10 +491,6 @@ def sapisrv_inicializar_ok(*args, **kwargs):
 # ----------------------------------------------------------------------------------------------------------------------
 def sapisrv_inicializar(*args, **kwargs):
 
-    #print("ponto329")
-    #var_dump(args)
-    #var_dump(kwargs)
-
     # Simulando exceção, para testar o tratamento na rotina superior
     #5/0
     #raise SapiExceptionFalhaComunicacao("Apenas teste")
@@ -507,14 +513,14 @@ def sapisrv_inicializar(*args, **kwargs):
         #print("Assegure-se de estar utilizando uma máquina homologada")
         raise SapiExceptionAgenteDesautorizado
 
+    print_log("sapilib iniciada")
+
 
 # Reporta ao servidor um erro ocorrido no cliente
 # Parâmetros:
 #   programa: Nome do programa
 #   ip (opcional): IP da máquina
-def sapisrv_reportar_erro_cliente(
-        erro
-):
+def sapisrv_reportar_erro_cliente(erro):
     # Lista de parâmetros
     param = dict()
     param['erro'] = erro
@@ -893,10 +899,7 @@ def _sapisrv_chamar_programa_get(programa, parametros, registrar_log=False):
     url = _obter_parini('url_base') + programa + "?" + parametros_formatados
 
     # Registra em log
-    if modo_debug():
-        # Se estiver em debug, mostra na tela também
-        print_log_dual(url)
-    elif registrar_log:
+    if modo_debug() or registrar_log:
         # Registra apenas no log
         print_log(url)
 
@@ -961,7 +964,7 @@ def sapisrv_get_ok(url):
 # ----------------------------------------------------------------------
 def _sapisrv_chamar_programa_post(programa, parametros, registrar_log=False):
     if (registrar_log or modo_debug()):
-        print_log_dual("Chamada POST para", programa)
+        print_log("Chamada POST para", programa)
 
     retorno = sapisrv_post_sucesso(programa, parametros)
 
@@ -977,9 +980,9 @@ def _sapisrv_chamar_programa_post(programa, parametros, registrar_log=False):
     # Registra resultado no log
     if (registrar_log or modo_debug()):
         if sucesso:
-            print_log_dual("Servidor respondeu com sucesso")
+            print_log("Servidor respondeu com sucesso")
         else:
-            print_log_dual("Servidor respondeu com falha: ", msg_erro)
+            print_log("Servidor respondeu com falha: ", msg_erro)
 
     # Retorna o resultado, decomposto nos seus elementos
     return (sucesso, msg_erro, dados)
@@ -1060,7 +1063,7 @@ def _post(programa, parametros):
 def erro_fatal(*args):
     sys.stdout.write("Sapi Erro Fatal: ")
     print_ok(*args)
-    print_ok("Para maiores informações, consulte o arquivo de log (sapi_log.txt)")
+    print_ok("Para maiores informações, consulte o arquivo de log")
     os._exit(1)
 
 
@@ -1077,6 +1080,15 @@ def var_dump(x):
     print(type(x))
     pp = pprint.PrettyPrinter(indent=4)
     pp.pprint(x)
+
+# Recupera um valor string de um dicionario.
+# Se não existir ou não possuir valor definido, retorna string nulo
+# ----------------------------------------------------------------------
+def obter_dict_string_ok(dict, chave):
+    valor=dict.get(chave, None)
+    if valor is None:
+        return ""
+    return str(valor)
 
 
 # Limpa tela, linux e nt
@@ -1152,12 +1164,29 @@ def print_ok(*arg):
     print(*arg)
 
 
+def obter_timestamp(remover_milisegundo=True):
+    ts = str(datetime.datetime.now())
+    if remover_milisegundo:
+        # Remove milisegundo
+        ts, mili=ts.split('.')
+    # Troca separadores incomuns que podem confundir SO por '-'
+    ts=ts.replace('.','_')
+    ts=ts.replace(' ','_')
+    ts=ts.replace(':','-')
+
+    return ts
+
+
 # Nome do arquivo de log
 # ----------------------------------------------------------------------
 def obter_nome_arquivo_log():
+    global Gparini
     arquivo_log=Gparini.get('log',None)
     if arquivo_log is None:
-        arquivo_log="sapi_log.txt"
+        # Default no formato:
+        # sapi_log_AAAA-MM-DD_HH-MM-SS_ssssss.txt, onde ssssss são os milisegundos
+        arquivo_log="sapi_log_"+obter_timestamp(remover_milisegundo=False)+".txt"
+        Gparini['log']=arquivo_log
 
     return arquivo_log
 
@@ -1672,6 +1701,7 @@ def _receber_comando(menu_comando):
     cmd_navegacao = menu_comando['cmd_navegacao']
     cmd_item = menu_comando['cmd_item']
     cmd_geral = menu_comando['cmd_geral']
+    cmd_diagnostico = menu_comando['cmd_diagnostico']
 
     comando_ok = False
     comando_recebido = ""
@@ -1697,7 +1727,7 @@ def _receber_comando(menu_comando):
         elif (comando_recebido == "H" or comando_recebido == "?"):
             # Exibe ajuda para comando
             print()
-            print("Navegacao:")
+            print("Navegação:")
             print("----------")
             print('<ENTER> : Exibe lista de tarefas atuais (sem Refresh no servidor)')
             for key in cmd_navegacao:
@@ -1710,10 +1740,18 @@ def _receber_comando(menu_comando):
                 print(key.upper(), " : ", comandos[key])
             print()
 
+            print("Diagnóstico de problemas:")
+            print("-------------------------")
+            for key in cmd_diagnostico:
+                print(key.upper(), " : ", comandos[key])
+            print()
+
             print("Comandos gerais:")
             print("----------------")
             for key in cmd_geral:
                 print(key.upper(), " : ", comandos[key])
+            print()
+
         elif (comando_recebido == ""):
             # print("Para ajuda, digitar comando 'h' ou '?'")
             return ("", "")
