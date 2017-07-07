@@ -1698,6 +1698,7 @@ def console_receber_comando(menu_comando):
 def _receber_comando(menu_comando):
 
     comandos = menu_comando['comandos']
+    cmd_exibicao = menu_comando.get('cmd_exibicao',[])
     cmd_navegacao = menu_comando['cmd_navegacao']
     cmd_item = menu_comando['cmd_item']
     cmd_geral = menu_comando['cmd_geral']
@@ -1725,14 +1726,27 @@ def _receber_comando(menu_comando):
             # um número é um comando válido
             comando_ok = True
         elif (comando_recebido == "H" or comando_recebido == "?"):
+
             # Exibe ajuda para comando
-            print()
+
+            # Comandos de exibição
+            if len(cmd_exibicao)>0:
+                print()
+                print("Exibição:")
+                print("----------")
+                print('<ENTER> : Exibe lista de tarefas atuais (sem Refresh no servidor)')
+                for key in cmd_exibicao:
+                    print(key.upper(), " : ", comandos[key])
+                print()
+
+            # Exibe ajuda para comando
             print("Navegação:")
             print("----------")
-            print('<ENTER> : Exibe lista de tarefas atuais (sem Refresh no servidor)')
+            print('nn : Posiciona no elemento com Sq=nn da lista (Exemplo: 5, posiciona no quinto elemento)')
             for key in cmd_navegacao:
                 print(key.upper(), " : ", comandos[key])
             print()
+
 
             print("Processamento da tarefa corrente (marcada com =>):")
             print("--------------------------------------------------")

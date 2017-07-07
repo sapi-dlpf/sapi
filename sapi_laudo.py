@@ -52,7 +52,7 @@ if sys.version_info <= (3, 0):
 # GLOBAIS
 # =======================================================================
 Gprograma = "sapi_laudo"
-Gversao = "1.7.2"
+Gversao = "1.8.1"
 
 # Para gravação de estado
 Garquivo_estado = Gprograma + "v" + Gversao.replace('.', '_') + ".sapi"
@@ -1004,9 +1004,18 @@ def recupera_dados_para_laudo_das_tarefas_item(dados_item, fase=None):
     # Monta resposta
     for t in tarefas:
         # var_dump(t["tarefa"]["dados_relevantes_json"])
-        dados_relevantes_json = json.loads(t["tarefa"]["dados_relevantes_json"])
-        dados_laudo = dados_relevantes_json["laudo"]
-        lista_dados_laudo.append(dados_laudo)
+        # var_dump(t["tarefa"]["dados_relevantes_json"])
+        if t["tarefa"]["dados_relevantes_json"] is not None:
+            dados_relevantes_json = json.loads(t["tarefa"]["dados_relevantes_json"])
+            dados_laudo = dados_relevantes_json["laudo"]
+            lista_dados_laudo.append(dados_laudo)
+        # TODO: Inexequibilidade
+        # O if acima é para tratar inexiquilibadade...tarefa sem dados json
+        # Contudo, o certo seria o sistema gravar o motivo da inexiquilibilidade no JSON
+        # para depois aproveitar no laudo....ou talvez dar um outro tratamento diferenciado.
+        #dados_relevantes_json = json.loads(t["tarefa"]["dados_relevantes_json"])
+        #dados_laudo = dados_relevantes_json["laudo"]
+        #lista_dados_laudo.append(dados_laudo)
 
     return lista_dados_laudo
 
