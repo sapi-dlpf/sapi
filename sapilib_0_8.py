@@ -57,6 +57,7 @@
 
 # Módulos utilizados
 import codecs
+import copy
 import datetime
 import json
 import os
@@ -69,6 +70,7 @@ import subprocess
 import http.client
 import socket
 import tkinter
+import time
 import traceback
 from tkinter import filedialog
 import ssl
@@ -132,6 +134,11 @@ Gparini = dict()  # Parâmetros de inicialização
 # Controle de mensagens/log
 GlogDual = False
 
+# Tempo de espera de resposta do servidor http (SETEC3)
+# Tempo de espera padrão
+Ghttp_timeout_padrao=60
+# Tempo de espera corrente
+Ghttp_timeout_corrente=copy.copy(Ghttp_timeout_padrao)
 
 # =====================================================================================================================
 # Funções de ALTO NÍVEL relacionadas com acesso ao servidor (sapisrv_*)
@@ -162,6 +169,21 @@ def ligar_modo_debug():
 def desligar_modo_debug():
     global Gparini
     Gparini['debug'] = False
+
+
+# Parâmetros de configuração da comunicação http
+# ---------------------------------------------------------------------------
+def set_http_timeout(timeout):
+    global Ghttp_timeout_corrente
+    Ghttp_timeout_corrente = timeout
+    if modo_debug():
+        print_log("Timeout http modificado para: ", Ghttp_timeout_corrente)
+
+def reset_http_timeout():
+    global Ghttp_timeout_corrente
+    Ghttp_timeout_corrente = Ghttp_timeout_padrao
+    if modo_debug():
+        print_log("Timeout http restaurado para padrão: ", Ghttp_timeout_corrente)
 
 # Processa parâmetros de chamada
 def sapi_processar_parametros_usuario():
@@ -197,11 +219,11 @@ def sapi_processar_parametros_usuario():
 
         # Feedback dos parâmetros selecionados
         if options.background:
-            print_log_dual(
+            print_log(
                 "--background: Entrando em modo background. Saída normal será armazenada apenas em log. Erros fatais poderão ser exibidos na saída padrão.")
         if options.debug:
             Gparini['debug'] = True
-            print_log_dual("--debug: Entrando em modo de debug (--debug)")
+            print_log("--debug: Entrando em modo de debug (--debug)")
 
     Gparametros_usuario_ja_processado = True
 
@@ -717,7 +739,6 @@ def sapisrv_chamar_programa(programa, parametros, abortar_insucesso=False, regis
     parametros['execucao_programa_versao'] = _obter_parini('programa_versao')
     parametros['token'] = _obter_parini('servidor_token')
 
-    # xxx
     try:
         if metodo == 'get':
             return _sapisrv_chamar_programa_get(programa, parametros, registrar_log)
@@ -776,7 +797,6 @@ class SapiExceptionFalhaComunicacao(Exception):
 class SapiExceptionProgramaDesautorizado(Exception):
     pass
 
-
 class SapiExceptionVersaoDesatualizada(Exception):
     pass
 
@@ -786,6 +806,8 @@ class SapiExceptionProgramaFoiAtualizado(Exception):
 class SapiExceptionAgenteDesautorizado(Exception):
     pass
 
+class SapiExceptionFalhaTrocaSituacaoTarefa(Exception):
+    pass
 
 class SapiExceptionGeral(Exception):
     pass
@@ -802,7 +824,7 @@ def testa_comunicacao_servidor_sapi(url_base):
     print_log("Testando conexao com servidor SAPI em " + url)
 
     try:
-        f = urllib.request.urlopen(url)
+        f = urllib.request.urlopen(url, timeout=Ghttp_timeout_corrente)
         resposta = f.read()
     except BaseException as e:
         print_log("Erro: ", str(e))
@@ -903,8 +925,16 @@ def _sapisrv_chamar_programa_get(programa, parametros, registrar_log=False):
         # Registra apenas no log
         print_log(url)
 
+
     #retorno = _sapisrv_get_sucesso(url) # Isto aqui estava errado...chamando sucesso, mas tratando erro...sem sentido
+    start_time = time.time()
     retorno = sapisrv_get_ok(url)
+    elapsed_time = time.time() - start_time
+
+    if modo_debug() or registrar_log:
+        # Registra apenas no log
+        print_log("Tempo de resposta: ",elapsed_time)
+
 
     # Ajusta sucesso para booleano
     sucesso = False
@@ -939,10 +969,12 @@ def _sapisrv_get_sucesso(url):
 # Explica erros e aborta
 # ----------------------------------------------------------------------
 def sapisrv_get_ok(url):
+
     # Invoca com GET
     try:
-        f = urllib.request.urlopen(url)
+        f = urllib.request.urlopen(url, timeout=Ghttp_timeout_corrente)
         resultado = f.read()
+
     except BaseException as e:
         print_tela_log("Nao foi possivel conectar com:", url)
         print_tela_log("Erro: ", str(e))
@@ -1036,10 +1068,16 @@ def _post(programa, parametros):
     protocolo=_obter_parini('servidor_protocolo')
     if protocolo=='https':
         # HTTPS
-        conn = http.client.HTTPSConnection(_obter_parini('servidor_ip'), port=_obter_parini('servidor_porta'))
+        conn = http.client.HTTPSConnection(
+            _obter_parini('servidor_ip'),
+            port=_obter_parini('servidor_porta'),
+            timeout=Ghttp_timeout_corrente)
     else:
         # HTTP simples
-        conn = http.client.HTTPConnection(_obter_parini('servidor_ip'), port=_obter_parini('servidor_porta'))
+        conn = http.client.HTTPConnection(
+            _obter_parini('servidor_ip'),
+            port=_obter_parini('servidor_porta'),
+            timeout = Ghttp_timeout_corrente)
 
     # Parâmetros para POST
     headers = {"Content-type": "application/x-www-form-urlencoded",

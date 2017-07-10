@@ -1,0 +1,192 @@
+TODO - Lista de pendências do projeto SAPI
+============================================
+
+
+Problemas para resolver por versão:
+
+1.8) Falhas relatadas pelos últimos usuários.
++/- Possibilidade de correção na estrutura de itens já processada.
+- Problema de congelamento do sapi_iped
+- Tolerância a falha em caso de não resposta do SETEC3 (travamento do sapi_iped)
+- Novo servidor de deployment
+
+1.9) Novas funcionalidades:
+- Tratamento completo para inexiquibilidade.
+- Mais de uma versão do IPED
+- sapi_watchdog
+- sapi_imagem: Exame de celular completo, incluindo cartão de memória e pequenos dispositivos de mídia (pendrives) que possam estar
+  acompanhando a solicitação.
+- Mecanismo para interromper uma tarefa em excução:
+  - No servidor, possibilidade de mandar Abortar a tarefa
+  - Nos clientes, quando for atualizar status e receber comando de abortar, interromper a execução.
+
+2.0)
+- sapi_tableau
+
+
+3.0)
+- Arquivamento (ver detalhes abaixo).
+
+
+sapi_iped_executar_bat:
+- Está gerando ano_dia_mes.log (revisar....)
+- Nao processar o UFDR e o XML: Mover poara outra pasta, e depois retornar novamente para a pasta original
+  O XML podia até elmininar no destino, para não ocupar espaço.
+
+sapi_lib
+* Nas requisições http, tratar ausência de resposta (timeout e rententativas)
+- Nas conexões com o storage, testar se utilizando o IP no net \\ip ou invés do nome netbios...
+  pelo que li, isto permite que sejam feitas várias conexões, cada uma com uma conta (não faz muito sentido, mas...)
+
+sapi_cellebrite:
+  * Comando ET, que exclui tarefa.
+    - Excluir a pasta totalmente, e depois atualizar o status da tarefa para excluída.
+  * Mostrar no cabeçalho o nome do Perito, para quando ficar rodando qualquer pessoa poder identificar o DONO.
+  * Conta a quantidade de arquivos e tamnho total da pasta antes de iniciar a cópia, na pasta de origem
+  * Reconta na pasta de destino e confere (para garantir que copiou tudo)
+  * Log significativo.
+  - Parsing de campos: pegar todos os modelos, selecionado pelo usuário, detectado, se houver mais do que um.
+  - Permitir que o usuário descreva a inexquilidade (Lista com as mais comuns), que será atualizada no servidor.
+
+
+sapi_iped
+* Está invocando perfil setecpr_ocr ou ocr, revisar, testar
+* Na mensagem do hash, está aparecendo o texto listaArquivos.csv, quando deveria ser "Lista de Arquivos.csv" (Dante)
+* Quando for montar multicase, desprezar pastas que não possuam conteúdo (acho que já faz isto...)
+* Receber comando de exclusão de tarefa.
+  - No servidor, quando mandar excluir tarefa, irá mudar para status (Aguardando execução), e o tipo será 'excluir'.
+  - Exclui pasta, e refaz o multicase.
+* Utilar sapilib com tratamento de timeout e retentativas para aumentar tolerância a falha
+  - Simular tratavadas...colocar resposta para dormir no servidor, com aleatoriedade, forçando retentativas...
+* Atualização de status intermediários, se não tiverem sucesso, tudo bem, tenta algumas vezes e desiste.
+* Atualização de status final, se não tiver sucesso após algumas tentativas, coloca tarefa como abortada (para ser retomada adiante)
+  e prossegue para a próxima.
+- Permitir executar mais de uma versão do IPED.
+
+sapi_watchdog (NOVO)
+- Novo programa, que ficará monitorando se pasta de arquivo de log está sendo modificidado.
+- Parâmetros:
+  - pasta a ser monitorada:
+  - tempo de espera:
+  - acao=restart servidor
+- Pode ter até mais de um watchdog rodando. Um pode por exemplo mandar email, etc, e outro pode restart o servidor.
+- sapi_watchdog não pode usar sapilib, para evitar "se congelar" pelo mesmo motivo que os outros programas...tem que ser leve.
+
+sapi_imagem (NOVO):
+  - Funcionalidade de submeter uma imagem a processamento
+  - Reconhece formato do guymager (log)
+  - Reconhece formato do tableu (log)
+  - Reconhece outros formatos sem log, mas neste caso não recupera nenhum dado para laudo:
+     - E01 genérico
+     - DD genérico
+     - Outros formatos raw (qualquer arquivo):
+       - Neste caso, ajusta para nomenclatura do IPED (apenas algumas extensões são aceitas...testar)
+       - Se tiver vários arquivos que formam um conjunto, tem que dar algum tratamento.
+
+
+sapi_laudo:
+  - converter para sapilib0.8
+  - Criar sapicli, que irá agrupar todas as funções comumente utilizadas pelos clientes sapi.
+  - Ajustar interface com novos comandos.
+  - MSISDN: Quando não existir, já preencher como 'INDISPONÍVEL'
+  - Preencher com descrição de inexequibilidade.
+
+
+sapi_tableau (NOVO):
+  - Primeiro fazer o parser no sapi_imagem, para ter uma solução razoável para o pessoal ir utilizando.
+  - Controlar interface web
+
+
+DEPLOYMENT
+==========================================================================
+Deployment:
+  - Montar esquema de deployment no macsetec3
+  - No servidor de deployment, a credencial de acesso (login/senha) não pode ser igual à do servidor,
+    caso contrário o servidor se loga sozinho...é melhor controlar este acesso, utilizando uma conta diferente.
+    deployment_admin
+    deployment_consulta
+  - Roteiro do servidor de deployment no wiki
+  - No desevolvimento, ajustar servidor de deployment para macsetec2.
+  - O endereço do servidor de deployment deve ficar no conf, assim cada máquina tem o deployment independente.
+  - Para permitir deployment individual de cada programa, fazer configuração individual no setec3.
+    sapi_cellebrite.config.php
+    sapi_laudo.config.php
+    (etc)
+    - Armazenar versão e outros dados úteis...talvez através de constantes simbólicas
+  - Pasta de download, que armazena versões antigas.
+
+
+SETEC3
+=====================
+conf.inc
+- Trocar referências a DNS por ip fixo (diminui a chance de problema quando temos problema de DNS).
+
+SETEC3 ????.php
+ * Quando uma mensagem de log for inserida, efetuar a exclusão de mensagens irrelevantes (ver script),
+  para manter log enxuto.
+
+SETEC3 painel administrativo:
+- Tarefas por período.
+
+SETEC3 sapi_tarefa:
+  - Excluir tarefa: Disponível apenas para tarefa IPED:
+    - Troca status da tarefa para Aguardando Execução e o tipo para 'excluir'
+
+SETEC3 sapi_exame:
+- Tratar ; ou , no final do item. Está aparecendo item nulo na tela de itens.
+- Botão [Gerar], deixar mais claro que também serve para fazer ajustes em tarefas que já foram geradas
+  (exemplo: mídia de entrega)
+  - Permitir mais de uma versão de IPED, para poder colocar uma versão "Homologada" e outras "novas"
+
+Modelos:
+* Ajustar MJSP para todos (revisar geral)
+- Separar modelo de mídia óptica de BLURAY e DVD
+- Etiqueta p/ RIMAGE P/ DVD: Colocar DVD na direita (como o bluray)
+- Quantidade de páginas, está ficando fixo depois que processa pelo sapi_laudo.py. Pesquisar....
+
+
+mídia anexa:
+  - Reativar mídia anexa para permitir upload de dados gravados.
+    - Limpar base. Salvar dump da base de dados antes de limpar, caso no futuro surja alguma dúvida.
+  - Permitir upload por programa, para que os isos produzidos no sapi possam ser copiados para o sistema mídia anexa.
+
+
+MÁQUINAS DE EXAME
+===================================================
+Máquinas do Cellebrite:
+- Instalar libreoffice
+- Instalar VNC viewer
+- No email, informar que é possível executar todas as tarefas lá...
+
+
+STORAGES
+===================================================
+GTPI-STO-01:
+  - Promover o GTPI-STO-01 em produtivo.
+  - Colocar
+
+GTPI-STO-02:
+  - Colocar o GTPI-STO-02 em desenvolvimento novamente.
+  - Ajustar deployment para desenvolvimento
+  - Deixar rodando
+
+GTPI-STO-03:
+  - Reinstalar windows via pendrive. A reinstalação normal não funcionou.
+
+
+NOVAS FUNCIONALIDADES:
+=======================================================================
+Arquivamento:
+- Limpara pastas de processamento (precisará de um programa específico) que rodará quando:
+  - O memorando tiver sido arquivado a mais de 10 dias.
+  - O laudo foi entregue e existe confirmação de recebimento.
+  - A máquina está ociosa.
+  - Em período noturno.
+
+Geração de ISO:
+- Armazenar e mostrar o tamanho de cada pasta.
+- Permitir a seleção de itens, mostrando o tamanho de cada conjunto (para verificar se cabe na mídia de destino).
+- Geração de uma ou mais mídias para cada memorando (tarefas distintas).
+- Upload da mídia gerada para o servidor de mídia anexa.
+
+

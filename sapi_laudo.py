@@ -2578,7 +2578,7 @@ def exibir_situacao():
         print("  Enquanto esta condição persistir, não será possível efetuar a geração de laudo (*gl)")
         print("- Em caso de dúvida, consulte o setec3")
     else:
-        print("- Para gerar laudo, gere o modelo de laudo padrão SAPI no SISCRIM e em seguida *qqutilize comando *GL")
+        print("- Para gerar laudo, gere o modelo de laudo padrão SAPI no SISCRIM e em seguida utilize comando *GL")
 
 
     return
