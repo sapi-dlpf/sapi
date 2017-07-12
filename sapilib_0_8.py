@@ -123,6 +123,9 @@ Gconf_ambiente['prod'] = {
     'servidor_sistema': 'setec3'
 }
 
+# Storages nos quais foi feita conexão para cópia de dados
+Gdic_storage=dict()
+
 
 # Definido durante inicializacao
 # --------------------------------
@@ -165,11 +168,16 @@ def desligar_log_dual():
 def ligar_modo_debug():
     global Gparini
     Gparini['debug'] = True
+    print_log("Modo debug foi ligado")
 
 def desligar_modo_debug():
     global Gparini
     Gparini['debug'] = False
+    print_log("Modo debug foi desligado")
 
+def debug(*arg):
+    if modo_debug():
+        print_log("DEBUG:", *arg)
 
 # Parâmetros de configuração da comunicação http
 # ---------------------------------------------------------------------------
@@ -243,8 +251,8 @@ def atualizar_programa(nome_programa):
         param = {'arquivo': nome_programa}
 
         (sucesso, msg_erro, conteudo_arquivo)=sapisrv_chamar_programa(
-            "sapisrv_download.php",
-            param,
+            programa="sapisrv_download.php",
+            parametros=param,
             abortar_insucesso=False,
             registrar_log=True
         )
@@ -269,8 +277,6 @@ def atualizar_programa(nome_programa):
     # Grava conteúdo do arquivo na pasta de destino
     caminho_programa_tmp=os.path.join(pasta_destino,"tmp_"+nome_programa)
 
-    #var_dump(arquivo_destino)
-    #die('ponto215')
 
     # Grava o arquivo recuperado
     try:
@@ -327,7 +333,7 @@ def atualizar_programa(nome_programa):
 #              Default: 'desenv' se houver arquivo 'desenvolvimento_nao_excluir.txt' na pasta. Caso contrário, 'prod'
 # ----------------------------------------------------------------------------------------------------------------------
 def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambiente=None, auto_atualizar=False,
-                                  nome_arquivo_log=None):
+                                  nome_arquivo_log=None, label_processo=None):
 
     # Atualiza estas globais
     global Ginicializado
@@ -368,6 +374,10 @@ def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambie
     # Nome do arquivo de log
     if nome_arquivo_log is not None:
         Gparini['log']=nome_arquivo_log
+
+    # Label do processo, que será utilizado para rotular as linhas de log
+    if label_processo is not None:
+        Gparini['label_processo']=label_processo
 
     # Pasta de execução do programa
     pasta_execucao=os.path.abspath(os.path.dirname(sys.argv[0]))
@@ -423,7 +433,7 @@ def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambie
     # programa_habilitado(Gparini['nome_programa'], Gparini['versao'])
     # simulação de erros:
     # raise SapiExceptionAgenteDesautorizado("Máquina com ip 10.41.58.58 não autorizada para executar tal programa")
-    # raise SapiExceptionProgramaDesautorizado("Este programa xxxx na versão zzz não está autorizado")
+    # raise SapiExceptionProgramaDesautorizado("Este programa xxxx na versão kkkk não está autorizado")
 
     try:
         (sucesso, msg_erro, resultado) = sapisrv_chamar_programa(
@@ -549,8 +559,8 @@ def sapisrv_reportar_erro_cliente(erro):
 
     # Invoca sapi_srv
     (sucesso, msg_erro, configuracao) = sapisrv_chamar_programa(
-        "sapisrv_reportar_erro_cliente.php",
-        param,
+        programa="sapisrv_reportar_erro_cliente.php",
+        parametros=param,
         abortar_insucesso=False,
         registrar_log=True
     )
@@ -584,8 +594,8 @@ def sapisrv_obter_configuracao_cliente(
 
     # Invoca sapi_srv
     (sucesso, msg_erro, configuracao) = sapisrv_chamar_programa(
-        "sapisrv_obter_configuracao_cliente.php",
-        param,
+        programa="sapisrv_obter_configuracao_cliente.php",
+        parametros=param,
         abortar_insucesso=False,
         registrar_log=True
     )
@@ -631,8 +641,8 @@ def sapisrv_obter_iniciar_tarefa(
     # Invoca sapi_srv
     try:
         (sucesso, msg_erro, resultado) = sapisrv_chamar_programa(
-            "sapisrv_obter_iniciar_tarefa.php",
-            param,
+            programa="sapisrv_obter_iniciar_tarefa.php",
+            parametros=param,
             abortar_insucesso=False,
             registrar_log=True
         )
@@ -669,11 +679,11 @@ def sapisrv_obter_iniciar_tarefa(
 # Atualiza status da tarefa do sapisrv
 # ----------------------------------------------------------------------------------------------------------------------
 def sapisrv_atualizar_status_tarefa(codigo_tarefa, codigo_situacao_tarefa, status, dados_relevantes=None,
-                                    registrar_log=False):
+                                    registrar_log=True):
     # Parâmetros
     param = {'codigo_tarefa': codigo_tarefa,
              'codigo_situacao_tarefa': codigo_situacao_tarefa,
-             'status': status
+             'status': ajusta_texto_saida(status) #Efetua ajustes ip=>netbios
              }
 
     metodo_invocar = 'get'
@@ -684,16 +694,22 @@ def sapisrv_atualizar_status_tarefa(codigo_tarefa, codigo_situacao_tarefa, statu
         metodo_invocar = 'post'
 
     # Invoca sapi_srv
+    print('ponto699')
     (sucesso, msg_erro, resultado) = sapisrv_chamar_programa(
-        "sapisrv_atualizar_tarefa.php", param, registrar_log, metodo=metodo_invocar)
+        programa="sapisrv_atualizar_tarefa.php",
+        parametros=param,
+        registrar_log=False,
+        metodo=metodo_invocar
+    )
+    print('ponto706')
 
     # Registra em log
     if registrar_log:
         if sucesso:
-            print_log_dual("Atualizado status no servidor: ", status)
+            print_log("Tarefa ", codigo_tarefa, ": atualizado status: ", codigo_situacao_tarefa, status)
         else:
             # Se der erro, registra no log e prossegue (tolerância a falhas)
-            print_log_dual("Não foi possível atualizar status no servidor", msg_erro)
+            print_log("Tarefa ", codigo_tarefa, ": Não foi possível atualizar status no servidor: ", msg_erro)
 
     # Retorna se teve ou não sucesso, e caso negativo a mensagem de erro
     return (sucesso, msg_erro)
@@ -714,7 +730,11 @@ def sapisrv_armazenar_texto(tipo_objeto, codigo_objeto, titulo, conteudo, regist
 
     # Invoca sapi_srv
     (sucesso, msg_erro, resultado) = sapisrv_chamar_programa(
-        "sapisrv_armazenar_texto.php", param, registrar_log, metodo=metodo_invocar)
+        programa="sapisrv_armazenar_texto.php",
+        parametros=param,
+        registrar_log=registrar_log,
+        metodo=metodo_invocar
+    )
 
     # Registra em log
     if registrar_log:
@@ -738,12 +758,15 @@ def sapisrv_chamar_programa(programa, parametros, abortar_insucesso=False, regis
     parametros['execucao_programa'] = _obter_parini('programa')
     parametros['execucao_programa_versao'] = _obter_parini('programa_versao')
     parametros['token'] = _obter_parini('servidor_token')
-
+    print("ponto753")
+    var_dump(programa)
+    var_dump(abortar_insucesso)
+    print('ponto761')
     try:
         if metodo == 'get':
-            return _sapisrv_chamar_programa_get(programa, parametros, registrar_log)
+            return _sapisrv_chamar_programa_get(programa=programa, parametros=parametros, registrar_log=registrar_log)
         elif metodo == 'post':
-            return _sapisrv_chamar_programa_post(programa, parametros, registrar_log)
+            return _sapisrv_chamar_programa_post(programa=programa, parametros=parametros, registrar_log=registrar_log)
         else:
             erro_fatal("sapisrv_chamar_programa: Método inválido: ", metodo)
     except BaseException as e:
@@ -820,7 +843,7 @@ class SapiExceptionGeral(Exception):
 # Retorna: Verdadeiro, Falso
 # ----------------------------------------------------------------------
 def testa_comunicacao_servidor_sapi(url_base):
-    url = url_base + "/sapisrv_ping.php"
+    url = url_base + "sapisrv_ping.php"
     print_log("Testando conexao com servidor SAPI em " + url)
 
     try:
@@ -976,11 +999,11 @@ def sapisrv_get_ok(url):
         resultado = f.read()
 
     except BaseException as e:
-        print_tela_log("Nao foi possivel conectar com:", url)
-        print_tela_log("Erro: ", str(e))
+        print_tela_log("Não foi recebido resposta em tempo hábil para URL:", url)
+        print_tela_log("Exceção:",type(e).__name__, " - ",str(e))
         print_tela_log("Verifique configuracao de rede")
         # Gera exception para interromper execução de comando
-        raise SapiExceptionGeral("Operação interrompida")
+        raise SapiExceptionGeral(str(e))
 
     referencia = "GET => " + url
 
@@ -1051,8 +1074,6 @@ def sapisrv_post_ok(programa, parametros):
 
     # Monta referência para exibição de erro
     referencia = "POST em " + programa
-    # var_dump(resultado)
-    # die('ponto619')
 
     return processar_resultado_ok(resultado, referencia)
 
@@ -1153,8 +1174,11 @@ def concatena_args(*arg):
         # Se não for string, converte para string
         if not type(x) == str:
             x = str(x)
-        # Concatena
-        s = s + x
+        # Concatena, separando com um espaço apenas
+        s = s + x.strip() + " "
+
+    # Remove espaços adicionais no início e fim
+    s=s.strip()
 
     return s
 
@@ -1163,8 +1187,6 @@ def concatena_args(*arg):
 # Apenas em situações críticas (programa abortado) o resultado sairá na console (stdout ou stderr)
 def modo_background():
     background=Gparini.get('background', False)
-    #var_dump(background)
-    #die('ponto984')
     return background
 
 def modo_debug():
@@ -1228,6 +1250,15 @@ def obter_nome_arquivo_log():
 
     return arquivo_log
 
+# Efetua ajustes no texto, para ficar adequado a log e registro de status
+def ajusta_texto_saida(s):
+
+    for caminho_storage in Gdic_storage:
+        nome_storage=Gdic_storage[caminho_storage]
+        s=s.replace(caminho_storage, nome_storage)
+
+    return s
+
 
 # Grava apenas em arquivo de log
 # ----------------------------------------------------------------------
@@ -1239,14 +1270,17 @@ def _print_log_apenas(*arg):
     # Código para python2. Por enquanto desativado
     # linha="["+str(pid)+"] : "+hora+" : "+converte_unicode(*arg)
 
-    linha = "[" + str(pid) + "] : " + hora + " : " + concatena_args(*arg)
+    # Adiciona rotulo, utilizado para facilitar a separação de registros dos processos filhos
+    rotulo=''
+    label_processo=Gparini.get('label_processo',None)
+    if label_processo is not None:
+        rotulo="("+label_processo+ ") "
 
-    #
+    linha = "[" + str(pid) + "] : " + hora + " : " + rotulo + concatena_args(*arg)
+
+    linha=ajusta_texto_saida(linha)
+
     arquivo_log=obter_nome_arquivo_log()
-
-    #arquivo_log=Gparini.get('log',None)
-    #if arquivo_log is None:
-    #    arquivo_log="sapi_log.txt"
 
     with codecs.open(arquivo_log, 'a', "utf-8") as sapi_log:
         sapi_log.write(linha + "\r\n")
@@ -1280,7 +1314,10 @@ def print_log_dual(*arg):
 # ----------------------------------------------------------------------
 def print_tela_log(*arg):
     if not modo_background():
+        # Exibe na tela
         print_ok(*arg)
+
+    # Grava no log
     _print_log_apenas(*arg)
 
 
@@ -1555,88 +1592,131 @@ def acesso_storage_linux(ponto_montagem, conf_storage):
         return False
 
 
+#
+def obter_caminho_storage(conf_storage, utilizar_ip=True):
+
+    nome_maquina_storage=conf_storage["maquina_netbios"]
+    ip_storage=conf_storage["maquina_ip"]
+
+    if utilizar_ip:
+        maquina = ip_storage
+    else:
+        maquina = nome_maquina_storage
+
+    # "\\" = "\", pois '\' é escape
+    caminho_storage = (
+        "\\" + "\\" + maquina +
+        "\\" + conf_storage["pasta_share"]
+    )
+
+    return caminho_storage
+
+
 # Verifica se storage já está montado. Se não estiver, monta.
 # Retorna:
 # - Sucesso: Se montagem foi possível ou não
 # - ponto_montagem: Caminho para montagem
 # - mensagem_erro: Caso tenha ocorrido erro na montagem
 # =============================================================
-def acesso_storage_windows(conf_storage, utilizar_ip=False):
-    # var_dump(conf_storage)
-    # die('ponto586')
+def acesso_storage_windows(conf_storage, utilizar_ip=True):
 
-    # No caso do windows, vamos utilizar o nome netbios
-    if utilizar_ip:
-        maquina = conf_storage["maquina_ip"]
-    else:
-        maquina = conf_storage["maquina_netbios"]
+    global dic_storage
 
-    # Ponto de montagem implícito
-    # Não vou mapear para uma letra aqui, pois pode dar conflito
-    # com algo mapeado pelo usuário
-    # Logo, o caminho do storage é o ponto de montagem
-    # "\\" = "\", pois '\' é escape
-    caminho_storage = (
-        "\\" + "\\" + maquina +
-        "\\" + conf_storage["pasta_share"]
-    )
+    caminho_storage=obter_caminho_storage(conf_storage, utilizar_ip=True)
+    caminho_storage_netbios=obter_caminho_storage(conf_storage, utilizar_ip=False)
+
+    # # Ponto de montagem implícito
+    # # Não vou mapear para uma letra aqui, pois pode dar conflito
+    # # com algo mapeado pelo usuário
+    # # Logo, o caminho do storage é o ponto de montagem
+    # caminho_storage = (
+    #     "\\" + "\\" + maquina +
+    #     "\\" + conf_storage["pasta_share"]
+    # )
+
     ponto_montagem = caminho_storage + "\\"
-    # print_log_dual(ponto_montagem)
+
+    debug("Verificando acesso ao storage: ",ponto_montagem)
     arquivo_controle = ponto_montagem + 'storage_sapi_nao_excluir.txt'
 
-
-    # print_ok(arquivo_controle)
-    # die('ponto531')
-    # Se já está montado
+    # Verifica se storage já está montado
+    # -----------------------------------
+    montar=True
     if os.path.exists(caminho_storage):
-        # Confere se existe arquivo indicativo de storage bem montado
-        # die('ponto603')
-        if os.path.isfile(arquivo_controle):
-            # Sucesso: Montagem do storage confirmada
-            # die('ponto606')
-            return True, ponto_montagem, ""
-        else:
-            # Falha
-            print_ok("Storage está montado em " + caminho_storage)
-            print_ok("Contudo o mesmo não contém arquivo [" + arquivo_controle + "]")
-            print_ok("Isto pode indicar que o storage não foi montado com sucesso, ou que está corrompido")
-            return False, ponto_montagem, "Storage sem arquivo de controle"
+        debug("Storage já estava montado em", caminho_storage)
+        montar=False
 
-    # Ainda não está montado
-    if not modo_background():
-        print_ok("- Aguarde conexão com storage: " + caminho_storage)
+    # Montagem do storage
+    # --------------------
+    if montar:
+        # Conecta no share do storage, utilizando net use.
+        # Exemplo:
+        # net use \\10.41.87.239\storage /user:sapi sapi
+        # Para desmontar (para teste), utilizar:
+        # net use \\10.41.87.239\storage /delete
+        comando = (
+            "net use " + caminho_storage +
+            " /user:" + conf_storage["usuario"] +
+            " " + conf_storage["senha"]
+        )
 
-    # Conecta no share do storage, utilizando net use.
-    # Exemplo:
-    # net use \\10.41.87.239\storage /user:sapi sapi
-    # Para desmontar (para teste), utilizar:
-    # net use \\10.41.87.239\storage /delete
-    comando = (
-        "net use " + caminho_storage +
-        " /user:" + conf_storage["usuario"] +
-        " " + conf_storage["senha"]
-    )
+        debug("Conectando com storage")
+        #debug(comando)
 
-    #print_ok("Conectando com storage")
-    #print_ok(comando)
-    subprocess.call(comando, shell=True)
+        print("- Efetuando conexão ao storage de destino. Aguarde...")
+        subprocess.call(comando, shell=True)
 
-    # Verifica se montou
+        # Guarda o ponto de montagem, o qual será utilizado posteriormente para desmontar
+        debug("Storage foi montado em ", caminho_storage)
+
+    # Verifica se montou corretamente
+    # -------------------------------
     if not os.path.exists(caminho_storage):
         # Falha
-        print_ok("Montagem de storage falhou [" + caminho_storage + "]")
+        print_log("Montagem de storage falhou [",caminho_storage,"]")
         return False, ponto_montagem, "Falhou na montagem"
 
-    # Confere se existe arquivo indicativo de storage bem montado
-    if not os.path.isfile(arquivo_controle):
+    # Confere integridade do storage
+    # ------------------------------
+    if os.path.isfile(arquivo_controle):
+        debug("Acesso ao storage confirmado através do acesso ao arquivo: ", arquivo_controle)
+        # Registra que está montado, para posteriormente desmontar
+        Gdic_storage[caminho_storage]=caminho_storage_netbios
+        return True, ponto_montagem, ""
+    else:
         # Falha
-        print_ok("Storage foi montado em " + caminho_storage)
-        print_ok("Contudo não foi localizado arquivo [" + arquivo_controle + "]")
-        print_ok("Isto pode indicar que o storage não foi montado com sucesso, ou está corrompido")
-        return False, ponto_montagem, "Storage não possui arquivo de controle"
+        print_log("Storage está montado em", caminho_storage)
+        print_log("Não foi localizado o arquivo:", arquivo_controle)
+        print_log("Isto pode indicar que o storage não foi montado com sucesso, ou que está corrompido")
+        return False, ponto_montagem, "Storage sem arquivo de controle"
 
-    # Sucesso: Montado e confirmado ok
-    return True, ponto_montagem, ""
+    # Não deveria chegar neste ponto
+    return False, ponto_montagem, "[1658] Erro inesperado Comunique desenvolvedor"
+
+def  desconectar_storage_windows():
+
+    for caminho_storage in Gdic_storage:
+
+        nome_storage=Gdic_storage[caminho_storage]
+
+        # Desconect share
+        # net use \\10.41.87.239\storage /del
+        comando = (
+            "net use " + caminho_storage + " /del 1>nul 2>nul"
+        )
+
+        #print("Desconectando do storage")
+        #print(comando)
+        subprocess.call(comando, shell=True)
+
+        # Verifica se montou
+        if not os.path.exists(caminho_storage):
+            # Ok, conseguiu desconectar
+            print_log("Desconectado do storage ", nome_storage)
+        else:
+            # Registra em log que não foi possível, mas não tem mais o que fazer,
+            # pois já está saindo do programa
+            print_log("Não foi possível desconectar do storage ", nome_storage)
 
 
 # Controle de concorrência
@@ -1766,21 +1846,23 @@ def _receber_comando(menu_comando):
         elif (comando_recebido == "H" or comando_recebido == "?"):
 
             # Exibe ajuda para comando
-
+            cls()
+            print("Lista de comandos disponíveis:")
+            print("==============================")
             # Comandos de exibição
             if len(cmd_exibicao)>0:
                 print()
-                print("Exibição:")
-                print("----------")
-                print('<ENTER> : Exibe lista de tarefas atuais (sem Refresh no servidor)')
+                print("Comandos de exibição da situação:")
+                print("----------------------------------")
+                print('<ENTER> :  Exibir lista de tarefas atuais (sem Refresh no servidor)')
                 for key in cmd_exibicao:
-                    print(key.upper(), " : ", comandos[key])
+                    print(key.upper(), "    : ", comandos[key])
                 print()
 
             # Exibe ajuda para comando
-            print("Navegação:")
-            print("----------")
-            print('nn : Posiciona no elemento com Sq=nn da lista (Exemplo: 5, posiciona no quinto elemento)')
+            print("Comandos de Navegação:")
+            print("----------------------")
+            print('nn :  Posicionar no elemento com Sq=nn da lista (Exemplo: 5, posiciona no quinto elemento)')
             for key in cmd_navegacao:
                 print(key.upper(), " : ", comandos[key])
             print()
@@ -1810,7 +1892,7 @@ def _receber_comando(menu_comando):
         else:
             if (comando_recebido != ""):
                 print("Comando (" + comando_recebido + ") inválido")
-                print("Para ajuda, digitar comando 'h' ou '?'")
+                print("Para obter ajuda, digitar comando 'h' ou '?'")
 
     return (comando_recebido, argumento_recebido)
 

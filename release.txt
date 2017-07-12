@@ -7,6 +7,7 @@ Sapi_cellebrite 1.8.1:
 - Comando *LG: Exibição contínua (loop) da situação com refresh.
 - Cópia exclusivamente em background, com feedback contínuo.
 - Melhorias nas mensagens e interface para deixar mais intuitivo
+- Verificação de cópia através de checagem de tamanho total e quantidade de arquivos copiados.
 - No término da execução, pede um <ENTER> para permitir maior clareza de funcionamento na console como shortcut, caso ocorra algum erro.
 - sapilib 0.8
 
