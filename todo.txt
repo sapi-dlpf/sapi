@@ -10,6 +10,7 @@ Problemas para resolver por versão:
 - Tolerância a falha em caso de não resposta do SETEC3 (travamento do sapi_iped)
 - Novo servidor de deployment
 
+
 1.9) Novas funcionalidades:
 ---------------------------------------------
 - Tratamento completo para inexiquibilidade.
@@ -33,6 +34,7 @@ Problemas para resolver por versão:
 
 3.0) Regime de produção
 ---------------------------------------------
+- Caracteres semi-graficos nos programas interativos
 - Arquivamento (ver detalhes abaixo).
 
 4.0) Ampliação de base de usuários
@@ -45,24 +47,31 @@ Por programa/componente:
 =======================================================================================================================
 
 sapi_lib
-* Nas requisições http, tratar ausência de resposta (timeout e rententativas)
+* Nas requisições http, tratar ausência de resposta (timeout e retentativas)
 - Na conexão com o storage, tratar senha diferenciada (hash)
 
 sapi_cellebrite:
-  * Tolerância a falha na atualização do status
-  * Tratamento adequado no caso de não conseguir modificar o status
+  *OK Tolerância a falha na atualização do status
+  *OK Tratamento adequado no caso de não conseguir modificar o status
+  *OK Log significativo.
   * Comando ET, que exclui tarefa.
-    - Excluir a pasta totalmente, e depois atualizar o status da tarefa para excluída.
-  * Log significativo.
   - Parsing de campos: pegar todos os modelos, selecionado pelo usuário, detectado, se houver mais do que um.
   - Permitir que o usuário descreva a inexquilidade (Lista com as mais comuns), que será atualizada no servidor.
-
+  - Problema de cópia de relatório gigante do Fernando que deu erro (HD externo)
 
 sapi_iped_executar_bat:
 - Está gerando ano_dia_mes.log (revisar....)
 
-
 sapi_iped
+* Refactor: Utilizar paradigma do sapi_cellebrite
+* Revisar todas as chamadas para sapi_srv_chamar_programa:
+  - Parâmetros nominados
+  - abortar_insucesso=False
+* Rotina para atualizar_status, que se der erro, não tem problema....
+  (talvez levar do sapi_cellebrite para o sapilib...vai ser utilizada em outros lugares)
+  Levar também a de troca de status.
+  - Mas no caso do sapi_iped, se não conseguir trocar situação irá ficar tentando, até conseguir, em loop.
+* Receber comando do servidor Web (exemplo: excluir)
 * Está invocando perfil setecpr_ocr ou ocr, revisar, testar
 * Na mensagem do hash, está aparecendo o texto listaArquivos.csv, quando deveria ser "Lista de Arquivos.csv" (Dante)
 * Quando for montar multicase, desprezar pastas que não possuam conteúdo (acho que já faz isto...)

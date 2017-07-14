@@ -99,8 +99,12 @@ GIpedExecutando = 60
 GIpedFinalizado = 62
 GIpedHashCalculado = 65
 GIpedMulticaseAjustado = 68
-
 GFinalizadoComSucesso = 95
+# Intervalos de status
+# Intervalo de status que uma tarefa está executando
+# Isto aqui pode dar problema, se forem criadas situações na base do SETEC3 fora deste intervalo
+Gexecutando_intervalo_ini=20
+Gexecutando_intervalo_fim=70
 
 # Configuração dos ambientes
 # --------------------------
@@ -184,14 +188,12 @@ def debug(*arg):
 def set_http_timeout(timeout):
     global Ghttp_timeout_corrente
     Ghttp_timeout_corrente = timeout
-    if modo_debug():
-        print_log("Timeout http modificado para: ", Ghttp_timeout_corrente)
+    debug("Timeout http modificado para: ", Ghttp_timeout_corrente)
 
 def reset_http_timeout():
     global Ghttp_timeout_corrente
     Ghttp_timeout_corrente = Ghttp_timeout_padrao
-    if modo_debug():
-        print_log("Timeout http restaurado para padrão: ", Ghttp_timeout_corrente)
+    debug("Timeout http restaurado para padrão: ", Ghttp_timeout_corrente)
 
 # Processa parâmetros de chamada
 def sapi_processar_parametros_usuario():
@@ -471,7 +473,7 @@ def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambie
             raise SapiExceptionProgramaDesautorizado(resultado['explicacao'])
         elif tipo_erro=='AgenteDesautorizado':
             raise SapiExceptionAgenteDesautorizado(resultado['explicacao'])
-        erro_fatal('Erro fatal: Resposta inesperada de servidor')
+        erro_fatal('Resposta inesperada de servidor')
 
     return
 
@@ -485,7 +487,7 @@ def sapisrv_inicializar_ok(*args, **kwargs):
         sapisrv_inicializar(*args, **kwargs)
 
     except SapiExceptionVersaoDesatualizada:
-        print_tela_log("Efetue atualização do programa e execute novamente")
+        print_tela_log("- Efetue atualização do programa e execute novamente")
         os._exit(1)
 
     except SapiExceptionProgramaFoiAtualizado as e:
@@ -493,8 +495,8 @@ def sapisrv_inicializar_ok(*args, **kwargs):
             print_log("Programa foi atualizado para nova versão em: ",e)
         else:
             # Modo iterativo, mostra mensagem
-            print_tela_log("Programa foi atualizado para nova versão em: ",e)
-            print_tela_log("Finalizando agora. Invoque programa novamente para executar a nova versão.")
+            print_tela_log("- Programa foi atualizado para nova versão em: ",e)
+            print_tela_log("- Finalizando agora. Invoque programa novamente para executar a nova versão.")
             pausa()
         # Encerra
         os._exit(1)
@@ -532,11 +534,12 @@ def sapisrv_inicializar(*args, **kwargs):
 
     except SapiExceptionFalhaComunicacao as e:
         # Exibe erro e passa para cima
-        print_tela_log("[383] Falha na comunicação: ", e)
+        print_tela_log("- [383] Falha na comunicação: ", e)
+        print_tela_log("- Verifique a conexão com o servidor SETEC3 (sugestão: Tente acessar com um browser a partir desta máquina)")
         raise SapiExceptionFalhaComunicacao
 
     except SapiExceptionVersaoDesatualizada as e:
-        print_tela_log("[360]: " + str(e))
+        print_tela_log("- [360]: " + str(e))
         raise SapiExceptionVersaoDesatualizada
 
     except SapiExceptionAgenteDesautorizado as e:
@@ -673,13 +676,10 @@ def sapisrv_obter_iniciar_tarefa(
 
 
 
-
-
-
 # Atualiza status da tarefa do sapisrv
 # ----------------------------------------------------------------------------------------------------------------------
-def sapisrv_atualizar_status_tarefa(codigo_tarefa, codigo_situacao_tarefa, status, dados_relevantes=None,
-                                    registrar_log=True):
+def _sapisrv_atualizar_status_tarefa(codigo_tarefa, codigo_situacao_tarefa, status, dados_relevantes=None,
+                                     registrar_log=True):
     # Parâmetros
     param = {'codigo_tarefa': codigo_tarefa,
              'codigo_situacao_tarefa': codigo_situacao_tarefa,
@@ -694,25 +694,100 @@ def sapisrv_atualizar_status_tarefa(codigo_tarefa, codigo_situacao_tarefa, statu
         metodo_invocar = 'post'
 
     # Invoca sapi_srv
-    print('ponto699')
     (sucesso, msg_erro, resultado) = sapisrv_chamar_programa(
         programa="sapisrv_atualizar_tarefa.php",
         parametros=param,
         registrar_log=False,
         metodo=metodo_invocar
     )
-    print('ponto706')
 
     # Registra em log
-    if registrar_log:
-        if sucesso:
-            print_log("Tarefa ", codigo_tarefa, ": atualizado status: ", codigo_situacao_tarefa, status)
-        else:
-            # Se der erro, registra no log e prossegue (tolerância a falhas)
-            print_log("Tarefa ", codigo_tarefa, ": Não foi possível atualizar status no servidor: ", msg_erro)
+    if sucesso:
+        print_log("Tarefa ", codigo_tarefa, ": atualizado status: ", codigo_situacao_tarefa, status)
+    else:
+        # Se der erro, registra no log e prossegue (tolerância a falhas)
+        print_log("Tarefa ", codigo_tarefa, ": Não foi possível atualizar status no SETEC3: ", msg_erro)
 
     # Retorna se teve ou não sucesso, e caso negativo a mensagem de erro
     return (sucesso, msg_erro)
+
+
+# Atualiza status da tarefa em execução
+# Caso ocorra algum erro, ignora atualização, afinal este status é apenas informativo
+# Retorna:
+#  - True: Se foi possível atualizar o status
+#  - False: Se não atualizou o status
+def sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status):
+
+    try:
+
+        # Verifica se a tarefa continua em andamento
+        # Pode ter sido por exemplo abortada
+        # ---------------------------------------------
+        # Recupera dados atuais da tarefa do servidor,
+        (sucesso, msg_erro, tarefa) = sapisrv_chamar_programa(
+            "sapisrv_consultar_tarefa.php",
+            {'codigo_tarefa': codigo_tarefa}
+        )
+
+        # Alguma coisa está impedindo tarefa de ser encontrada
+        if (not sucesso):
+            # Ignora atualização, pois o registro do status em andamento é apenas informativo
+            return False
+
+        # Se não está mais em andamento, não irá atualizar status
+        codigo_situacao_tarefa = int(tarefa['codigo_situacao_tarefa'])
+        if (    codigo_situacao_tarefa>=Gexecutando_intervalo_ini
+            and codigo_situacao_tarefa<=Gexecutando_intervalo_fim):
+            debug("Atualização de status será efetuada, pois tarefa ainda está em execução")
+        else:
+            # Não está em execução
+            debug("Atualização de status não é possível, pois tarefa não está em execução")
+            # Ignora atualização
+            return False
+
+        # Ok, tarefa em andamento, atualiza o status
+        codigo_situacao_tarefa = GEmAndamento
+        (ok, msg_erro) = _sapisrv_atualizar_status_tarefa(
+            codigo_tarefa=codigo_tarefa,
+            codigo_situacao_tarefa=codigo_situacao_tarefa,
+            status=texto_status
+        )
+
+        # Se ocorrer algum erro, ignora (registrando no log)
+        # Afinal, o status em andamento é apenas informativo
+        if not ok:
+            return False
+
+    except BaseException as e:
+        print_log("Ignorando atualização de status devido a erro:", str(e))
+        return False
+
+    # Tudo certo, atualizou o status
+    return True
+
+
+# Troca situação da tarefa
+# Este é uma operação crítica, que tem que ser realizada no momento correto
+# Se ocorrer um erro, repassa para o chamador decidir
+def sapisrv_troca_situacao_tarefa_obrigatorio(codigo_tarefa, codigo_situacao_tarefa, texto_status, dados_relevantes=None):
+
+    # Se ocorrer alguma exceção aqui, simplesmente será repassada para o chamador,
+    # que deverá tratar adequadamente
+    (ok, msg_erro) = _sapisrv_atualizar_status_tarefa(
+        codigo_tarefa=codigo_tarefa,
+        codigo_situacao_tarefa=codigo_situacao_tarefa,
+        status=texto_status,
+        dados_relevantes=dados_relevantes
+    )
+
+    # Se ocorrer algum erro, gera um exceção
+    if not ok:
+        raise SapiExceptionFalhaTrocaSituacaoTarefa(msg_erro)
+
+    return
+
+
 
 
 
@@ -758,10 +833,7 @@ def sapisrv_chamar_programa(programa, parametros, abortar_insucesso=False, regis
     parametros['execucao_programa'] = _obter_parini('programa')
     parametros['execucao_programa_versao'] = _obter_parini('programa_versao')
     parametros['token'] = _obter_parini('servidor_token')
-    print("ponto753")
-    var_dump(programa)
-    var_dump(abortar_insucesso)
-    print('ponto761')
+
     try:
         if metodo == 'get':
             return _sapisrv_chamar_programa_get(programa=programa, parametros=parametros, registrar_log=registrar_log)
@@ -774,7 +846,7 @@ def sapisrv_chamar_programa(programa, parametros, abortar_insucesso=False, regis
             # As mensagens explicativas do erro já foram impressas
             erro_fatal("sapisrv_chamar_programa: Abortando após erro (abortar_insucesso=True)")
         else:
-            print_log("sapisrv_chamar_programa: Repassando exception para chamador")
+            debug("sapisrv_chamar_programa: Repassando exception para chamador")
             raise
 
 # Invoca Sapi server (sapisrv), contando com sucesso.
@@ -859,7 +931,7 @@ def testa_comunicacao_servidor_sapi(url_base):
     # Confere resposta
     if (resposta != "pong"):
         # Muito incomum...mostra na tela também
-        print_tela_log("Servidor respondeu, em ", url, " porem com resposta inesperada: ", resposta)
+        print_tela_log("- Servidor respondeu, em ", url, " porem com resposta inesperada: ", resposta)
         return False
 
     # Tudo bem
@@ -902,12 +974,12 @@ def processar_resultado_ok(resultado, referencia=""):
         resultado = resultado.decode('utf-8')
     except BaseException as e:
         print_tela_log()
-        print_tela_log("Falha na codificação UTF-8 da resposta de: ", referencia)
+        print_tela_log("- Falha na codificação UTF-8 da resposta de: ", referencia)
         print_tela_log("===== Pagina retornada =========")
         print_tela_log(resultado)
         print_tela_log("===== Fim da pagina =========")
-        print_tela_log("Erro: ", str(e))
-        print_tela_log("Verifique programa sapisrv")
+        print_tela_log("- Erro: ", str(e))
+        print_tela_log("- Verifique programa sapisrv")
         raise SapiExceptionGeral("Operação interrompida")
 
     # Processa pagina resultante em formato JSON
@@ -920,12 +992,12 @@ def processar_resultado_ok(resultado, referencia=""):
 
     except BaseException as e:
         print_tela_log()
-        print_tela_log("Resposta invalida (não está no formato json) de: ", referencia)
+        print_tela_log("- Resposta invalida (não está no formato json) de: ", referencia)
         print_tela_log("===== Pagina retornada =========")
         print_tela_log(resultado)
         print_tela_log("===== Fim da pagina =========")
-        print_tela_log("Erro: ", str(e))
-        print_tela_log("Verifique programa sapisrv")
+        print_tela_log("- Erro: ", str(e))
+        print_tela_log("- Verifique programa sapisrv (desenvolvedor)")
         raise SapiExceptionGeral("Operação interrompida")
 
     # Tudo certo
@@ -980,7 +1052,7 @@ def _sapisrv_get_sucesso(url):
 
     # Se não foi sucesso, aborta
     if (d["sucesso"] == "0"):
-        print_tela_log("Erro inesperado reportado por: ", url)
+        print_tela_log("- Erro inesperado reportado por: ", url)
         print_tela_log(d["msg_erro"])
         raise SapiExceptionGeral("Operação interrompida")
 
@@ -999,9 +1071,9 @@ def sapisrv_get_ok(url):
         resultado = f.read()
 
     except BaseException as e:
-        print_tela_log("Não foi recebido resposta em tempo hábil para URL:", url)
-        print_tela_log("Exceção:",type(e).__name__, " - ",str(e))
-        print_tela_log("Verifique configuracao de rede")
+        print_tela_log("- Não foi recebido resposta em tempo hábil para GET em URL:", url)
+        print_tela_log("- Exceção:",type(e).__name__, " - ",str(e))
+        print_tela_log("- Verifique rede")
         # Gera exception para interromper execução de comando
         raise SapiExceptionGeral(str(e))
 
@@ -1052,7 +1124,7 @@ def sapisrv_post_sucesso(programa, parametros):
 
     # Se não foi sucesso, aborta
     if (d["sucesso"] == "0"):
-        print_tela_log("Erro inesperado reportado por: ", programa, " via post")
+        print_tela_log("- Erro inesperado reportado por: ", programa, " via post")
         print_tela_log(d["msg_erro"])
         raise SapiExceptionGeral("Operação interrompida")
 
@@ -1067,9 +1139,9 @@ def sapisrv_post_ok(programa, parametros):
     try:
         resultado = _post(programa, parametros)
     except BaseException as e:
-        print_tela_log("Falha na chamada de ", programa, " com POST")
-        print_tela_log("Erro: ", str(e))
-        print_tela_log("Verifique configuracao de rede")
+        print_tela_log("- Falha na chamada de ", programa, " com POST")
+        print_tela_log("- Erro: ", str(e))
+        print_tela_log("- Verifique rede")
         raise SapiExceptionGeral("Operação Interrompida")
 
     # Monta referência para exibição de erro
@@ -1120,9 +1192,9 @@ def _post(programa, parametros):
 # Tratamento para erro fatal
 # ----------------------------------------------------------------------
 def erro_fatal(*args):
-    sys.stdout.write("Sapi Erro Fatal: ")
-    print_ok(*args)
-    print_ok("Para maiores informações, consulte o arquivo de log")
+    sys.stdout.write("- Sapi Erro Fatal: ")
+    print(*args)
+    print("- Para maiores informações, consulte o arquivo de log")
     os._exit(1)
 
 
@@ -1162,7 +1234,7 @@ def print_hex(s):
     r = ""
     for x in s:
         r = r + hex(ord(x)) + ":"
-    print_ok(r)
+    print(r)
 
 
 # Substitui o convert_unicode no python3, que já é unicode nativo
@@ -1194,34 +1266,6 @@ def modo_debug():
     return debug
 
 
-# Paleativo para resolver problema de utf-8 no Windows
-# e esta confusão de unicode no python
-# Recebe um conjunto de parâmetros string ou unicode
-# Converte tudo para unicode e exibe
-# Exemplo de chamada:
-# print_ok(x, y, z)
-# Atenção: Se tentar concatenar antes de chamar, pode dar erro de 
-# na concatenação (exemplo: print_ok(x+y+z))
-# Se isto acontecer, utilize o formato de multiplos argumentos (separados
-# por virgulas)
-# 
-# Lógica para python 2 foi desativada.
-# Mantendo chamadas ao wrapper da função print por precaução....
-# para poder eventualmente compatibilizar um programa com python 2 e 3
-# ----------------------------------------------------------------------
-def print_ok(*arg):
-    if (len(arg) == 0):
-        print()
-        return
-
-    # Este código é para python 2
-    # Como eu espero que tudo funcione em python 3, vamos desabilitá-lo
-    # Se mais tarde for necessário algo em python2, terá que colocar
-    # alguma esperteza aqui
-    # print converte_unicode(*arg)
-
-    # Python3, já tem suporte para utf-8...basta exibir
-    print(*arg)
 
 
 def obter_timestamp(remover_milisegundo=True):
@@ -1252,6 +1296,11 @@ def obter_nome_arquivo_log():
 
 # Efetua ajustes no texto, para ficar adequado a log e registro de status
 def ajusta_texto_saida(s):
+
+    # Se começar ou terminar por "-" ou " " ou qualquer combinação destes, remove, pois no log o texto é direto
+    # Isto serve para que mensagens que são para tela, que tem formato "- xxxx", fiquem no log apenas como "xxxx"
+    s=s.strip("-")
+    s=s.strip(" ")
 
     for caminho_storage in Gdic_storage:
         nome_storage=Gdic_storage[caminho_storage]
@@ -1306,7 +1355,7 @@ def print_log(*arg):
 def print_log_dual(*arg):
     linha = _print_log_apenas(*arg)
     if not modo_background():
-        print_ok(linha)
+        print(linha)
 
 
 # Exibe mensagem recebida na tela
@@ -1315,7 +1364,7 @@ def print_log_dual(*arg):
 def print_tela_log(*arg):
     if not modo_background():
         # Exibe na tela
-        print_ok(*arg)
+        print(*arg)
 
     # Grava no log
     _print_log_apenas(*arg)
@@ -1336,7 +1385,7 @@ def print_var(print_destino, *arg):
 
 # Imprime se o primeiro argumento for verdadeiro
 # ----------------------------------------------------------------------
-def if_print_ok(exibir, *arg):
+def if_print(exibir, *arg):
     # o primeiro campo tem que ser do tipo booleano
     # Um erro bastante comum é esquecer de passar este parâmetro
     # Logo, geramos um erro fatal aqui
@@ -1390,7 +1439,7 @@ def esta_rodando_linux():
     # Algum outro sistema (talvez tenha que tratar os OSx se não vier
     # posix)
     # Por enquanto vamos abortar aqui, e ir refinando o código
-    print_ok("Sistema operacional desconhecido : ", os.name)
+    print("Sistema operacional desconhecido : ", os.name)
     os._exit(1)
 
 
@@ -1405,6 +1454,17 @@ def tem_direito_root():
 
     # Ok, tudo certo
     return True
+
+def espera_enter(texto=None):
+    if texto is None:
+        texto="Digite <ENTER> para prosseguir"
+    try:
+        input(texto)
+        return True
+    except KeyboardInterrupt:
+        # Ignorar CTR-C
+        return False
+
 
 
 # Pergunta Sim/Não via via input() e retorna resposta
@@ -1557,7 +1617,7 @@ def acesso_storage_linux(ponto_montagem, conf_storage):
     # Não deveria falhar em condições normais
     # Talvez falhe se estiver sem root
     if not os.path.exists(ponto_montagem):
-        print_tela_log("Criação de pasta para ponto de montagem [", ponto_montagem, "] falhou")
+        print_tela_log("- Criação de pasta para ponto de montagem [", ponto_montagem, "] falhou")
         return False
 
     # Verifica se arquivo de controle existe no storage
@@ -1577,7 +1637,7 @@ def acesso_storage_linux(ponto_montagem, conf_storage):
         " " + ponto_montagem
     )
 
-    # print_ok(comando)
+    # print(comando)
     os.system(comando)
 
     # Verifica se arquivo de controle existe no storage
@@ -1586,9 +1646,9 @@ def acesso_storage_linux(ponto_montagem, conf_storage):
         return True
     else:
         # print_tela_log(comando)
-        print_tela_log("Após montagem de storage, não foi encontrado arquivo de controle[", arquivo_controle, "]")
-        print_tela_log("Ou montagem do storage falhou, ou storage não possui o arquivo de controle.")
-        print_tela_log("Se for este o caso, inclua na raiz o arquivo de controle com qualquer conteúdo.")
+        print_tela_log("- Após montagem de storage, não foi encontrado arquivo de controle[", arquivo_controle, "]")
+        print_tela_log("- Ou montagem do storage falhou, ou storage não possui o arquivo de controle.")
+        print_tela_log("- Se for este o caso, inclua na raiz o arquivo de controle com qualquer conteúdo.")
         return False
 
 
@@ -1796,7 +1856,7 @@ def console_executar_tratar_ctrc(funcao, *args):
         return(funcao( *args ))
     except KeyboardInterrupt:
         print()
-        print("Operação interrompida pelo usuário")
+        print("- Operação interrompida pelo usuário com <CTR>-<C>")
         return False
 
 
@@ -1811,6 +1871,13 @@ def console_receber_comando(menu_comando):
         #return ("*qq", "")
 
 
+def exibe_menu_comandos(menu, comandos):
+    formato_saida = "%10s : %s"
+    for key in menu:
+        print(formato_saida % (key.upper(), comandos[key]))
+    print()
+
+
 # Recebe e confere a validade de um comando de usuário
 # ----------------------------------------------------------------------------------------------------------------------
 def _receber_comando(menu_comando):
@@ -1821,6 +1888,14 @@ def _receber_comando(menu_comando):
     cmd_item = menu_comando['cmd_item']
     cmd_geral = menu_comando['cmd_geral']
     cmd_diagnostico = menu_comando['cmd_diagnostico']
+
+    # Adiciona alguns comandos fixos, que valem para qualquer programa
+    if '<ENTER>' not in cmd_exibicao:
+        comandos['<ENTER>']='Exibir lista de tarefas atuais (sem Refresh no servidor)'
+        cmd_exibicao.append('<ENTER>')
+    if 'nn' not in cmd_navegacao:
+        comandos['nn'] = 'Posicionar no elemento com Sq=nn da lista (Exemplo: 5, posiciona no quinto elemento)'
+        cmd_navegacao.append('nn')
 
     comando_ok = False
     comando_recebido = ""
@@ -1854,37 +1929,24 @@ def _receber_comando(menu_comando):
                 print()
                 print("Comandos de exibição da situação:")
                 print("----------------------------------")
-                print('<ENTER> :  Exibir lista de tarefas atuais (sem Refresh no servidor)')
-                for key in cmd_exibicao:
-                    print(key.upper(), "    : ", comandos[key])
-                print()
+                exibe_menu_comandos(cmd_exibicao, comandos)
 
             # Exibe ajuda para comando
             print("Comandos de Navegação:")
             print("----------------------")
-            print('nn :  Posicionar no elemento com Sq=nn da lista (Exemplo: 5, posiciona no quinto elemento)')
-            for key in cmd_navegacao:
-                print(key.upper(), " : ", comandos[key])
-            print()
-
+            exibe_menu_comandos(cmd_navegacao, comandos)
 
             print("Processamento da tarefa corrente (marcada com =>):")
             print("--------------------------------------------------")
-            for key in cmd_item:
-                print(key.upper(), " : ", comandos[key])
-            print()
+            exibe_menu_comandos(cmd_item, comandos)
 
             print("Diagnóstico de problemas:")
             print("-------------------------")
-            for key in cmd_diagnostico:
-                print(key.upper(), " : ", comandos[key])
-            print()
+            exibe_menu_comandos(cmd_diagnostico, comandos)
 
             print("Comandos gerais:")
             print("----------------")
-            for key in cmd_geral:
-                print(key.upper(), " : ", comandos[key])
-            print()
+            exibe_menu_comandos(cmd_geral, comandos)
 
         elif (comando_recebido == ""):
             # print("Para ajuda, digitar comando 'h' ou '?'")
