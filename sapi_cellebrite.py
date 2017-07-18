@@ -81,10 +81,12 @@ Gmenu_comandos['comandos'] = {
 
     # Comandos relacionados com a tarefa corrente
     '*cr': 'Copiar a pasta de relatórios do Cellebrite para o STORAGE',
-    '*at': 'Abortar tarefa que está (ou deveria estar) em andamento',
-    '*rt': 'Reiniciar tarefa que foi concluída com sucesso',
+    '*ab': 'Abortar tarefa que está (ou deveria estar) em andamento',
+    '*ri': 'Reiniciar tarefa que foi concluída com sucesso',
     '*cs': 'Comparar a situação da tarefa indicada no SETEC3 com a situação observada no storage, e corrige, se necessário',
     '*du': '(Dump) Mostrar todas as propriedades de uma tarefa (utilizado para Debug)',
+    '*ex': 'Excluir tarefa',
+    '*lo': 'Exibe log da tarefa',
 
     # Comandos gerais
     '*sg': 'Exibir situação atualizada das tarefas (com refresh do servidor). ',
@@ -93,16 +95,16 @@ Gmenu_comandos['comandos'] = {
     '*qq': 'Finalizar',
 
     # Comandos para diagnóstico de problemas
-    '*el': 'Exibir log desta instância do sapi_cellebrite. Utiliza argumento como filtro (exe: *EL status => Exibe apenas registros de log contendo o string "status".',
+    '*lg': 'Exibir log geral desta instância do sapi_cellebrite. Utiliza argumento como filtro (exe: *EL status => Exibe apenas registros de log contendo o string "status".',
     '*db': 'Ligar/desligar modo debug. No modo debug serão geradas mensagens adicionais no log.'
 
 }
 
 Gmenu_comandos['cmd_exibicao'] = ["*sg", "*sgr"]
 Gmenu_comandos['cmd_navegacao'] = ["+", "-"]
-Gmenu_comandos['cmd_item'] = ["*cr", "*cs", "*at", "*rt"]
+Gmenu_comandos['cmd_item'] = ["*cr", "*cs", "*ab", "*ri","*ex", "*lo"]
 Gmenu_comandos['cmd_geral'] = ["*tt", "*qq"]
-Gmenu_comandos['cmd_diagnostico'] = ["*db", "*el"]
+Gmenu_comandos['cmd_diagnostico'] = ["*db", "*lg"]
 
 # **********************************************************************
 # PRODUCAO DEPLOYMENT AJUSTAR
@@ -335,7 +337,7 @@ def sintetizar_arquivo_xml(arquivo, caminho_arquivo_temporario):
     with codecs.open(caminho_arquivo_temporario, 'a+b', encoding='utf-8') as ftemp:
         ftemp.write("</project>")
 
-    print_log("Arquivo XML sintetizado gravado em ", caminho_arquivo_temporario)
+    debug("Arquivo XML sintetizado gravado em ", caminho_arquivo_temporario)
 
     return
 
@@ -635,7 +637,6 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
             # <field name="Value" type="String">
             # <field name="Category" type="String">
             for field in model:
-                # var_dump(field)
                 nome = field.get('name', None)
 
                 # <value type="String"><![CDATA[MSISDN 1]]></value>
@@ -675,7 +676,6 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
     if model_type is not None:
         # Processa informações de conta
         for model in model_type:
-            # var_dump(model)
             if model.get('type', None) != 'UserAccount':
                 # Despreza, se não for userAccount...tem fotos e outras coisas aqui também....
                 # Quem sabe no futuro, colocar a foto associada ao perfil.
@@ -742,7 +742,6 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
             if dext[extraction_id].get(user_account, None) is None:
                 dext[extraction_id][user_account] = list()
             dext[extraction_id][user_account].append(conta_formatada)
-            # var_dump(dext[extraction_id][user_account])
 
 
     # ------------------------------------------------------------------
@@ -796,7 +795,6 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
         for i in dext:
             if not dext[i].get("sapiAparelho", False):
                 continue
-            # var_dump(dext[i])
             for j in dext[i]:
                 if (j not in proplaudo_aparelho):
                     continue
@@ -1029,7 +1027,7 @@ def exibe_dados_tarefa(tarefa):
     print("Código da tarefa   : ", tarefa["codigo_tarefa"])
     print("Storage            : ", tarefa['dados_storage']['maquina_netbios'])
     print("Pasta armazenamento: ", tarefa['caminho_destino'])
-    print("Situação           : ", tarefa['descricao_situacao_tarefa'])
+    print("Situação           : ", tarefa["codigo_situacao_tarefa"],"-", tarefa['descricao_situacao_tarefa'])
     if obter_dict_string_ok(tarefa, 'status_ultimo') != '':
         tempo_str = remove_decimos_segundo(obter_dict_string_ok(tarefa, 'tempo_desde_ultimo_status'))
         print_centralizado("")
@@ -1093,16 +1091,16 @@ def print_atencao():
 
 
 def print_falha_comunicacao():
-    print("- Talvez tenha ocorrido falha de comunicação com servidor.")
-    print("- Sugestão: Utilizando um browser, tente acessar o SETEC3 deste computador para conferir se acesso está ok")
     print("- Consulte o log para entender melhor o problema(*EL)")
+    print("- Se você suspeita de falha de comunicação (rede), ")
+    print("  tente acessar o SETEC3 utilizando um browser computador para conferira se a conexão está ok")
 
 def print_comando_cancelado():
     print("- Comando cancelado")
     print()
 
 # ----------------------------------------------------------------------------------------------------------------------
-# @*at - Aborta execução de tarefa
+# @*ab - Aborta execução de tarefa
 # ----------------------------------------------------------------------------------------------------------------------
 def abortar_tarefa():
     console_executar_tratar_ctrc(funcao=_abortar_tarefa)
@@ -1120,7 +1118,7 @@ def pode_abortar(tarefa):
         print("- Tarefa com situação ", codigo_situacao_tarefa, "-",
               tarefa['descricao_situacao_tarefa'] + " NÃO pode ser abortada")
         print("- Apenas tarefas EM ANDAMENTO podem ser abortadas")
-        print("- Se você quer reexecutar esta tarefa, utilize o comando *RT")
+        print("- Se você quer reexecutar esta tarefa, utilize o comando *RI")
         print("- Em caso de divergência, efetue em Refresh na lista de tarefas (*SG)")
         print("- Comando cancelado.")
         return False
@@ -1167,15 +1165,15 @@ def pode_abortar(tarefa):
     # ------------------------------------------------------------------------------------------------------------------
     print()
     print_atencao()
-    print("- Esta tarefa está a bastante tempo sem atualização do status, indicando que o processo de cópia")
+    print("- Esta tarefa está a bastante tempo sem atualização do status, indicando que o seu processamento")
     print("  deve ter sido interrompido ou estar travado (congelado).")
     print("- Contudo, isto nem sempre isto é verdade.")
-    print("  Se por algum motivo o processo de cópia da tarefa perdeu contato com o SETEC3, ")
+    print("  Se por algum motivo o processo que está executando a tarefa perdeu contato com o SETEC3, ")
     print("  o status da tarefa não será atualizado, mas o processo pode ainda estar rodando,")
     print("  uma vez que os agentes python do SAPI são tolerantes a falhas de comunição com o servidor.")
     print("- Antes de abortar a tarefa, assegure-se que a tarefa realmente NÃO ESTÁ sendo processada.")
     print("- Dicas:")
-    print("  - Conecte no storage de destino via VNC e verifique se a pasta da tarefa está recebendo novos arquivos")
+    print("  - Conecte no storage de destino via VNC e verifique se a pasta da tarefa não está sendo alterada")
     print("  - Se a máquina em que está rodando o sapi_cellebrite para a tarefa utiliza Windows 10, ")
     print("    verifique se a console não está travada em modo de seleção: Aparece no cabeçalho o texto SELECT.")
     print("    Se for este o caso, um simples <ENTER> fará com o que o processo continue.")
@@ -1196,6 +1194,10 @@ def _abortar_tarefa():
     tarefa = carrega_exibe_tarefa_corrente()
     if tarefa is None:
         return False
+    codigo_tarefa = tarefa["codigo_tarefa"]
+
+    # Label para log
+    definir_label_log('*ab:'+codigo_tarefa)
 
     # Verifica se tarefa pode ser abortada
     #-----------------------------------------
@@ -1223,8 +1225,7 @@ def _abortar_tarefa():
     # ------------------------------------------------------------------------------------------------------------------
     print("- Abortando tarefa. Aguarde...")
 
-    codigo_tarefa = tarefa["codigo_tarefa"]
-    print_log("Abortando tarefa ",codigo_tarefa, " por solicitação do usuário (*AT)")
+    print_log("Abortando tarefa ",codigo_tarefa, " por solicitação do usuário (*AB)")
 
     # Mata qualquer processo relacionado com esta tarefa
     for ix in sorted(Gpfilhos):
@@ -1242,13 +1243,13 @@ def _abortar_tarefa():
     # ------------------------
     if not troca_situacao_tarefa_ok(codigo_tarefa=codigo_tarefa,
                                     codigo_nova_situacao=GAbortou,
-                                    texto_status="Abortada por comando do usuário (*AT)"
+                                    texto_status="Abortada por comando do usuário (*AB)"
                                     ):
         # Se falhar, encerra. Mensagens já foram dadas na função chamada
         return
 
 
-    # Sucesso comando (*AT)
+    # Sucesso comando (*AB)
     print()
     print("- Situação da tarefa alterada para'Abortada'")
     print("- Esta tarefa está disponível para ser refeita.")
@@ -1257,7 +1258,121 @@ def _abortar_tarefa():
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-# Reinicia execução de tarefa
+# @*ri - Reinicia execução de tarefa
+# ----------------------------------------------------------------------------------------------------------------------
+def reiniciar_tarefa():
+    console_executar_tratar_ctrc(funcao=_reiniciar_tarefa)
+
+# Retorna True se tarefa pode ser reiniciada
+def pode_reiniciar(tarefa):
+
+    # Verifica se tarefa pode ser reiniciada
+    # ------------------------------------------------------------------
+    codigo_tarefa = tarefa["codigo_tarefa"]
+    codigo_situacao_tarefa = int(tarefa['codigo_situacao_tarefa'])
+
+    if codigo_situacao_tarefa != GFinalizadoComSucesso:
+        # Tarefas com outras situações não são permitidas
+        print("- Tarefa com situação ", codigo_situacao_tarefa, "-",
+              tarefa['descricao_situacao_tarefa'] + " NÃO pode ser reiniciada")
+        print("- Apenas tarefas FINALIZADA COM SUCESSO podem ser reiniciadas")
+        print("- Em caso de divergência, efetue em Refresh na lista de tarefas (*SG)")
+        return False
+
+    # ------------------------------------------------------------------------------------------------------------------
+    # Verifica se tarefa possui filhas já iniciadas
+    # ------------------------------------------------------------------------------------------------------------------
+    qtd=int(tarefa["quantidade_tarefas_filhas_iniciadas"])
+    if qtd>0:
+        print("- Esta tarefa possui ", qtd, " tarefa(s) filha(s) já iniciada(s)")
+        print("- Desta forma, não é possível reinicializá-la.")
+        print("- Se você realmente quer reiniciar, exclua primeiro a(s) tarefa(s) filhas")
+        print("  Dica: Consulte cada tarefa filha no SETEC3, para obter instrução de como efetuar a exclusão.")
+        return False
+
+    # Ok, pode reiniciar
+    return True
+
+def _reiniciar_tarefa():
+    print()
+    print("- Reiniciar tarefa")
+
+    # Carrega situação atualizada da tarefa
+    # -----------------------------------------
+    tarefa = carrega_exibe_tarefa_corrente()
+    if tarefa is None:
+        return False
+
+    codigo_tarefa = tarefa["codigo_tarefa"]
+
+    # Label para log
+    definir_label_log('*ri:'+codigo_tarefa)
+
+    # Verifica se pode reiniciar
+    # ----------------------------------------
+    reiniciar=pode_reiniciar(tarefa)
+
+    # Alguma situação impede (ou o usuário desistiu de reiniciar)
+    # Retorna ao menu de comandos
+    if not reiniciar:
+        print()
+        return
+
+    # ------------------------------------------------------------------------------------------------------------------
+    # Confirmação final
+    # ------------------------------------------------------------------------------------------------------------------
+    print()
+    prosseguir = pergunta_sim_nao("< Deseja realmente reiniciar esta tarefa?", default="n")
+    if not prosseguir:
+        print("- Cancelado pelo usuário.")
+        return False
+
+    # ------------------------------------------------------------------------------------------------------------------
+    # Reinicia tarefa
+    # ------------------------------------------------------------------------------------------------------------------
+    print("- Reiniciando tarefa. Aguarde...")
+
+    # Troca situação da tarefa
+    # ------------------------
+    if not troca_situacao_tarefa_ok(codigo_tarefa=codigo_tarefa,
+                                    codigo_nova_situacao=GAguardandoPCF,
+                                    texto_status="Reiniciada por comando do usuário(*RI)"
+                                    ):
+        # Se falhar, encerra. Mensagens já foram dadas na função chamada
+        return
+
+
+    # Sucesso comando (*RI)
+    print()
+    print_tela_log("- Situação da tarefa alterada para 'Aguardando PCF'")
+    print("- Tarefa está pronta para ser refeita")
+    exibir_situacao_apos_comando()
+    return
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# @*lo - Exibir log de tarefa
+# ----------------------------------------------------------------------------------------------------------------------
+
+def exibir_log_tarefa(filtro_usuario):
+
+    (tarefa, item) = obter_tarefa_item_corrente()
+    codigo_tarefa = tarefa["codigo_tarefa"]
+
+    print()
+    print("- Exibir log da tarefa", codigo_tarefa)
+
+    filtro_base=":"+codigo_tarefa+"]"
+    exibir_log(comando='*lo',filtro_base=filtro_base, filtro_usuario=filtro_usuario, limpar_tela=False)
+
+    return
+
+
+
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# @*ri - Reinicia execução de tarefa
 # ----------------------------------------------------------------------------------------------------------------------
 def reiniciar_tarefa():
     console_executar_tratar_ctrc(funcao=_reiniciar_tarefa)
@@ -1316,7 +1431,7 @@ def _reiniciar_tarefa():
     # Confirmação final
     # ------------------------------------------------------------------------------------------------------------------
     print()
-    print("- Reiniciar uma tarefa é um procedimento irreversível, e implica em refazer a cópia desde o início")
+    print("- Confira se você selecionou a tarefa correta a ser reiniciada.")
     print()
     prosseguir = pergunta_sim_nao("< Deseja realmente reiniciar esta tarefa?", default="n")
     if not prosseguir:
@@ -1334,13 +1449,13 @@ def _reiniciar_tarefa():
     # ------------------------
     if not troca_situacao_tarefa_ok(codigo_tarefa=codigo_tarefa,
                                     codigo_nova_situacao=GAguardandoPCF,
-                                    texto_status="Reiniciada por comando do usuário(*RT)"
+                                    texto_status="Reiniciada por comando do usuário(*RI)"
                                     ):
         # Se falhar, encerra. Mensagens já foram dadas na função chamada
         return
 
 
-    # Sucesso comando (*RT)
+    # Sucesso comando (*RI)
     print()
     print("- Situação da tarefa alterada para 'Aguardando PCF'")
     print("- Tarefa está pronta para ser refeita")
@@ -1348,6 +1463,413 @@ def _reiniciar_tarefa():
     return
 
 
+# ----------------------------------------------------------------------------------------------------------------------
+# @*ex - Excluir tarefa
+# ----------------------------------------------------------------------------------------------------------------------
+def excluir_tarefa():
+    console_executar_tratar_ctrc(funcao=_excluir_tarefa)
+
+# Retorna True se tarefa pode ser excluida
+def pode_excluir(tarefa):
+
+    # Verifica se tarefa pode ser excluida
+    # ------------------------------------------------------------------
+    codigo_tarefa = tarefa["codigo_tarefa"]
+    codigo_situacao_tarefa = int(tarefa['codigo_situacao_tarefa'])
+
+    # Label para diferenciar mensagens de log
+    definir_label_log('*ex:'+codigo_tarefa)
+
+    # Não pode estar em Em Andamento (no SETEC3)
+    # ------------------------------------------
+    if codigo_situacao_tarefa == GEmAndamento:
+        # Tarefas com outras situações não são permitidas
+        print("- Tarefa NÃO pode ser excluída, pois está em andamento. Apenas tarefas 'paradas' podem ser excluídas")
+        print("- Utilize comando *AB (abortar tarefa) para interromper execução e depois reaplique comando *EX")
+        return False
+
+
+    # Não pode ter algum processo em backgroud executando a tarefa
+    # ------------------------------------------------------------
+    for ix in sorted(Gpfilhos):
+        if Gpfilhos[ix].is_alive() and "executar":
+            dummy, codigo_tarefa_execucao = ix.split(':')
+            if int(codigo_tarefa_execucao)==codigo_tarefa:
+                print("- Tarefa",codigo_tarefa, "está rodando em background (",ix,Gpfilhos[ix].pid,")")
+                print("- Antes de excluir a tarefa, é necessário abortar a execução. Utilize comando *AB")
+                return False
+
+
+    # Não pode ter alguma tarefa filha já iniciada
+    # --------------------------------------------
+    qtd=int(tarefa["quantidade_tarefas_filhas_iniciadas"])
+    if qtd>0:
+        print("- Esta tarefa possui ", qtd, " tarefa(s) filha(s) já iniciada(s)")
+        print("- Desta forma, não é possível excluí-la.")
+        print("- Se você realmente quer excluir esta tarefa, exclua primeiro a(s) tarefa(s) filhas")
+        print("  Dica: Consulte cada tarefa filha no SETEC3, para obter instrução de como efetuar a exclusão.")
+        return False
+
+    # Ok, pode excluir
+    return True
+
+
+def _excluir_tarefa():
+    print()
+    print("- Excluir tarefa")
+
+    # Carrega situação atualizada da tarefa
+    # -----------------------------------------
+    tarefa = carrega_exibe_tarefa_corrente()
+    if tarefa is None:
+        return False
+    codigo_tarefa = tarefa["codigo_tarefa"]
+
+    # Verifica se pode excluir
+    # ----------------------------------------
+    excluir=pode_excluir(tarefa)
+
+    # Alguma situação impede (ou o usuário desistiu de excluir)
+    # Retorna ao menu de comandos
+    if not excluir:
+        print("- Comando cancelado")
+        return
+
+    # -----------------------------------------------------------------
+    # Pasta de destino
+    # -----------------------------------------------------------------
+    print()
+    print("Verificando pasta de destino")
+    print("=============================")
+
+    print("- Storage da tarefa: ", tarefa["dados_storage"]["maquina_netbios"])
+
+    # Montagem de storage
+    # -------------------
+    # Confirma que tem acesso ao storage escolhido
+    # print("- Verificando conexão com storage de destino. Aguarde...")
+    ponto_montagem = conectar_ponto_montagem_storage_ok(tarefa["dados_storage"])
+    if ponto_montagem is None:
+        # Mensagens de erro já foram apresentadas pela função acima
+        return
+
+    caminho_destino = ponto_montagem + tarefa["caminho_destino"]
+
+    print("- Pasta de destino no storage:")
+    print(" ", tarefa["caminho_destino"])
+
+    # Verifica se pasta de destino já existe
+    limpar_pasta_destino = False
+    if os.path.exists(caminho_destino):
+        print_atencao()
+        print()
+        print("- A pasta de destino da tarefa já existe.")
+        print("- A exclusão da tarefa irá apagar definitivamente todos os dados desta pasta.")
+        print("- Se você precisa dos dados da pasta, conecte no servidor e efetue uma cópia dos dados antes de prosseguir.")
+        print()
+        prosseguir = pergunta_sim_nao(
+            "< Você concorda que a pasta de destino da tarefa seja excluída?",
+            default="n")
+        if not prosseguir:
+            # Encerra
+            print("- Cancelado pelo usuário.")
+            return
+        print_log("Usuário solicitou exclusão da pasta de destino: ", caminho_destino)
+        limpar_pasta_destino = True
+    else:
+        print("- Não existe pasta de destino (Não foi criado nada no storage para esta tarefa)")
+        print()
+
+    # ------------------------------------------------------------------------------------------------------------------
+    # Efetuar exclusão da tarefa
+    # ------------------------------------------------------------------------------------------------------------------
+    print()
+    print("Efetuar exclusão")
+    print("================")
+    print()
+    print("- A exclusão de uma tarefa é um procedimento IRREVERSÍVEL.")
+    print("- Sugestão: Confira pela última vez se você selecionou a tarefa correta!!!")
+    print()
+    print("- Está tudo pronto para excluir tarefa.")
+    prosseguir = pergunta_sim_nao("< Prosseguir? ", default="n")
+    if not prosseguir:
+        return
+
+    # Decide o método a utilizar.
+    # Se houver pasta da tarefa, efetua exclusão em background. Caso contrário, faz exclusão em foreground
+    if limpar_pasta_destino:
+        efetuar_exclusao_background(codigo_tarefa, caminho_destino, )
+        return
+
+    # Efetua exclusão em foreground
+    # ------------------------------------------------------
+    try:
+        # Exclui tarefa no SETEC3
+        # -----------------------
+        sapisrv_excluir_tarefa(codigo_tarefa=codigo_tarefa)
+        print_log("Tarefa excluida com sucesso")
+    except BaseException as e:
+        print_tela_log("- Não foi possível excluir tarefa: ", str(e))
+        print_falha_comunicacao()
+        return
+
+    # Ok, exclusão finalizada
+    return
+
+
+
+def efetuar_exclusao_background(codigo_tarefa, caminho_destino):
+    # Troca situação da tarefa
+    # ------------------------
+    texto_status = "Excluindo tarefa"
+    if not troca_situacao_tarefa_ok(codigo_tarefa=codigo_tarefa,
+                                    codigo_nova_situacao=GEmExclusao,
+                                    texto_status=texto_status
+                                    ):
+        # Se falhar, encerra. Mensagens já foram dadas na função chamada
+        return
+
+    # ------------------------------------
+    # Inicia procedimentos em background
+    # ------------------------------------
+    print_log("Iniciando exclusão em background")
+    # Os processo filhos irão atualizar o mesmo arquivo log do processo pai
+    nome_arquivo_log_para_processos_filhos = obter_nome_arquivo_log()
+
+    # Inicia processo filho para excluir tarefa
+    # ------------------------------------------------------------------------------------------------------------------
+    label_processo = "executar:" + str(codigo_tarefa)
+    dados_pai_para_filho=obter_dados_para_processo_filho()
+    p_executar = multiprocessing.Process(
+        target=background_executar_exclusao,
+        args=(codigo_tarefa, caminho_destino,
+              nome_arquivo_log_para_processos_filhos, label_processo, dados_pai_para_filho)
+    )
+    p_executar.start()
+
+    registra_processo_filho(label_processo, p_executar)
+
+    # Inicia processo filho para acompanhar exclusão
+    # ------------------------------------------------------------------------------------------------------------------
+    label_processo = "acompanhar:" + str(codigo_tarefa)
+    p_acompanhar = multiprocessing.Process(
+        target=background_acompanhar_exclusao,
+        args=(codigo_tarefa, caminho_destino, nome_arquivo_log_para_processos_filhos, label_processo))
+    p_acompanhar.start()
+
+    registra_processo_filho(label_processo, p_acompanhar)
+
+    # Tudo certo, agora é só aguardar
+    print()
+    print("- Ok, procedimento de exclusão foi iniciado em background.")
+    print("- Você pode continuar trabalhando, inclusive efetuar outras tarefas simultaneamente.")
+    print("- Para acompanhar a situação da exclusão, utilize o comando *SG, ou então *SGR (repetitivo)")
+    print("- Também é possível acompanhar a situação através do SETEC3")
+    print("- Em caso de problema/dúvida, utilize *EL para visualizar o log")
+    print("- IMPORTANTE: Não encerre este programa enquanto houver tarefas em andamento, ")
+    print("  pois as mesmas serão interrompidas e terão que ser reprocessadas")
+    print("- Quando a exclusão for finalizada, a tarefa desaparecerá da lista de tarefas")
+
+    exibir_situacao_apos_comando()
+
+    return
+
+
+
+# Efetua a exclusão da tarefa, incluindo sua pasta de destino
+def background_executar_exclusao(codigo_tarefa, caminho_destino,
+                                 nome_arquivo_log, label_processo, dados_pai_para_filho):
+
+    # Impede interrupção por sigint
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+    # Inicializa sapilib
+    # Será utilizado o mesmo arquivo de log do processo pai
+    sapisrv_inicializar(Gprograma, Gversao, nome_arquivo_log=nome_arquivo_log, label_processo=label_processo)
+
+    # Restaura dados herdados do processo pai
+    restaura_dados_no_processo_filho(dados_pai_para_filho)
+
+
+    # ------------------------------------------------------------------
+    # Conceito:
+    # ------------------------------------------------------------------
+    sucesso=False
+    try:
+        # 1) Marca início em background
+        print_log("Início da exclusão em background para tarefa", codigo_tarefa)
+
+        # 2) Exclui pasta de destino
+        # ---------------------------
+        texto_status = "Excluindo pasta de destino"
+        sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status)
+        # Exclui pasta de destino
+        shutil.rmtree(caminho_destino, ignore_errors=True)
+        # Ok, exclusão concluída
+        texto_status = "Pasta de destino excluída"
+        sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status)
+
+        # Se chegou aqui, sucesso
+        print_log("Exclusão de pasta da tarefa efetuada com sucesso")
+        sucesso=True
+
+    except BaseException as e:
+        # Erro fatal: Mesmo estando em background, exibe na tela
+        erro_resultado=str(e)
+        print_tela_log("- [1673] ** ERRO na tarefa",codigo_tarefa, "durante exclusão:" + erro_resultado)
+        print("- Consulte log para mais informações")
+        sucesso=False
+
+    # -----------------------------------------------------------------------------------------------------------------
+    # EXCLUSÃO COM ERRO
+    # -----------------------------------------------------------------------------------------------------------------
+    if not sucesso:
+        try:
+            # Troca para situação Abortada
+            # -----------------------------------
+            sapisrv_troca_situacao_tarefa_obrigatorio(
+                codigo_tarefa=codigo_tarefa,
+                codigo_situacao_tarefa=GAbortou,
+                texto_status="Exclusão falhou")
+        except BaseException as e:
+            # Se não conseguiu trocar a situação, avisa que usuário terá que abortar manualmente
+            print()
+            print_tela_log("- [1826] Não foi possível abortar a tarefa",codigo_tarefa, "automaticamente")
+            print_tela_log("- Exclusão falhou, e além disso, quando o sistema tentou atualizar situação para 'Abortada', isto também falhou")
+            print_tela_log("- Tarefa está em situação inconsistente, como se estive sendo excluída, mas na realidade já foi abortada")
+            print_tela_log("- Será necessário abortar manualmente (comando *AB)")
+            print_falha_comunicacao()
+            # Prossegue por gravidade, pois está em background e irá encerrar logo em seguida
+
+        # Encerra
+        sys.exit(0)
+
+    # -----------------------------------------------------------------------------------------------------------------
+    # Exclusão finalizada com sucesso
+    # -----------------------------------------------------------------------------------------------------------------
+    try:
+        # Exclui tarefa no SETEC3
+        # -----------------------------------
+        sapisrv_excluir_tarefa(codigo_tarefa=codigo_tarefa)
+        print_log("Tarefa excluida com sucesso")
+    except BaseException as e:
+        print()
+        print_tela_log("- Exclusão da pasta da tarefa", codigo_tarefa,"foi concluída")
+        print_tela_log("- Contudo, NÃO FOI POSSÍVEL possível excluir a tarefa no SETEC3")
+        print_tela_log("- Esta tarefa ficará em estado inconsistente, pois para o sistema ainda está sendo excluída")
+        print("- Após sanar o problema (rede?), execute novamente o comando para concluir a exclusão")
+        print_falha_comunicacao()
+        sys.exit(0)
+
+    # Tudo certo
+    print()
+    print_tela_log("- Tarefa", codigo_tarefa, "excluída com sucesso")
+    print("- Utilize comando *SG para conferir a situação atual da lista de tarefas")
+    print("- Esta tarefa não aparecerá mais na lista de tarefas")
+
+    print_log("Fim da exclusão em background para tarefa", codigo_tarefa)
+    sys.exit(0)
+
+# Acompanhamento de copia em background
+def background_acompanhar_exclusao(codigo_tarefa, caminho_destino, nome_arquivo_log, label_processo):
+
+    # Impede interrupção por sigint
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+    # Inicializa sapilib, compartilhando o arquivo de log do processo principal
+    sapisrv_inicializar(Gprograma, Gversao, nome_arquivo_log=nome_arquivo_log, label_processo=label_processo)
+    print_log("Processo de acompanhamento de cópia iniciado")
+
+    # Executa, e se houver algum erro, registra em log
+    try:
+
+        # simula erro
+        #i=5/0
+
+        _background_acompanhar_exclusao(codigo_tarefa, caminho_destino)
+
+    except BaseException as e:
+        # Erro fatal: Mesmo que esteja em background, exibe na tela
+        print()
+        print("*** Acompanhamento de exclusão falhou, consulte log para mais informações ***")
+        print_log("*** Erro *** em acompanhamento de exclusão: ", str(e))
+
+    # Encerra normalmente
+    print_log("Processo de acompanhamento de exclusão finalizado")
+    sys.exit(0)
+
+
+# Processo em background para efetuar o acompanhamento da cópia
+def _background_acompanhar_exclusao(codigo_tarefa, caminho_destino):
+
+    # intervalo entre as atualizações
+    pausa=15
+
+    # Recupera características da pasta de destino
+    r=obter_caracteristicas_pasta(caminho_destino)
+    tam_pasta_destino = r.get("tamanho_total", None)
+    if tam_pasta_destino is None:
+        # Se não tem conteúdo, encerrra....Não deveria acontecer nunca
+        raise("[2027] Falha na obtençao do tamanho da pasta de destino")
+
+    # Avisa que vai começar
+    print_log("A cada ", GtempoEntreAtualizacoesStatus, "segundos será atualizado o status da exclusão")
+
+    # Fica em loop enquanto tarefa estiver em situação EmExclusao
+    tamanho_anterior=-1
+    while True:
+
+        # Intervalo entre atualizações de status
+        time.sleep(pausa)
+
+        # Verifica se tarefa ainda está em estado de Exclusao
+        tarefa=recupera_tarefa_do_setec3(codigo_tarefa)
+        if tarefa is not None:
+            codigo_situacao_tarefa = int(tarefa['codigo_situacao_tarefa'])
+            if codigo_situacao_tarefa != GEmExclusao:
+                print_log("Verificado que situação da tarefa",codigo_tarefa,"foi modificada para",codigo_situacao_tarefa,". Encerrando acompanhamento de exclusão.")
+                return
+
+        # Aumenta o tempo de pausa a cada atualização de status
+        # sem ultrapassar o máximo
+        pausa = round(pausa * 1.2)
+        if pausa > GtempoEntreAtualizacoesStatus:
+            # Pausa nunca será maior que o limite estabelecido
+            pausa = GtempoEntreAtualizacoesStatus
+
+        debug("Novo ciclo de acompanhamento de exclusão de tarefa")
+
+        # Verifica o tamanho atual da pasta de destino
+        try:
+            tamanho_atual = tamanho_pasta(caminho_destino)
+        except OSError as e:
+            # Quando a pasta está sendo excluída, é comum que o procedimento
+            # de verificação de tamanho falhe,
+            # pois quando ele vai pegar as propriedades de um arquivo, o mesmo foi excluído pelo outro processo
+            debug("[1800] Ignorando erro: ",str(e))
+            # Não tem o que fazer...Tentar novamente
+            continue
+
+        # Atualiza tamanho atual da pasta
+        tamanho_atual_humano = converte_bytes_humano(tamanho_atual)
+
+        # Atualiza status
+        percentual = (tamanho_atual / tam_pasta_destino) * 100
+        texto_status = "Falta excluir " + tamanho_atual_humano + " (" + str(round(percentual, 1)) + "%)"
+        print_log(texto_status)
+        sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status)
+
+        if percentual>=100:
+            print_log("Encerrando acompanhamento de exclusão, pois foi excluido 100% da pasta da tarefa")
+            return
+
+
+# @*ex - FIM ----------------------------------------------------------------------------------------------------------
+
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Diversas funções de apoio
 # ---------------------------------------------------------------------------------------------------------------------
 def carrega_exibe_tarefa_corrente():
 
@@ -1440,6 +1962,7 @@ def _copiar_relatorio_cellebrite():
     codigo_tarefa = tarefa['codigo_tarefa']
     item = tarefa['dados_item']
 
+
     # Verifica se tarefa tem o tipo certo
     # ------------------------------------
     if (not tarefa["tipo"] == "extracao"):
@@ -1459,7 +1982,7 @@ def _copiar_relatorio_cellebrite():
         print("- Esta tarefa está em andamento.")
         print()
         print(
-            "- Se você deseja realmente deseja reiniciar esta tarefa, primeiramente será necessário abortar a mesma (comando *AT).")
+            "- Se você deseja realmente deseja reiniciar esta tarefa, primeiramente será necessário abortar a mesma (comando *AB).")
         print()
         prosseguir = pergunta_sim_nao(
             "< Você deseja abortar esta tarefa (para em seguida reiniciar)?",
@@ -1476,7 +1999,7 @@ def _copiar_relatorio_cellebrite():
         print("- Tarefa com situação ", codigo_situacao_tarefa, "-",
               tarefa['descricao_situacao_tarefa'] + " NÃO pode ser processada")
         print("- Apenas tarefas com situação 'Aguardando ação PCF' ou 'Abortada' podem ser processadas")
-        print("- Se você quer reexecutar esta tarefa, utilize o comando *RT")
+        print("- Se você quer reexecutar esta tarefa, utilize o comando *RI")
         print("- Em caso de divergência, efetue em Refresh na lista de tarefas (*SG)")
         return
 
@@ -1487,7 +2010,7 @@ def _copiar_relatorio_cellebrite():
         # Isto aqui não deveria acontecer nunca...mas para garantir...
         print("Cancelado: Tarefa já foi finalizada com sucesso.")
         print()
-        print("Caso seja necessário refazer esta tarefa, utilize a opção de *RT.")
+        print("Caso seja necessário refazer esta tarefa, utilize a opção de *RI.")
         return
 
     # Divisão em dua partes, pois depois do tinker
@@ -1655,17 +2178,6 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
         # Mensagens de erro já foram apresentadas pela função acima
         return
 
-    # (sucesso, ponto_montagem, erro) = acesso_storage_windows(tarefa["dados_storage"])
-    # if not sucesso:
-    #     print("- Acesso ao storage [" + ponto_montagem + "] falhou")
-    #     print("- Verifique se servidor está acessível (rede) e disponível (ativo)")
-    #     print("- Sugestão: Conecte no servidor via VNC com a conta consulta")
-    #     print("- IMPORTANTE: NÃO FAÇA uma conexão no share do storage com a conta de consulta,")
-    #     print("  pois isto pode impedir o acesso para escrita.")
-    #     return
-    # else:
-    #     print("- Acesso ao storage confirmado")
-
     caminho_destino = ponto_montagem + tarefa["caminho_destino"]
 
     print("- Pasta de destino no storage:")
@@ -1740,11 +2252,14 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
     # Inicia processo filho para execução da cópia
     # ------------------------------------------------------------------------------------------------------------------
     label_processo = "executar:" + str(codigo_tarefa)
+    dados_pai_para_filho=obter_dados_para_processo_filho()
     p_executar = multiprocessing.Process(
         target=background_executar_copia,
         args=(codigo_tarefa, caminho_origem, caminho_destino,
               dados_relevantes, limpar_pasta_destino_antes_copiar,
-              nome_arquivo_log_para_processos_filhos, label_processo))
+              nome_arquivo_log_para_processos_filhos, label_processo,
+              dados_pai_para_filho)
+    )
     p_executar.start()
 
     registra_processo_filho(label_processo, p_executar)
@@ -1777,7 +2292,8 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
 # Efetua a cópia de uma pasta
 def background_executar_copia(codigo_tarefa, caminho_origem, caminho_destino,
                               dados_relevantes, limpar_pasta_destino_antes_copiar,
-                              nome_arquivo_log, label_processo):
+                              nome_arquivo_log, label_processo,
+                              dados_pai_para_filho):
 
     # Impede interrupção por sigint
     signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -1785,6 +2301,9 @@ def background_executar_copia(codigo_tarefa, caminho_origem, caminho_destino,
     # Inicializa sapilib
     # Será utilizado o mesmo arquivo de log do processo pai
     sapisrv_inicializar(Gprograma, Gversao, nome_arquivo_log=nome_arquivo_log, label_processo=label_processo)
+
+    # Restaura dados herdados do processo pai
+    restaura_dados_no_processo_filho(dados_pai_para_filho)
 
     # ------------------------------------------------------------------
     # Conceito:
@@ -1911,7 +2430,7 @@ def background_executar_copia(codigo_tarefa, caminho_origem, caminho_destino,
             print_tela_log("- [1826] Não foi possível abortar a tarefa",codigo_tarefa, "automaticamente")
             print_tela_log("- Cópia falhou, e além disso, quando o sistema tentou atualizar situação para 'Abortada', isto também falhou")
             print_tela_log("- Tarefa está em situação inconsistente, como se estive executando, mas na realidade já foi abortada")
-            print_tela_log("- Será necessário abortar manualmente (comando *AT)")
+            print_tela_log("- Será necessário abortar manualmente (comando *AB)")
             print_falha_comunicacao()
             # Prossegue por gravidade, pois está em background e irá encerrar logo em seguida
 
@@ -1934,13 +2453,13 @@ def background_executar_copia(codigo_tarefa, caminho_origem, caminho_destino,
         print_tela_log("- Cópia da tarefa", codigo_tarefa,"foi concluída")
         print_tela_log("- Contudo, NÃO FOI POSSÍVEL possível atualizar situação para 'Sucesso'")
         print_tela_log("- Esta tarefa ficará em estado inconsistente, pois para o sistema ainda está em execução")
-        print_tela_log("- Após sanar o problema, utilize comando *cs para atualizar situação da tarefa")
+        print("- Após sanar o problema, utilize comando *cs para atualizar situação da tarefa")
         print_falha_comunicacao()
         sys.exit(0)
 
     # Tudo certo
-    print_tela_log("- Tarefa", codigo_tarefa, "finalizada com SUCESSO")
-    print_tela_log("- Utilize comando *SG para conferir a situação atual da tarefa")
+    print("- Tarefa", codigo_tarefa, "finalizada com SUCESSO")
+    print("- Utilize comando *SG para conferir a situação atual da tarefa")
     print_log("Fim da cópia em background para tarefa", codigo_tarefa)
     sys.exit(0)
 
@@ -2097,14 +2616,14 @@ def determinar_situacao_no_storage(tarefa):
     # --------------------------------------------------------------------
     (erros, avisos) = valida_pasta_relatorio_cellebrite(pasta=caminho_destino, explicar=True)
     if len(erros) > 0:
-        status = "- Na pasta de destino no storage estão faltando arquivos básicos."
+        status = "Na pasta de destino no storage estão faltando arquivos básicos."
         codigo_status = GEmAndamento
-        print(status)
+        print("-",status)
         return (codigo_status, status, {}, erros, avisos)
 
     # Ok, já tem todos os arquivos básicos
-    status = "- Pasta contém todos os arquivos básicos."
-    print(status)
+    status = "Pasta contém todos os arquivos básicos."
+    print("-",status)
 
     # Valida arquivo xml
     print("- Validando Relatório.XML. Isto pode demorar, dependendo do tamanho do arquivo. Aguarde...")
@@ -2117,7 +2636,7 @@ def determinar_situacao_no_storage(tarefa):
     if (not resultado):
         status = "Arquivo XML inconsistente"
         codigo_status = GAbortou
-        print(status)
+        print("-",status)
         return (codigo_status, status, {}, erros, avisos)
 
     # Exibe o resultado dos dados coletados para laudo
@@ -2143,6 +2662,20 @@ def _comparar_sistema_com_storage():
         return False
 
     codigo_tarefa=tarefa['codigo_tarefa']
+    codigo_situacao_setec3 = int(tarefa["codigo_situacao_tarefa"])
+
+    # Label para diferenciar mensagens de log
+    definir_label_log('*cs:'+codigo_tarefa)
+
+
+    # Se tarefa está sendo executada, não permite comparação
+    # -------------------------------------------
+    if codigo_situacao_setec3 == GEmAndamento:
+        # Tarefas com outras situações não são permitidas
+        print("- Esta tarefa está em execução. Desta forma, não é possível fazer a comparação de situação")
+        print("- Para efetuar a comparação, será primeiro necessário abortar a tarefa (*AB).")
+        print("- Comando cancelado.")
+        return False
 
     # Determina a situação da tarefa no storage
     # -----------------------------------------
@@ -2155,11 +2688,11 @@ def _comparar_sistema_com_storage():
 
     # Exibe situação no storage
     print()
-    print("- Situação observada no storage         : ", str(codigo_situacao_storage), "-", texto_status)
+    print("- Situação no SETEC3            : ", tarefa["codigo_situacao_tarefa"],"-", tarefa['descricao_situacao_tarefa'])
+    print("- Situação observada no storage : ", str(codigo_situacao_storage), "-", texto_status)
 
     # Compara situação do SETEC3 com situação do storage
     # --------------------------------------------------
-    codigo_situacao_setec3 = int(tarefa["codigo_situacao_tarefa"])
 
     # Se a situação é mesma, está tudo certo
     # --------------------------------------
@@ -2177,6 +2710,14 @@ def _comparar_sistema_com_storage():
         print("- Tarefa foi abortada sem ser concluída.")
         return
 
+    # Se no storage está em andamento (tem alguns arquivos)
+    # e no servidor está aguardando PCF, talvez tenha sido reinicida, tudo bem, faz sentido
+    if (    (codigo_situacao_storage == GEmAndamento)
+        and (codigo_situacao_setec3 == GAguardandoPCF)):
+        print()
+        print("- Situação observada na pasta de destino está coerente com a situação do servidor.")
+        print("- Possivelmente tarefa foi reiniciada.")
+        return
 
     # Se a situação no storage é menor que no setec3, tem alguma inconsistência...ou falha na verificação
     if (codigo_situacao_storage < codigo_situacao_setec3):
@@ -2191,12 +2732,11 @@ def _comparar_sistema_com_storage():
     print_atencao()
     print('- A situação da tarefa no SETEC3 não está coerente com a situação observada na pasta de destino do storage.')
     print('- Isto pode ocorrer caso tenha havido alguma falha no procedimento')
-    print('  de atualização da situação após a cópia no sapi_cellebrite, ou caso tenha sido feita uma cópia manual.')
-    print('- Em caso de dúvida, consulte o log sapi_log.txt.')
+    print('  de atualização da situação após a cópia no sapi_cellebrite.')
     print()
     print('- Caso você tenha certeza que os dados armazenados no servidor estão ok,')
     print('  basta efetuar a atualização do situação (respondendo S na próxima pergunta)')
-    print('- Caso contrário, refaça a cópia (comando *CR)')
+    print('- Em caso de dúvida, refaça a cópia (comando *CR)')
     print()
     atualizar = pergunta_sim_nao("< Atualizar SETEC3 com a situação observada no storage? ", default="n")
     if (not atualizar):
@@ -2273,8 +2813,6 @@ def exibir_situacao(comando=''):
         if int(t['codigo_situacao_tarefa']) == int(GEmAndamento) and t['status_ultimo'] is not None:
             situacao = t['status_ultimo']
 
-        # var_dump(i)
-
         # Calcula largura da última coluna, que é variável (item : Descrição)
         # Esta constantes de 60 é a soma de todos os campos e espaços antes do campo "Item : Descrição"
         lid = Glargura_tela - 58
@@ -2309,36 +2847,42 @@ def exibir_situacao(comando=''):
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-# @*el - Exibe conteúdo do arquivo de log
+# Exibe conteúdo do arquivo de log
 # ----------------------------------------------------------------------------------------------------------------------
-def exibir_log(filtro=""):
+def exibir_log(comando, filtro_base="", filtro_usuario="", limpar_tela=True):
 
-    # Filtro
-    filtro=filtro.strip()
+    # Filtros
+    filtro_base     =filtro_base.strip()
+    filtro_usuario  =filtro_usuario.strip()
 
     # Limpa tela e imprime cabeçalho do programa
     # --------------------------------------------------------------------------------
-    cls()
-    print_linha_cabecalho()
-    print("Arquivo de log: ", obter_nome_arquivo_log())
-    if filtro!="":
-        print("Contendo termo: ",filtro)
+    if limpar_tela:
+        cls()
+        print_linha_cabecalho()
+        print("Arquivo de log: ", obter_nome_arquivo_log())
+
     print_centralizado()
+
+    if filtro_usuario!= "":
+       print("Contendo termo: ", filtro_usuario)
+       print_centralizado()
 
     arquivo_log = obter_nome_arquivo_log()
 
-    # arquivo_log=Gparini.get('log',None)
-    # if arquivo_log is None:
-    #    arquivo_log="sapi_log.txt"
+    # Não tem arquivo de log
+    if (not os.path.isfile(arquivo_log)):
+        print("*** Arquivo de log vazio ***")
+        return
 
     with codecs.open(arquivo_log, 'r', "utf-8") as sapi_log:
         qtd=0
         for linha in sapi_log:
-            exibir=False
-            if filtro=="":
-                exibir=True
-            elif filtro.lower() in linha.lower():
-                exibir=True
+            exibir=True
+            if filtro_base!="" and filtro_base.lower() not in linha.lower():
+                exibir=False
+            if filtro_usuario!="" and filtro_usuario.lower() not in linha.lower():
+                exibir=False
 
             if exibir:
                 qtd=qtd+1
@@ -2346,10 +2890,10 @@ def exibir_log(filtro=""):
 
     sapi_log.close()
 
-    if filtro=="":
+    if filtro_usuario=="":
         print()
         print("- Dica: Para filtrar o log, forneça um string após comando.")
-        print("  Exemplo: '*EL acomp' exibe apenas mensagens de log que contém o termo 'acomp'")
+        print("  Exemplo: ",comando," erro => Lista apenas linhas que contém o termo 'erro'")
 
     return
 
@@ -2412,12 +2956,12 @@ def carregar_estado():
 # ----------------------------------------------------------------------
 # @*TT - Usuário seleciona a solicitação de exame
 # ----------------------------------------------------------------------
-def obter_memorando_tarefas():
-    console_executar_tratar_ctrc(funcao=_obter_memorando_tarefas)
+def obter_solicitacao_exame():
+    console_executar_tratar_ctrc(funcao=_obter_solicitacao_exame)
 
 # Carrega situação de arquivo
 # ----------------------------------------------------------------------
-def _obter_memorando_tarefas():
+def _obter_solicitacao_exame():
     # Irá atualizar a variáel global de tarefas
     global Gtarefas
 
@@ -2543,7 +3087,16 @@ def _obter_memorando_tarefas():
             # Continua no loop
             continue
 
-        # Tudo certo, interrompe loop
+        # Muda log para o arquivo com nome
+        partes=solicitacao["identificacao"].split('-')
+        nome_arquivo_log="log_sapi_cellebrite_"+partes[0]+"_"+solicitacao["codigo_documento_externo"]+".txt"
+        # Sanitiza, removendo e trocando caracteres especiais
+        nome_arquivo_log=nome_arquivo_log.replace('/','-')
+        nome_arquivo_log=nome_arquivo_log.replace(' ','')
+
+        definir_nome_arquivo_log(nome_arquivo_log)
+
+        # Tudo certo, interrompe loop e retorna
         return True
 
 
@@ -2665,7 +3218,7 @@ def finalizar_programa():
             print_tela_log("- Os processos relativos à tarefa", codigo_tarefa,"foram cancelados")
             print_tela_log("- Contudo, não foi possível atualizar a situação da tarefa ", codigo_tarefa, "para 'Abortada'")
             print_tela_log("- Tarefa", codigo_tarefa,"ficará em estado inconsistente, pois o servidor achará que ainda está rodando")
-            print("- Posteriormente será necessário abortá-la manualmente (comando *AT)")
+            print("- Posteriormente será necessário abortá-la manualmente (comando *AB)")
 
     # Para garantir, aguarda caso ainda tenha algum processo não finalizado...NÃO DEVERIA ACONTECER NUNCA
     # --------------------------------------------------------------------------------------------------------------
@@ -2721,6 +3274,10 @@ def exibir_situacao_repetir():
 
 def main():
 
+    #teste="-ABC"
+    #print(ajusta_texto_saida(teste))
+    #die('ponto3250')
+
     # Cabeçalho inicial do programa
     # ------------------------------------------------------------------------------------------------------------------
     print()
@@ -2739,8 +3296,9 @@ def main():
 
     # Inicialização de sapilib
     # -----------------------------------------------------------------------------------------------------------------
-    print_log('Iniciando ', Gprograma, ' - ', Gversao)
-    sapisrv_inicializar_ok(Gprograma, Gversao, auto_atualizar=True)
+    nome_arquivo_log = "log_sapi_cellebrite.txt"
+    sapisrv_inicializar_ok(Gprograma, Gversao, auto_atualizar=True, nome_arquivo_log=nome_arquivo_log)
+    print_log('Inicializado com sucesso', Gprograma, ' - ', Gversao)
 
     # Teste
     #atualizar_status_tarefa_andamento(465, 'bla, bla')
@@ -2755,7 +3313,7 @@ def main():
         refresh_tarefas()
     else:
         # Obtem lista de tarefas, solicitando o memorando
-        if obter_memorando_tarefas():
+        if obter_solicitacao_exame():
             if len(Gtarefas)==0:
                 # Se usuário interromper sem selecionar, finaliza
                 print("- Execução finalizada.")
@@ -2786,7 +3344,7 @@ def main():
             if finalizar_programa():
                 # Finaliza
                 print()
-                print_tela_log("- Finalizando por solicitação do usuário. Aguarde...")
+                print("- Finalizando por solicitação do usuário. Aguarde...")
                 break
             else:
                 # Continua recebendo comandos
@@ -2815,11 +3373,14 @@ def main():
         elif (comando == '*cs'):
             comparar_sistema_com_storage()
             continue
-        elif (comando == '*at'):
+        elif (comando == '*ab'):
             abortar_tarefa()
             continue
-        elif (comando == '*rt'):
+        elif (comando == '*ri'):
             reiniciar_tarefa()
+            continue
+        elif (comando == '*ex'):
+            excluir_tarefa()
             continue
 
         # Comandos gerais
@@ -2830,8 +3391,11 @@ def main():
         elif (comando == '*sgr'):
             exibir_situacao_repetir()
             continue
-        elif (comando == '*el'):
-            exibir_log(filtro=argumento)
+        elif (comando == '*lg'):
+            exibir_log(comando='*lg', filtro_base='', filtro_usuario=argumento)
+            continue
+        elif (comando == '*lo'):
+            exibir_log_tarefa(filtro_usuario=argumento)
             continue
         elif (comando == '*db'):
             if modo_debug():
@@ -2843,7 +3407,7 @@ def main():
             continue
         elif (comando == '*tt'):
             print_log("Usuário comandou troca de solicitação de exame (*TT)")
-            if obter_memorando_tarefas():
+            if obter_solicitacao_exame():
                 # Se trocou de memorando, Inicializa indice da tarefa corrente e exibe
                 Gicor = 1
                 salvar_estado()
@@ -2858,7 +3422,6 @@ def main():
 
     # Finaliza
     print()
-    print_log("sapi_cellebrite finalizado")
     print("FIM SAPI Cellebrite - Versão: ", Gversao)
 
 

@@ -54,7 +54,7 @@ sapi_cellebrite:
   *OK Tolerância a falha na atualização do status
   *OK Tratamento adequado no caso de não conseguir modificar o status
   *OK Log significativo.
-  * Comando ET, que exclui tarefa.
+  *OK Comando EX, que exclui tarefa.
   - Parsing de campos: pegar todos os modelos, selecionado pelo usuário, detectado, se houver mais do que um.
   - Permitir que o usuário descreva a inexquilidade (Lista com as mais comuns), que será atualizada no servidor.
   - Problema de cópia de relatório gigante do Fernando que deu erro (HD externo)
@@ -63,7 +63,17 @@ sapi_iped_executar_bat:
 - Está gerando ano_dia_mes.log (revisar....)
 
 sapi_iped
+1) Novo servidor de deployment
+Bug:
+* Está invocando perfil setecpr_ocr ou ocr, revisar, testar
+Novos conceitos:
 * Refactor: Utilizar paradigma do sapi_cellebrite
+* Mudar estrutura de log: geral (do programa) e por tarefa (assim que a tarefa é definida)
+* Quando uma tarefa for devolvida (volta para estado AguardandoProcessamento),
+  tem que excluir pasta antes...para ficar na situação original.
+  Se não for possível excluir a pasta, o estado tem que ficar como abortada
+  O ideal é primeiro colocar no estado abortada, e depois passar para o estado de AguardandoProcessamento.
+  Desta forma, fica bem registrado que houve um problema.
 * Revisar todas as chamadas para sapi_srv_chamar_programa:
   - Parâmetros nominados
   - abortar_insucesso=False
@@ -71,8 +81,12 @@ sapi_iped
   (talvez levar do sapi_cellebrite para o sapilib...vai ser utilizada em outros lugares)
   Levar também a de troca de status.
   - Mas no caso do sapi_iped, se não conseguir trocar situação irá ficar tentando, até conseguir, em loop.
-* Receber comando do servidor Web (exemplo: excluir)
-* Está invocando perfil setecpr_ocr ou ocr, revisar, testar
+* Receber comando do servidor Web de exclusão.
+  - Utilizar o mesmo paradigma dos agentes com interface, ou seja, fica lendo um comando que será passado
+    (ao invés de passar o comando pela linha de comando, vem via http)
+* Exclusão de tarefa parada:
+  - Neste caso será uma tarefa para ser executada, com o comando previamente setado.
+  - Ou seja, começa executando a tarefa, verifica que o comando é de exclusão e faz o que tem que fazer.
 * Na mensagem do hash, está aparecendo o texto listaArquivos.csv, quando deveria ser "Lista de Arquivos.csv" (Dante)
 * Quando for montar multicase, desprezar pastas que não possuam conteúdo (acho que já faz isto...)
 * Receber comando de exclusão de tarefa.
@@ -84,6 +98,7 @@ sapi_iped
 * Atualização de status final, se não tiver sucesso após algumas tentativas, coloca tarefa como abortada (para ser retomada adiante)
   e prossegue para a próxima.
 - Permitir executar mais de uma versão do IPED.
+- Quando terminar a execução de uma tarefa, fazer o upload do log da tarefa (teria utilidade?)
 - Nao processar o UFDR e o XML: Mover poara outra pasta, e depois retornar novamente para a pasta original
   O XML podia até elmininar no destino, para não ocupar espaço.
 

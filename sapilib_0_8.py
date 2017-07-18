@@ -94,6 +94,7 @@ GAguardandoProcessamento = 5
 GAbortou = 8
 GDespachadoParaAgente = 20
 GPastaDestinoCriada = 30
+GEmExclusao = 35
 GEmAndamento = 40
 GIpedExecutando = 60
 GIpedFinalizado = 62
@@ -127,8 +128,6 @@ Gconf_ambiente['prod'] = {
     'servidor_sistema': 'setec3'
 }
 
-# Storages nos quais foi feita conexão para cópia de dados
-Gdic_storage=dict()
 
 
 # Definido durante inicializacao
@@ -136,7 +135,6 @@ Gdic_storage=dict()
 Ginicializado = False
 Gparametros_usuario_ja_processado = False
 Gparini = dict()  # Parâmetros de inicialização
-
 
 # Controle de mensagens/log
 GlogDual = False
@@ -146,6 +144,13 @@ GlogDual = False
 Ghttp_timeout_padrao=60
 # Tempo de espera corrente
 Ghttp_timeout_corrente=copy.copy(Ghttp_timeout_padrao)
+
+# Variáveis globais alteradas durante a execução do programa
+# Serão reapassada para processos filhos
+# -------------------------------------------------------
+# Storages nos quais foi feita conexão para cópia de dados
+Gdic_storage=dict()
+
 
 # =====================================================================================================================
 # Funções de ALTO NÍVEL relacionadas com acesso ao servidor (sapisrv_*)
@@ -182,6 +187,35 @@ def desligar_modo_debug():
 def debug(*arg):
     if modo_debug():
         print_log("DEBUG:", *arg)
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Comunicação entre processos
+# ----------------------------------------------------------------------------------------------------------------------
+# Diferentement do fork, um subprocesso do python não herda nenhum conteúdo de variáveis no instante de criação
+# do novo processo. O novo processo nasce limpo, como se fosse um programa que iniciou a execução
+# Logo, para pode passar alguns dados de estado da sapilib para o processo filho, é necessário fazer isto explicitamente
+
+# Fornece dados que serão passados para processo filho
+# -----------------------------------------------------
+def obter_dados_para_processo_filho():
+
+    # Monta um estrutura com dados que serão repassados para o processo filho
+    # Desta forma, pai e filhos compartilham o estado inicial
+
+    r = dict()
+    r['Gdic_storage']=Gdic_storage
+
+    return r
+
+#
+def restaura_dados_no_processo_filho(r):
+
+    global Gdic_storage
+
+    Gdic_storage=r['Gdic_storage']
+
+    return
+
 
 # Parâmetros de configuração da comunicação http
 # ---------------------------------------------------------------------------
@@ -377,9 +411,9 @@ def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambie
     if nome_arquivo_log is not None:
         Gparini['log']=nome_arquivo_log
 
-    # Label do processo, que será utilizado para rotular as linhas de log
+    # Label do processo será utilizado para rotular as linhas de log
     if label_processo is not None:
-        Gparini['label_processo']=label_processo
+        Gparini['label_log']=label_processo
 
     # Pasta de execução do programa
     pasta_execucao=os.path.abspath(os.path.dirname(sys.argv[0]))
@@ -425,7 +459,7 @@ def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambie
 
     # Inicializado
     Ginicializado = True
-    print_log("Inicializado SAPILIB Agente=", _obter_parini('nome_agente'),
+    debug("Inicializado SAPILIB Agente=", _obter_parini('nome_agente'),
               " Ambiente=", _obter_parini('nome_ambiente'),
               " Servidor=", _obter_parini('servidor_ip'),
               " arquivo_log=", obter_nome_arquivo_log())
@@ -548,7 +582,7 @@ def sapisrv_inicializar(*args, **kwargs):
         #print("Assegure-se de estar utilizando uma máquina homologada")
         raise SapiExceptionAgenteDesautorizado
 
-    print_log("sapilib iniciada")
+    debug("sapilib iniciada")
 
 
 # Reporta ao servidor um erro ocorrido no cliente
@@ -789,6 +823,32 @@ def sapisrv_troca_situacao_tarefa_obrigatorio(codigo_tarefa, codigo_situacao_tar
 
 
 
+# Exclui tarefa
+# Se ocorrer um erro, repassa para o chamador decidir
+def sapisrv_excluir_tarefa(codigo_tarefa):
+
+    # Parâmetros
+    param = {'codigo_tarefa': codigo_tarefa
+             }
+
+    # Invoca sapi_srv
+    (sucesso, msg_erro, resultado) = sapisrv_chamar_programa(
+        programa="sapisrv_excluir_tarefa.php",
+        parametros=param
+    )
+
+    # Se der erro, registra no log e gera exceção, para ser tratado pelo chamador
+    if not sucesso:
+        print_log("Tarefa ", codigo_tarefa, ": Não foi possível excluir no SETEC3: ", msg_erro)
+        raise SapiExceptionGeral(msg_erro)
+
+    # Tudo certo
+    print_log("Tarefa ", codigo_tarefa, " excluída com sucesso")
+
+    return True
+
+
+
 
 
 # Atualiza status da tarefa do sapisrv
@@ -916,7 +976,7 @@ class SapiExceptionGeral(Exception):
 # ----------------------------------------------------------------------
 def testa_comunicacao_servidor_sapi(url_base):
     url = url_base + "sapisrv_ping.php"
-    print_log("Testando conexao com servidor SAPI em " + url)
+    debug("Testando conexao com servidor SAPI em " + url)
 
     try:
         f = urllib.request.urlopen(url, timeout=Ghttp_timeout_corrente)
@@ -935,7 +995,7 @@ def testa_comunicacao_servidor_sapi(url_base):
         return False
 
     # Tudo bem
-    print_log("Servidor respondeu")
+    debug("Servidor respondeu")
     return True
 
 
@@ -1018,7 +1078,7 @@ def _sapisrv_chamar_programa_get(programa, parametros, registrar_log=False):
     # Registra em log
     if modo_debug() or registrar_log:
         # Registra apenas no log
-        print_log(url)
+        debug(url)
 
 
     #retorno = _sapisrv_get_sucesso(url) # Isto aqui estava errado...chamando sucesso, mas tratando erro...sem sentido
@@ -1028,7 +1088,7 @@ def _sapisrv_chamar_programa_get(programa, parametros, registrar_log=False):
 
     if modo_debug() or registrar_log:
         # Registra apenas no log
-        print_log("Tempo de resposta: ",elapsed_time)
+        debug("Tempo de resposta: ",elapsed_time)
 
 
     # Ajusta sucesso para booleano
@@ -1289,22 +1349,48 @@ def obter_nome_arquivo_log():
     if arquivo_log is None:
         # Default no formato:
         # sapi_log_AAAA-MM-DD_HH-MM-SS_ssssss.txt, onde ssssss são os milisegundos
-        arquivo_log="sapi_log_"+obter_timestamp(remover_milisegundo=False)+".txt"
+        arquivo_log="log_sapi_"+obter_timestamp(remover_milisegundo=False)+".txt"
         Gparini['log']=arquivo_log
 
     return arquivo_log
+
+
+# Nome do arquivo de log
+# ----------------------------------------------------------------------
+def definir_nome_arquivo_log(nome_arquivo_log):
+    global Gparini
+
+    debug("Mudando log para", nome_arquivo_log)
+
+    Gparini['log']=nome_arquivo_log
+
+
+# Definir label que será utilizando no arquivo de log
+# ----------------------------------------------------------------------
+def definir_label_log(label_log):
+    global Gparini
+
+    debug("label_log alterado para ", label_log)
+    Gparini['label_log']=label_log
+
+
+
 
 # Efetua ajustes no texto, para ficar adequado a log e registro de status
 def ajusta_texto_saida(s):
 
     # Se começar ou terminar por "-" ou " " ou qualquer combinação destes, remove, pois no log o texto é direto
     # Isto serve para que mensagens que são para tela, que tem formato "- xxxx", fiquem no log apenas como "xxxx"
+    s=s.strip(" ")
     s=s.strip("-")
     s=s.strip(" ")
 
     for caminho_storage in Gdic_storage:
         nome_storage=Gdic_storage[caminho_storage]
         s=s.replace(caminho_storage, nome_storage)
+
+    # Para teste, coloca uma marcador...só para saber que está passando por aqui
+    #s=s+" (1)"
 
     return s
 
@@ -1319,13 +1405,13 @@ def _print_log_apenas(*arg):
     # Código para python2. Por enquanto desativado
     # linha="["+str(pid)+"] : "+hora+" : "+converte_unicode(*arg)
 
-    # Adiciona rotulo, utilizado para facilitar a separação de registros dos processos filhos
-    rotulo=''
-    label_processo=Gparini.get('label_processo',None)
-    if label_processo is not None:
-        rotulo="("+label_processo+ ") "
+    # Adiciona rotulo geral log, utilizado para separar atividades por tarefa, por exemplo
+    rotulo_log=''
+    label_log=Gparini.get('label_log',None)
+    if label_log is not None:
+        rotulo_log="["+label_log+ "] "
 
-    linha = "[" + str(pid) + "] : " + hora + " : " + rotulo + concatena_args(*arg)
+    linha = "[" + str(pid) + "] : " + hora + " : " + rotulo_log + concatena_args(*arg)
 
     linha=ajusta_texto_saida(linha)
 
@@ -1720,10 +1806,12 @@ def acesso_storage_windows(conf_storage, utilizar_ip=True):
             " " + conf_storage["senha"]
         )
 
-        debug("Conectando com storage")
+        #debug("Conectando com storage")
         #debug(comando)
 
-        print("- Efetuando conexão ao storage de destino. Aguarde...")
+        if not modo_background():
+            print("- Efetuando conexão ao storage de destino. Aguarde...")
+
         subprocess.call(comando, shell=True)
 
         # Guarda o ponto de montagem, o qual será utilizado posteriormente para desmontar
@@ -1765,18 +1853,18 @@ def  desconectar_storage_windows():
             "net use " + caminho_storage + " /del 1>nul 2>nul"
         )
 
-        #print("Desconectando do storage")
-        #print(comando)
+        #debug("Desconectando do storage")
+        #debug(comando)
         subprocess.call(comando, shell=True)
 
         # Verifica se montou
         if not os.path.exists(caminho_storage):
             # Ok, conseguiu desconectar
-            print_log("Desconectado do storage ", nome_storage)
+            debug("Desconectado do storage ", nome_storage)
         else:
             # Registra em log que não foi possível, mas não tem mais o que fazer,
             # pois já está saindo do programa
-            print_log("Não foi possível desconectar do storage ", nome_storage)
+            debug("Não foi possível desconectar do storage ", nome_storage)
 
 
 # Controle de concorrência

@@ -1,10 +1,12 @@
 
 Sapi_cellebrite 1.8.1:
 - Opção para renomear arquivo xml_em_copia (caso cópia tenha sido interrompida)
-- Comando *AT: Abortar tarefa
-- Comando *EL: Exibe log
+- Comando *AB: Abortar tarefa
+- Comando *RI: Reinicia tarefa
+- Comando *EX: Exclui tarefa
+- Comando *LO: Exibe log da tarefa
 - Comando *DG: Incluir mensagens de debug no log
-- Comando *LG: Exibição contínua (loop) da situação com refresh.
+- Comando *SGR: Exibição contínua (loop) da situação com refresh.
 - Cópia exclusivamente em background, com feedback contínuo.
 - Melhorias nas mensagens e interface para deixar mais intuitivo
 - Verificação de cópia através de checagem de tamanho total e quantidade de arquivos copiados.

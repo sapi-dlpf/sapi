@@ -532,7 +532,7 @@ def executa_iped(codigo_tarefa, comando, caminho_destino, caminho_log_iped, cami
 
     if deu_erro:
         # Aborta tarefa
-        erro = "Chamada de IPED falhou (retornou exit code de erro). Analise arquivo de resultado "
+        erro = "Chamada de IPED falhou (retornou exit code de erro). Analise arquivo de resultado. Tarefa devolvida para reiniciar processamento."
         if erro_exception!="":
             erro = erro + ": " + erro_exception
         # Tolerância a Falhas: Permite que outro agente execute
