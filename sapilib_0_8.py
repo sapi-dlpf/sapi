@@ -207,14 +207,28 @@ def obter_dados_para_processo_filho():
 
     return r
 
-#
+# Restaura dados gllobias no processo filho
+# -----------------------------------------------------
 def restaura_dados_no_processo_filho(r):
-
     global Gdic_storage
 
     Gdic_storage=r['Gdic_storage']
-
     return
+
+
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Dados para deployment
+# ----------------------------------------------------------------------------------------------------------------------
+def obter_info_deployment():
+
+    r = dict()
+    r["storage_deployment"]=Gparini.get("storage_deployment",None)
+    r["pasta_deployment_origem"]=Gparini.get("pasta_deployment_origem", None)
+
+    return r
+
 
 
 # Parâmetros de configuração da comunicação http
@@ -487,6 +501,7 @@ def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambie
 
     # Armazena servidor de deployment
     Gparini["storage_deployment"] = resultado.get('storage_deployment', None)
+    Gparini["pasta_deployment_origem"] = resultado.get('pasta_deployment_origem', None)
 
     # Trata acesso negado
     if (resultado['acesso_concedido']==0):
