@@ -152,6 +152,12 @@ Ghttp_timeout_corrente=copy.copy(Ghttp_timeout_padrao)
 Gdic_storage=dict()
 
 
+# Configuração de Tela
+# Todo: transferir para o sapicli
+#-------------------------------------
+Glargura_tela = 129
+
+
 # =====================================================================================================================
 # Funções de ALTO NÍVEL relacionadas com acesso ao servidor (sapisrv_*)
 #
@@ -161,6 +167,41 @@ Gdic_storage=dict()
 # Caso novos parâmetros sejam incluídos, serão opcionais.
 # =====================================================================================================================
 
+# ----------------------------------------------------------------------------------------------------------------------
+# Parâmetros de configuração
+# ----------------------------------------------------------------------------------------------------------------------
+def set_parini(chave, valor):
+    global Gparini
+    Gparini[chave] = valor
+    # Retorna o próprio valor, para ser utilizado na sequencia
+    return valor
+
+def get_parini(chave, default=None):
+    global Gparini
+
+    valor=Gparini.get(chave,None)
+    if valor is None:
+        valor=default
+
+    return valor
+
+# Recupera valor do dicionário de ambiente, neste caso um valor obrigatório
+# ----------------------------------------------------------------------------------------------------------------------
+def _obter_parini_obrigatorio(campo):
+    # Assegura que foi inicializado corretamente
+    assegura_inicializacao()
+
+    valor = Gparini.get(campo, None)
+
+    if valor is None:
+        erro_fatal("_obter_parini('" + str(campo) + "') => Parâmetro inválido. Revise código.")
+
+    return str(valor)
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Modos de trabalho
+# ----------------------------------------------------------------------------------------------------------------------
 # Liga log dual, fazendo com que todas as mensagens de log sejam exibidas também em tela
 # Isto faz com que qualquer print_log (e não apenas o print_log_dual) exiba a saída em tela,
 # além de escrever no log
@@ -175,18 +216,27 @@ def desligar_log_dual():
     GlogDual = False
 
 def ligar_modo_debug():
-    global Gparini
-    Gparini['debug'] = True
+    set_parini('debug', True)
     print_log("Modo debug foi ligado")
 
 def desligar_modo_debug():
-    global Gparini
-    Gparini['debug'] = False
+    set_parini('debug', False)
     print_log("Modo debug foi desligado")
 
+
+# Se estiver em modo debug, registra no log
 def debug(*arg):
     if modo_debug():
         print_log("DEBUG:", *arg)
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Funções relacionadas com arquivos
+# ----------------------------------------------------------------------------------------------------------------------
+# Recupera a data de modificação de um arquivo
+def obter_arquivo_data_modificacao(filename):
+    t = os.path.getmtime(filename)
+    return datetime.datetime.fromtimestamp(t)
+
 
 # ----------------------------------------------------------------------------------------------------------------------
 # Comunicação entre processos
@@ -224,8 +274,8 @@ def restaura_dados_no_processo_filho(r):
 def obter_info_deployment():
 
     r = dict()
-    r["storage_deployment"]=Gparini.get("storage_deployment",None)
-    r["pasta_deployment_origem"]=Gparini.get("pasta_deployment_origem", None)
+    r["storage_deployment"]=get_parini("storage_deployment")
+    r["pasta_deployment_origem"]=get_parini("pasta_deployment_origem")
 
     return r
 
@@ -247,7 +297,6 @@ def reset_http_timeout():
 def sapi_processar_parametros_usuario():
 
     # Atualiza estas globais
-    global Gparini
     global Gparametros_usuario_ja_processado
 
     # Só processa os parâmetros do usuário uma vez
@@ -261,27 +310,31 @@ def sapi_processar_parametros_usuario():
                           action="store_true", dest="debug", help="Informações adicionais para debug")
         parser.add_option("--background",
                           action="store_true", dest="background", help="Mensagens serão gravadas apenas em log")
-        parser.add_option("--log",
-                          action="store", dest="log", help="Arquivo para registro de log")
+        parser.add_option("--logfile",
+                          action="store", dest="logfile", help="Arquivo para registro de log")
+        parser.add_option("--logdir",
+                          action="store", dest="logdir", help="Pasta onde será criado o arquivo de log. Pasta deve existir.")
+
         (options, args) = parser.parse_args()
         # print(options)
-        Gparini['background'] = False
+        set_parini('background',False)
+
         if options.background:
-            Gparini['background'] = True
+            set_parini('background', True)
 
-        if options.debug:
-            ligar_modo_debug()
+        if options.logdir:
+            set_parini('logdir',options.logdir)
 
-        if options.log:
-            Gparini['log'] = options.log
+        if options.logfile:
+            set_parini('logfile', options.logfile)
 
         # Feedback dos parâmetros selecionados
         if options.background:
             print_log(
                 "--background: Entrando em modo background. Saída normal será armazenada apenas em log. Erros fatais poderão ser exibidos na saída padrão.")
+
         if options.debug:
-            Gparini['debug'] = True
-            print_log("--debug: Entrando em modo de debug (--debug)")
+            ligar_modo_debug()
 
     Gparametros_usuario_ja_processado = True
 
@@ -316,7 +369,7 @@ def atualizar_programa(nome_programa):
         return False
 
     # Pasta em que será feita a atualização
-    pasta_destino=Gparini['pasta_execucao']
+    pasta_destino=get_parini('pasta_execucao')
     #Apenas para teste, para não sobrepor o programa na pasta de desenvolvimento
     if ambiente_desenvolvimento():
         # No ambiente de desenvovlimento, não faz a atualização na pasta de execução, pois isto poderia sobrepor o programa
@@ -387,7 +440,6 @@ def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambie
 
     # Atualiza estas globais
     global Ginicializado
-    global Gparini
 
     #print("ponto171")
     #var_dump(parser)
@@ -405,13 +457,13 @@ def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambie
     if nome_programa is None:
         # obrigatório
         erro_fatal("Nome do programa não informado")
-    Gparini['programa'] = nome_programa
+    set_parini('programa', nome_programa)
 
     # Vesão do programa
     if versao is None:
         # Obrigatório
         erro_fatal("Versão não informada")
-    Gparini['programa_versao'] = versao
+    set_parini('programa_versao', versao)
 
     # Nome do Agente
     if nome_agente is None:
@@ -419,26 +471,27 @@ def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambie
         nome_agente = socket.gethostbyaddr(socket.gethostname())[0]
     # Sanitiza
     nome_agente=nome_agente.replace(".dpfsrpr","")
-    Gparini['nome_agente'] = nome_agente
+    set_parini('nome_agente', nome_agente)
 
     # Nome do arquivo de log
     if nome_arquivo_log is not None:
-        Gparini['log']=nome_arquivo_log
+        set_parini('log', nome_arquivo_log)
 
     # Label do processo será utilizado para rotular as linhas de log
     if label_processo is not None:
-        Gparini['label_log']=label_processo
+        set_parini('label_log', label_processo)
 
     # Pasta de execução do programa
     pasta_execucao=os.path.abspath(os.path.dirname(sys.argv[0]))
-    Gparini['pasta_execucao'] = pasta_execucao
+    set_parini('pasta_execucao', pasta_execucao)
 
     # Ambiente
     if ambiente is None:
         # Verifica se na pasta que está sendo executado existe arquivo desenvolvimento_nao_excluir.txt
         # Se existir, aceita isto como um sinalizador que está rodando em ambiente de desenvolvimento
-        arquivo_desenvolvimento = Gparini['pasta_execucao']+"/"+'desenvolvimento_nao_excluir.txt'
+        arquivo_desenvolvimento = os.path.join(pasta_execucao,'desenvolvimento_nao_excluir.txt')
         if os.path.isfile(arquivo_desenvolvimento):
+            print_log("Detectado existência de arquivo que indica que está em ambiente de desenvolvimento")
             ambiente = 'desenv'
 
     if ambiente is None:
@@ -454,16 +507,16 @@ def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambie
                    '/' + amb['servidor_sistema'] + '/'
         conectou = testa_comunicacao_servidor_sapi(url_base)
         if conectou:
-            Gparini['ambiente'] = ambiente
-            Gparini['nome_ambiente'] = amb['nome_ambiente']
+            set_parini('ambiente', ambiente)
+            set_parini('nome_ambiente', amb['nome_ambiente'])
             # Servidor
-            Gparini['servidor_protocolo'] = amb['servidor_protocolo']
-            Gparini['servidor_ip'] = ip
-            Gparini['servidor_porta'] = amb['servidor_porta']
-            Gparini['servidor_sistema'] = amb['servidor_sistema']
-            Gparini['url_base'] = url_base
+            set_parini('servidor_protocolo', amb['servidor_protocolo'])
+            set_parini('servidor_ip', ip)
+            set_parini('servidor_porta', amb['servidor_porta'])
+            set_parini('servidor_sistema', amb['servidor_sistema'])
+            set_parini('url_base', url_base)
             # Como token, por equanto será utilizado um valor fixo
-            Gparini['servidor_token'] = 'token_fixo_v0_7'
+            set_parini('servidor_token', 'token_fixo_v0_7')
             # ok
             break
 
@@ -473,14 +526,16 @@ def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambie
 
     # Inicializado
     Ginicializado = True
-    debug("Inicializado SAPILIB Agente=", _obter_parini('nome_agente'),
-              " Ambiente=", _obter_parini('nome_ambiente'),
-              " Servidor=", _obter_parini('servidor_ip'),
+    obter_nome_arquivo_log(resetar=True)
+
+
+    debug("Inicializado SAPILIB Agente=", _obter_parini_obrigatorio('nome_agente'),
+              " Ambiente=", _obter_parini_obrigatorio('nome_ambiente'),
+              " Servidor=", _obter_parini_obrigatorio('servidor_ip'),
               " arquivo_log=", obter_nome_arquivo_log())
 
     # Verifica se versão do programa está habilitada a rodar, através de chamada ao servidor
     # Todo: Implementar verificações no servidor (agente, programa/versão)
-    # programa_habilitado(Gparini['nome_programa'], Gparini['versao'])
     # simulação de erros:
     # raise SapiExceptionAgenteDesautorizado("Máquina com ip 10.41.58.58 não autorizada para executar tal programa")
     # raise SapiExceptionProgramaDesautorizado("Este programa xxxx na versão kkkk não está autorizado")
@@ -500,8 +555,8 @@ def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambie
         raise SapiExceptionProgramaDesautorizado('Não foi possível concluir solicitação de acesso')
 
     # Armazena servidor de deployment
-    Gparini["storage_deployment"] = resultado.get('storage_deployment', None)
-    Gparini["pasta_deployment_origem"] = resultado.get('pasta_deployment_origem', None)
+    set_parini("storage_deployment", resultado.get('storage_deployment', None))
+    set_parini("pasta_deployment_origem", resultado.get('pasta_deployment_origem', None))
 
     # Trata acesso negado
     if (resultado['acesso_concedido']==0):
@@ -904,10 +959,10 @@ def sapisrv_chamar_programa(programa, parametros, abortar_insucesso=False, regis
     # Adiciona o token aos parâmetros
     # Por equanto, vamos utilizar como token a versão da sapilib
     # Posteriormente, quando houver validação do software, substituir por algo mais elaborado
-    parametros['execucao_nome_agente'] = _obter_parini('nome_agente')
-    parametros['execucao_programa'] = _obter_parini('programa')
-    parametros['execucao_programa_versao'] = _obter_parini('programa_versao')
-    parametros['token'] = _obter_parini('servidor_token')
+    parametros['execucao_nome_agente'] = _obter_parini_obrigatorio('nome_agente')
+    parametros['execucao_programa'] = _obter_parini_obrigatorio('programa')
+    parametros['execucao_programa_versao'] = _obter_parini_obrigatorio('programa_versao')
+    parametros['token'] = _obter_parini_obrigatorio('servidor_token')
 
     try:
         if metodo == 'get':
@@ -944,7 +999,7 @@ def sapisrv_chamar_programa_sucesso_ok(programa, parametros, registrar_log=False
 # Retorna o nome do ambiente de execução
 # ----------------------------------------------------------------------------------------------------------------------
 def obter_ambiente():
-    return _obter_parini('nome_ambiente')
+    return _obter_parini_obrigatorio('nome_ambiente')
 
 
 def ambiente_desenvolvimento():
@@ -1018,25 +1073,13 @@ def testa_comunicacao_servidor_sapi(url_base):
 # ----------------------------------------------------------------------------------------------------------------------
 def assegura_inicializacao():
     if not Ginicializado:
-        erro_fatal("Faltou invocar função sapisrv_inicializar. Revise seu código")
+        erro_fatal("[1075]: Faltou invocar função sapisrv_inicializar. Revise seu código")
         os._exit(1)
 
     # Tudo certo
     return
 
 
-# Recupera valor do dicionário de ambiente
-# ----------------------------------------------------------------------------------------------------------------------
-def _obter_parini(campo):
-    # Assegura que foi inicializado corretamente
-    assegura_inicializacao()
-
-    valor = Gparini.get(campo, None)
-
-    if valor is None:
-        erro_fatal("_obter_parini('" + str(campo) + "') => Parâmetro inválido. Revise código.")
-
-    return str(valor)
 
 
 # Processa resultado de uma chamada ao sapi_srv
@@ -1088,7 +1131,7 @@ def processar_resultado_ok(resultado, referencia=""):
 def _sapisrv_chamar_programa_get(programa, parametros, registrar_log=False):
     # Monta URL
     parametros_formatados = urllib.parse.urlencode(parametros)
-    url = _obter_parini('url_base') + programa + "?" + parametros_formatados
+    url = _obter_parini_obrigatorio('url_base') + programa + "?" + parametros_formatados
 
     # Registra em log
     if modo_debug() or registrar_log:
@@ -1233,24 +1276,24 @@ def _post(programa, parametros):
     parametros_formatados = urllib.parse.urlencode(parametros)
 
     # Efetua conexão com servidor
-    protocolo=_obter_parini('servidor_protocolo')
+    protocolo=_obter_parini_obrigatorio('servidor_protocolo')
     if protocolo=='https':
         # HTTPS
         conn = http.client.HTTPSConnection(
-            _obter_parini('servidor_ip'),
-            port=_obter_parini('servidor_porta'),
+            _obter_parini_obrigatorio('servidor_ip'),
+            port=_obter_parini_obrigatorio('servidor_porta'),
             timeout=Ghttp_timeout_corrente)
     else:
         # HTTP simples
         conn = http.client.HTTPConnection(
-            _obter_parini('servidor_ip'),
-            port=_obter_parini('servidor_porta'),
+            _obter_parini_obrigatorio('servidor_ip'),
+            port=_obter_parini_obrigatorio('servidor_porta'),
             timeout = Ghttp_timeout_corrente)
 
     # Parâmetros para POST
     headers = {"Content-type": "application/x-www-form-urlencoded",
                "Accept": "text/plain"}
-    url_parcial = "/" + _obter_parini('servidor_sistema') + "/" + programa
+    url_parcial = "/" + _obter_parini_obrigatorio('servidor_sistema') + "/" + programa
 
     # Envia POST
     conn.request("POST", url_parcial, parametros_formatados, headers)
@@ -1269,7 +1312,13 @@ def _post(programa, parametros):
 def erro_fatal(*args):
     sys.stdout.write("- Sapi Erro Fatal: ")
     print(*args)
-    print("- Para maiores informações, consulte o arquivo de log")
+    print("=================================================================")
+    print("Segue pilha para orientação. Atenção: NÃO se trata de exception")
+    print("=================================================================")
+    traceback.print_stack()
+    print("=================================================================")
+    #trc_string = traceback.format_exc()
+    #print(trc_string)
     os._exit(1)
 
 
@@ -1311,6 +1360,45 @@ def print_hex(s):
         r = r + hex(ord(x)) + ":"
     print(r)
 
+# Utilizado para formatar impressões na tela como formulário, com uma largura fixa
+# campo1    : xxxx
+# Campo 25  : yyyyy
+def print_formulario(label="", largura_label=0, valor="", truncar=False):
+
+    global Gprint_formulario_ultima_largura_label
+
+    # Converte tudo para string
+    label=str(label)
+    valor=str(valor)
+
+    if largura_label==0:
+        # Se não foi definido a largura
+        if Gprint_formulario_ultima_largura_label is not None:
+            # Pega a última largura, se houver
+            largura_label=Gprint_formulario_ultima_largura_label
+        else:
+            # Caso contrário, considera a largura máxima para não truncar o campo
+            largura_label=len(label)
+    else:
+        Gprint_formulario_ultima_largura_label=largura_label
+
+    # Trunca campo, se ultrapassar tamanho máximo
+    if truncar:
+        if len(label)>largura_label:
+            label=label[0:largura_label-3]+"..."
+
+    largura_valor=Glargura_tela-largura_label-2
+
+    separador=": "
+    if label=="":
+        separador=""
+
+    string_formatacao = "%-" + str(largura_label)+ "s" + \
+                        "%2s" + \
+                        "%-" + str(largura_valor)+ "s"
+
+    print(string_formatacao % (label,separador,valor))
+
 
 # Substitui o convert_unicode no python3, que já é unicode nativo
 # Converte todos os argumentos para string e concatena
@@ -1333,11 +1421,11 @@ def concatena_args(*arg):
 # Neste modo, não exibe a saída regular na console (stdout)
 # Apenas em situações críticas (programa abortado) o resultado sairá na console (stdout ou stderr)
 def modo_background():
-    background=Gparini.get('background', False)
+    background=get_parini('background', False)
     return background
 
 def modo_debug():
-    debug=Gparini.get('debug', False)
+    debug=get_parini('debug', False)
     return debug
 
 
@@ -1356,39 +1444,62 @@ def obter_timestamp(remover_milisegundo=True):
     return ts
 
 
-# Nome do arquivo de log
-# ----------------------------------------------------------------------
-def obter_nome_arquivo_log():
-    global Gparini
-    arquivo_log=Gparini.get('log',None)
-    if arquivo_log is None:
-        # Default no formato:
-        # sapi_log_AAAA-MM-DD_HH-MM-SS_ssssss.txt, onde ssssss são os milisegundos
-        arquivo_log="log_sapi_"+obter_timestamp(remover_milisegundo=False)+".txt"
-        Gparini['log']=arquivo_log
-
-    return arquivo_log
-
+# ----------------------------------------------------------------------------------------------------------------------
+# Funções relacionadas com log
+# ----------------------------------------------------------------------------------------------------------------------
 
 # Nome do arquivo de log
+# resestar=True: Remonta o nome do arquivo de log, com os parâmetros vigentes
+# ----------------------------------------------------------------------------
+def obter_nome_arquivo_log(resetar=False):
+
+    # Se já está definido, retorna
+    # exceto se o parâmetro resetar=True. Neste caso irá remontar o nome do arquivo de log
+    if get_parini('log') is not None and not resetar:
+        return get_parini('log')
+
+    # Determina nome/caminho para arquivo de log
+    # ------------------------------------------
+
+    # Usuário forneceu parâmetro com o caminho completo para o arquivo de log
+    logfile=get_parini('logfile')
+    if logfile is not None:
+        return set_parini('log', logfile)
+
+    # Default para nome de arquivo de log
+    # log_XXXXX_AAAA-MM-DD_HH-MM-SS_ssssss.txt, onde:
+    # xxxx: Nome do programa
+    # ssssss: Milisegundos
+    programa=get_parini(chave='programa',default='sapi')
+    nome_arquivo_default="log_" + programa + "_" + obter_timestamp(remover_milisegundo=False) + ".txt"
+
+    # Usuário forneceu a pasta onde deve ser criado o arquivo de log
+    logdir=get_parini('logdir')
+    if logdir is not None:
+        # Verifica se pasta existe
+        if not os.path.isdir(logdir):
+            erro_fatal("--logdir ",logdir," : Pasta inexistente. Crie primeiro a pasta")
+        # Será criado arquivo com nome padrão na pasta indicada
+        return set_parini('log', os.path.join(logdir, nome_arquivo_default))
+
+    # Usuário não especificou pasta de log e nem caminho para o arquivo
+    # Desta forma, o log será gravado na pasta default, com nome default
+    return set_parini('log', nome_arquivo_default)
+
+# Força a mudança para um nome de arquivo de log arbitrário
 # ----------------------------------------------------------------------
 def definir_nome_arquivo_log(nome_arquivo_log):
-    global Gparini
 
-    debug("Mudando log para", nome_arquivo_log)
-
-    Gparini['log']=nome_arquivo_log
+    print_log("Mudando nome do arquivo de log. Log continua em: ", nome_arquivo_log)
+    set_parini('log', nome_arquivo_log)
 
 
 # Definir label que será utilizando no arquivo de log
 # ----------------------------------------------------------------------
 def definir_label_log(label_log):
-    global Gparini
 
+    set_parini('label_log', label_log)
     debug("label_log alterado para ", label_log)
-    Gparini['label_log']=label_log
-
-
 
 
 # Efetua ajustes no texto, para ficar adequado a log e registro de status
@@ -1422,7 +1533,7 @@ def _print_log_apenas(*arg):
 
     # Adiciona rotulo geral log, utilizado para separar atividades por tarefa, por exemplo
     rotulo_log=''
-    label_log=Gparini.get('label_log',None)
+    label_log=get_parini('label_log')
     if label_log is not None:
         rotulo_log="["+label_log+ "] "
 
@@ -1797,14 +1908,14 @@ def acesso_storage_windows(conf_storage, utilizar_ip=True):
 
     ponto_montagem = caminho_storage + "\\"
 
-    debug("Verificando acesso ao storage: ",ponto_montagem)
+    debug("Verificando acesso ao storage: ",caminho_storage_netbios)
     arquivo_controle = ponto_montagem + 'storage_sapi_nao_excluir.txt'
 
     # Verifica se storage já está montado
     # -----------------------------------
     montar=True
     if os.path.exists(caminho_storage):
-        debug("Storage já estava montado em", caminho_storage)
+        debug("Storage já estava montado em", caminho_storage_netbios)
         montar=False
 
     # Montagem do storage
@@ -1830,27 +1941,27 @@ def acesso_storage_windows(conf_storage, utilizar_ip=True):
         subprocess.call(comando, shell=True)
 
         # Guarda o ponto de montagem, o qual será utilizado posteriormente para desmontar
-        debug("Storage foi montado em ", caminho_storage)
+        debug("Storage foi montado em ", caminho_storage_netbios)
 
     # Verifica se montou corretamente
     # -------------------------------
     if not os.path.exists(caminho_storage):
         # Falha
-        print_log("Montagem de storage falhou [",caminho_storage,"]")
+        print_log("Montagem de storage falhou [",caminho_storage_netbios,"]")
         return False, ponto_montagem, "Falhou na montagem"
 
     # Confere integridade do storage
     # ------------------------------
     if os.path.isfile(arquivo_controle):
-        debug("Acesso ao storage confirmado através do acesso ao arquivo: ", arquivo_controle)
         # Registra que está montado, para posteriormente desmontar
         Gdic_storage[caminho_storage]=caminho_storage_netbios
+        debug("Acesso ao storage confirmado através do acesso ao arquivo: ", arquivo_controle)
         return True, ponto_montagem, ""
     else:
         # Falha
-        print_log("Storage está montado em", caminho_storage)
-        print_log("Não foi localizado o arquivo:", arquivo_controle)
-        print_log("Isto pode indicar que o storage não foi montado com sucesso, ou que está corrompido")
+        print_log("Storage está montado em", caminho_storage_netbios)
+        print_log("Contudo, NÃO foi localizado o arquivo:", arquivo_controle)
+        print_log("Isto pode indicar que o storage não foi montado com sucesso ou que está corrompido")
         return False, ponto_montagem, "Storage sem arquivo de controle"
 
     # Não deveria chegar neste ponto

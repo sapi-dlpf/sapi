@@ -62,6 +62,10 @@ sapi_cellebrite:
 sapi_iped_executar_bat:
 - Está gerando ano_dia_mes.log (revisar....)
 
+sapi_atualiza_iped:
+OK* Limpar logs: Está ficando muitos arquivos de log na pasta.
+* Limpar pasta indexador no final da execução (IPED não está conseguindo limpar)
+
 sapi_iped
 1) Novo servidor de deployment
 Bug:

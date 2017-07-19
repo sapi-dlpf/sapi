@@ -66,7 +66,6 @@ Gpfilhos = dict()  # Processos filhos
 
 # Diversos sem persistência
 Gicor = 1
-Glargura_tela = 129
 
 # Controle de frequencia de atualizacao
 GtempoEntreAtualizacoesStatus = 180  # Tempo normal de produção
@@ -407,7 +406,7 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
                     report_version +
                     ") não foi testada com este validador. Pode haver incompatibilidade.")
         avisos += [mensagem]
-        if_print(explicar, "#", mensagem)
+        if_print(explicar, "- AVISO:", mensagem)
     d_aquis_geral['reportVersion'] = report_version
 
     # # Nome do projeto
@@ -422,7 +421,7 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
     #                 + "\nPara tornar o relatório mais claro para o usuário, recomenda-se que o nome do projeto contenha no seu nome o item de apreensão, "
     #                 + "algo como: 'Item" + numero_item + "'")
     #     avisos += [mensagem]
-    #     if_print(explicar, "#", mensagem)
+    #     if_print(explicar, "- AVISO: ", mensagem)
 
     # ------------------------------------------------------------------
     # Valida extrações
@@ -542,24 +541,24 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
         mensagem = ("Não foi encontrada nenhuma extração com características de ser um aparelho celular." +
                     " O material não tem aparelho?")
         avisos += [mensagem]
-        if_print(explicar, "#", mensagem)
+        if_print(explicar, "- AVISO: ", mensagem)
 
     if (qtd_extracao_sim == 0):
         mensagem = ("Não foi encontrada nenhuma extração com características de cartão 'SIM'." +
                     "Realmente não tem SIM Card?. ")
         avisos += [mensagem]
-        if_print(explicar, "#", mensagem)
+        if_print(explicar, "- AVISO: ", mensagem)
 
     if (qtd_extracao_sd > 0):
         mensagem = ("Sistema ainda não é capaz de inserir dados do cartão automaticamente no laudo.")
         avisos += [mensagem]
-        if_print(explicar, "#", mensagem)
+        if_print(explicar, "- AVISO: ", mensagem)
 
     if (qtd_extracao_backup > 0):
         mensagem = (
             "Sistema ainda não preparado para tratar relatório de processamento de Backup. Consulte desenvolvedor.")
         avisos += [mensagem]
-        if_print(explicar, "#", mensagem)
+        if_print(explicar, "- AVISO: ", mensagem)
 
     # ------------------------------------------------------------------
     # Informações sobre os dispositivos
@@ -813,7 +812,7 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
             mensagem = (
                 "Não foi detectado IMEI para aparelho. Dica: Normalmente o IMEI é recuperado em extração lógica.")
             avisos += [mensagem]
-            if_print(explicar, "#", mensagem)
+            if_print(explicar, "- AVISO: ", mensagem)
 
         # Dados do aparelho
         dcomp['sapiTipoComponente'] = 'aparelho'
@@ -930,7 +929,7 @@ def exibir_dados_laudo(d):
     print_centralizado("")
 
     if qtd_alteracoes > 0:
-        print("#Aviso: Em", qtd_alteracoes,
+        print("- AVISO: Em", qtd_alteracoes,
               "strings foi necessário substituir caracteres especiais que não podem ser exibidos na console por '?'.")
 
     return
@@ -998,7 +997,7 @@ def valida_pasta_relatorio_cellebrite(pasta, explicar=False):
         for m in erros:
             print("* ERRO: ", m)
         for m in avisos:
-            print("# Aviso: ", m)
+            print("- AVISO: ", m)
 
     # Retorna resultado
     return (erros, avisos)
@@ -1020,25 +1019,38 @@ def remove_decimos_segundo(tempo):
     return tempo_str
 
 
+
 # Exibe dados gerais da tarefa e item, para conferência do usuário
 def exibe_dados_tarefa(tarefa):
+
+    # Prepara campos
+    situacao=str(tarefa["codigo_situacao_tarefa"])+ "-" + str(tarefa['descricao_situacao_tarefa'])
+
+    # Exibe
+
     print()
-    print_centralizado("")
-    print("Código da tarefa   : ", tarefa["codigo_tarefa"])
-    print("Storage            : ", tarefa['dados_storage']['maquina_netbios'])
-    print("Pasta armazenamento: ", tarefa['caminho_destino'])
-    print("Situação           : ", tarefa["codigo_situacao_tarefa"],"-", tarefa['descricao_situacao_tarefa'])
+    print_centralizado(" Tarefa " + str(tarefa["codigo_tarefa"]))
+    # Dados gerais da tarefa
+    print_formulario(label="Código da tarefa", largura_label=20, valor=tarefa["codigo_tarefa"])
+    print_formulario(label="Storage", valor=tarefa['dados_storage']['maquina_netbios'])
+    print_formulario(label="Pasta armazenamento", valor=tarefa['caminho_destino'])
+    # -------- Material ---------
+    print()
+    print("──── ","Material"," ────")
+    print_formulario(label="Item", valor=tarefa["dados_item"]["item_apreensao"])
+    print_formulario(label="Material", valor=tarefa["dados_item"]["material"])
+    print_formulario(label="Descrição", valor=tarefa["dados_item"]["descricao"])
+    # Situação
+    print()
+    print("──── ","Situação"," ────")
+    print_formulario(label="Situação", valor=situacao)
     if obter_dict_string_ok(tarefa, 'status_ultimo') != '':
         tempo_str = remove_decimos_segundo(obter_dict_string_ok(tarefa, 'tempo_desde_ultimo_status'))
-        print_centralizado("")
-        print("Último status   : ", obter_dict_string_ok(tarefa, 'status_ultimo'))
-        print("Atualizado em   : ",
-              remove_decimos_segundo(obter_dict_string_ok(tarefa, 'status_ultimo_data_hora_atualizacao')))
-        print("Tempo decorrido desde última atualização de status: ", tempo_str)
-    print_centralizado("")
-    print("Item     : ", tarefa["dados_item"]["item_apreensao"])
-    print("Material : ", tarefa["dados_item"]["material"])
-    print("Descrição: ", tarefa["dados_item"]["descricao"])
+        print_formulario(label="Último status", valor=obter_dict_string_ok(tarefa, 'status_ultimo'))
+        print_formulario(label="Atualizado em",
+              valor=remove_decimos_segundo(obter_dict_string_ok(tarefa, 'status_ultimo_data_hora_atualizacao')))
+        print_formulario(label="Atualizado faz (*)", valor=tempo_str)
+        print_formulario(label="", valor="(*) Tempo decorrido desde última atualização de status")
     print_centralizado("")
     print()
 
@@ -1663,9 +1675,9 @@ def efetuar_exclusao_background(codigo_tarefa, caminho_destino):
     print()
     print("- Ok, procedimento de exclusão foi iniciado em background.")
     print("- Você pode continuar trabalhando, inclusive efetuar outras tarefas simultaneamente.")
-    print("- Para acompanhar a situação da exclusão, utilize o comando *SG, ou então *SGR (repetitivo)")
-    print("- Também é possível acompanhar a situação através do SETEC3")
-    print("- Em caso de problema/dúvida, utilize *EL para visualizar o log")
+    print("- Para acompanhar a situação da exclusão, utilize o comando *SG ou então *SGR (repetitivo).")
+    print("- Também é possível acompanhar a situação através do SETEC3, de qualquer máquina.")
+    print("- Em caso de problema/dúvida, utilize *EL para visualizar o log.")
     print("- IMPORTANTE: Não encerre este programa enquanto houver tarefas em andamento, ")
     print("  pois as mesmas serão interrompidas e terão que ser reprocessadas")
     print("- Quando a exclusão for finalizada, a tarefa desaparecerá da lista de tarefas")
@@ -1962,6 +1974,8 @@ def _copiar_relatorio_cellebrite():
     codigo_tarefa = tarefa['codigo_tarefa']
     item = tarefa['dados_item']
 
+    # Label para log
+    definir_label_log('*cr:'+codigo_tarefa)
 
     # Verifica se tarefa tem o tipo certo
     # ------------------------------------
@@ -2148,7 +2162,7 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
         print()
         print_centralizado(' AVISOS ')
         for mensagem in avisos:
-            print("# Aviso: ", mensagem)
+            print("- AVISO: ", mensagem)
         print()
         print_centralizado('')
 
@@ -2211,7 +2225,7 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
         limpar_pasta_destino_antes_copiar = True
     else:
         print()
-        print("- Confira se a pasta de destino está bem formada, ou seja, se o memorando e o item estão ok,")
+        print("- Confira se a pasta de destino (exibida acima) está bem formada, ou seja, se o memorando e o item estão ok,")
         print("  pois será assim que ficará na mídia de destino.")
         print("- IMPORTANTE: Se a estrutura não estiver ok (por exemplo, o item está errado), cancele comando,")
         print("  ajuste no SETEC3 e depois retome esta tarefa.")
@@ -2231,6 +2245,8 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
     prosseguir = pergunta_sim_nao("< Prosseguir? ", default="n")
     if not prosseguir:
         return
+
+    print_log("Iniciando execução de comando de cópia (*cr)")
 
     # Troca situação da tarefa
     # ------------------------
@@ -2458,7 +2474,8 @@ def background_executar_copia(codigo_tarefa, caminho_origem, caminho_destino,
         sys.exit(0)
 
     # Tudo certo
-    print("- Tarefa", codigo_tarefa, "finalizada com SUCESSO")
+    print()
+    print("- Cópia de relatório para tarefa", codigo_tarefa, "foi concluída com SUCESSO")
     print("- Utilize comando *SG para conferir a situação atual da tarefa")
     print_log("Fim da cópia em background para tarefa", codigo_tarefa)
     sys.exit(0)
@@ -2890,6 +2907,11 @@ def exibir_log(comando, filtro_base="", filtro_usuario="", limpar_tela=True):
 
     sapi_log.close()
 
+    if qtd==0:
+        print("*** Nenhuma mensagem de log disponível ***")
+        return
+
+
     if filtro_usuario=="":
         print()
         print("- Dica: Para filtrar o log, forneça um string após comando.")
@@ -2957,7 +2979,7 @@ def carregar_estado():
 # @*TT - Usuário seleciona a solicitação de exame
 # ----------------------------------------------------------------------
 def obter_solicitacao_exame():
-    console_executar_tratar_ctrc(funcao=_obter_solicitacao_exame)
+    return console_executar_tratar_ctrc(funcao=_obter_solicitacao_exame)
 
 # Carrega situação de arquivo
 # ----------------------------------------------------------------------
@@ -3258,7 +3280,8 @@ def exibir_situacao_repetir():
             if refresh_tarefas():
                 exibir_situacao("*sgr")
                 print()
-                print("- Você está em modo *SGR, com refresh repetitivo da situação geral das tarefas a cada", intervalo, "segundos")
+                print("- Você está em modo *SGR, com refresh repetitivo da situação geral das tarefas a cada", intervalo, "segundos.")
+                print("- Uma vez que a maioria dos procedimentos atualizam o status no servidor apenas a cada 3 minutos, é normal que em alguns ciclos não haja alteração da situação.")
                 print("- Utilize <CTR><C> para sair deste modo e voltar ao menu de comandos")
             time.sleep(intervalo)
 
@@ -3273,6 +3296,12 @@ def exibir_situacao_repetir():
 
 
 def main():
+
+    #print_formulario(label="Campo1", largura_label=10, valor="valor do campo1")
+    #print_formulario(label="Campo2", valor="valor do campo2")
+    #print_formulario(label="Campo 3 é muito grande", largura_label=10, valor="valor do campo3", truncar=True)
+    #die('ponto3289')
+
 
     #teste="-ABC"
     #print(ajusta_texto_saida(teste))
@@ -3313,12 +3342,13 @@ def main():
         refresh_tarefas()
     else:
         # Obtem lista de tarefas, solicitando o memorando
-        if obter_solicitacao_exame():
-            if len(Gtarefas)==0:
-                # Se usuário interromper sem selecionar, finaliza
-                print("- Execução finalizada.")
-                # sys.exit()
-                return
+        obter_solicitacao_exame()
+        if len(Gtarefas)==0:
+            # Se usuário interromper sem selecionar, finaliza
+            print("- Execução finalizada.")
+            # sys.exit()
+            return
+
 
     # Salva estado atual
     salvar_estado()

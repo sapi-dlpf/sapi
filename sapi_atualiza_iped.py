@@ -16,11 +16,10 @@
 # Histórico:
 #  - v1.0 : Inicial
 #  - v1.5 : Atualização automática do IPED a partir de servidor de deployment
+#  - v1.8 : Utilização de sapilib0.8, servidor de deployment linux
 # ======================================================================================================================
 # TODO:
-# - Limpar pasta indexador no final da execução (IPED não está conseguindo limpar)
 # - Recurso de auto-atualização (sapi + iped)
-# - Rodar como serviço e/ou tarefa agendada do windows (talvez seja melhor a segunda, pois faz restart)
 # ======================================================================================================================
 
 # ======================================================================
@@ -30,6 +29,8 @@ from __future__ import print_function
 
 import platform
 import sys
+import os
+import datetime
 
 try:
     import time
@@ -118,7 +119,11 @@ def reportar_erro(erro):
         print_log("Não foi possível reportar o erro ao servidor: ", str(e))
 
 
-
+# Se ocorrer algum erro, será passado para o chamador
+def executa_rename(origem, destino):
+    print_log("Renomeando ", origem, " para ", destino)
+    os.rename(origem, destino)
+    print_log("Ok, renomeado")
 
 # Atualiza a pasta do sapi_iped
 # a partir do servidor de deployment
@@ -168,36 +173,60 @@ def atualizar_sapi_iped():
 
     # Nome para o qual pasta atual sera renomeada
     # ex: C:\sapi_iped => C:\sapi_iped_old
-    caminho_destino_renomeado=caminho_destino.rstrip('\\')+"_old"
+    caminho_destino_old=caminho_destino.rstrip('\\')+"_old"
     # Pasta temporária para fazer a cópia
     caminho_destino_tmp = caminho_destino.rstrip('\\') + "_tmp"
 
     try:
+
+
+        # 1) Verifica se pasta de destino do deployment existe
+        # -----------------------------------------------------
+        print_log("1) Testando se pasta de destino do deployment existe")
+        if not os.path.exists(caminho_destino):
+            print_log("Erro fatal: Pasta de destino do deployment não existe")
+            return False
+        else:
+            print_log("Ok, pasta de destino existe")
+
+        # 2) Exclui pastas temporárias que podem ter restado de processamento anterior
+        # ----------------------------------------------------------------------------
+        print_log("2) Excluindo pastas intermediárias que podem ter sobrado de processamentos anteriores")
         # Se a pasta old já existe, exclui
-        if os.path.exists(caminho_destino_renomeado):
-            print_log("Excluindo pasta [", caminho_destino_renomeado, "]")
-            shutil.rmtree(caminho_destino_renomeado)
-            if os.path.exists(caminho_destino_renomeado):
+        if os.path.exists(caminho_destino_old):
+            print_log("Excluindo pasta ", caminho_destino_old)
+            shutil.rmtree(caminho_destino_old)
+            if os.path.exists(caminho_destino_old):
                 print_log("Pasta ainda existe. Exclusão FALHOU. Erro inesperado!!!")
                 return False
 
+
         # Se a pasta tmp já existe, exclui
         if os.path.exists(caminho_destino_tmp):
-            print_log("Excluindo pasta [", caminho_destino_tmp, "]")
+            print_log("Excluindo pasta", caminho_destino_tmp)
             shutil.rmtree(caminho_destino_tmp)
             if os.path.exists(caminho_destino_tmp):
                 print_log("Pasta ainda existe. Exclusão FALHOU. Erro inesperado!!!")
                 return False
 
+        print_log("Ok, nada mais a excluir")
+
+        # 3) Verifica se pasta de destino do deployment está desimpedida
+        # O que pode estar impedindo:
+        # - Algum arquivo aberto na pasta
+        # - Um prompt de comando aberto na pasta
+        # --------------------------------------------------------------
+        print_log("3) Testando se pasta de destino do deployment está desimpedida")
         # Renomeia pasta de destino
         # Isto garantir que a pasta está disponível, sem nenhum tipo de lock que impeça a exclusão da mesma
         # (por exemplo, tem um prompt aberto na pasta)
         # Se não for possível renomear, também não será possível excluir depois
-        print_log("Testando para ver se consegue renomear [",caminho_destino,"] para [", caminho_destino_renomeado,"]")
-        os.rename(caminho_destino, caminho_destino_renomeado)
+        print_log("Testando para ver se consegue renomear",caminho_destino)
+        executa_rename(caminho_destino, caminho_destino_old)
 
         print_log("Voltando para nome anterior")
-        os.rename(caminho_destino_renomeado, caminho_destino)
+        executa_rename(caminho_destino_old, caminho_destino)
+
         print_log("Ok, pasta sapi_iped está livre para ser trabalhada (sem nenhum tipo de lock)")
 
     except WindowsError as e:
@@ -212,23 +241,61 @@ def atualizar_sapi_iped():
     try:
 
         # Copia a nova versão para pasta de destino temporária
+        # --------------------------------------------------------
         # Neste copia vai o sapi e também a pasta do IPED
         # Esta operação é relativamente demorada
         # Se for interrompida no meio, não dará problema,
         # pois estmaos apenas para outra pasta
-        print_log("Copiando de ["+caminho_origem+"] para ["+caminho_destino_tmp+"]")
+        print_log("4) Copiando "+caminho_origem+" para "+caminho_destino_tmp)
         shutil.copytree(caminho_origem, caminho_destino_tmp)
 
-        # TODO: O ideal é que isto aqui fosse atômico. O windows parece ter este conceito, mas não é trivial (via API)
-        # Renomeia pasta atual para OLD
-        print_log("Renomeando [",caminho_destino,"] para [", caminho_destino_renomeado,"]")
-        os.rename(caminho_destino, caminho_destino_renomeado)
-        # Renomeia pasta tmp para atual
-        print_log("Renomeando [",caminho_destino_tmp,"] para [", caminho_destino,"]")
-        os.rename(caminho_destino_tmp, caminho_destino)
+        # Salva a pasta atual para old, caso ocorra algum problema que tenha que ser restaurada
+        # -------------------------------------------------------------------------------------
+        print_log("5) Protege pasta atual, renomeando para _OLD")
+        executa_rename(caminho_destino, caminho_destino_old)
 
+    except WindowsError as e:
+        # Por algum motivo, Erros de windows não estão sendo capturado por OSError e por consequência também
+        # não estão sendo capturados por BaseException
+        # No manual do python, WindowsErro não é subclasse de OSError....mas segundo usuário deveria ser...
+        # Cuidado: Windows excp
+        # De qualquer forma, vamos deixar este "reparo" aqui, para repassar qualquer WindowsError para BaseException
+        print_log("Erro: ", e)
+        return False
+
+    if __name__ == '__main__':
+        try:
+
+            # Renomeia a nova pasta para pasta atual
+            # ------------------------------------------------------------------
+            deu_erro_rename = False;
+            print_log("6) Renomeia TMP (copiada) para pasta atual")
+            print_log("Pausa antes de executar operação, para dar tempo do Windows 'se achar'")
+            time.sleep(10)
+            executa_rename(caminho_destino_tmp, caminho_destino)
+
+        except WindowsError as e:
+            # Isto não deveria ter acontecido....já foi tentando em passo anterior e funcionou...
+            print_log("Erro: ", e)
+            print_log("Isto não deveria ocorrer. Verifique se a pasta de destino está em uso (algum arquivo aberto, prompt ou mesmo aberta no File Explorer")
+            deu_erro_rename=True;
+            # Aqui não vamos encerrar,
+            # Vamos apenas sair da exception para o erro ser melhor tratado
+            # pois é muito complicado executar dentro do bloco de exception coisas que podem causar exception
+
+    # Se der erro no rename do TMP para a pasta oficial, volta a situação anterior
+    # Se no próximo rename der erro também, aí não tem solução, o servidor ficará inativo exigindo intervenção humana
+    if deu_erro_rename:
+        print_log("Como o rename da pasta TMP falhou, vamos retornar a pasta old, para deixar o sistema com a situação anterior")
+        executa_rename(caminho_destino_old, caminho_destino)
+        print_log("Restaurada a situação anterior")
+        print_log("Atualização FALHOU, pois não foi possível concluir o procedimento")
+        return False
+
+    try:
         # Sobrepõem os parâmetros do iped standard com as configurações específicas
         # -------------------------------------------------------------------------
+        print_log("7) Ajustando IPED")
         # Localiza pasta de destino de profiles do IPED
         pasta_iped = None
         for item in os.listdir(caminho_destino):
@@ -266,15 +333,37 @@ def atualizar_sapi_iped():
         return False
 
     # Ok, tudo certo
-    print_log("Atualização efetuada com sucesso.")
+    print_log("8) Atualização efetuada com sucesso.")
     return True
+
+
+# Efetua limpeza na pasta de logs,  mantendo apenas os logs mais recentes
+# ----------------------------------------------------------------------------------------------------------------------
+def limpa_log():
+    logdir=get_parini('logdir', get_parini('pasta_execucao'))
+    print_log("9) Efetuando limpeza de arquivo de logs na pasta",logdir)
+
+    qtd_dias_manter_log=7
+    #data_limite = datetime.datetime.now() - datetime.timedelta(days=qtd_dias_manter_log)
+    data_limite = datetime.datetime.now() - datetime.timedelta(hours=1)
+    print_log("Excluindo arquivos de log que não foram alterados após: ",data_limite)
+
+    qtd_excluido=0
+    for arq in os.listdir(logdir):
+        arquivo = os.path.join(logdir, arq)
+        ts = obter_arquivo_data_modificacao(arquivo)
+        if str(ts) <= str(data_limite):
+            debug("Excluindo arquivo %-40s alterado em %-20s" % (arquivo,ts))
+            os.remove(arquivo)
+            qtd_excluido=qtd_excluido+1
+
+    print_log("Quantidade de arquivos excluídos: ", qtd_excluido)
 
 
 # ======================================================================
 # Rotina Principal 
 # ======================================================================
 def main():
-
 
     global Gconfiguracao
 
@@ -311,7 +400,7 @@ def main():
         print_log("sapi_iped desatualizado, será atualizado na sequencia")
 
     except Exception as e:
-        # Para outras exceçõs, irá ficar tentanto eternamente
+        # Para outras exceçõs, exibe erro e aborta
         print_log("[285]: ", str(e))
         exc_type, exc_value, exc_traceback = sys.exc_info()
         traceback.print_exception(exc_type, exc_value, exc_traceback,
@@ -327,6 +416,10 @@ def main():
         print_log("[332]: Exceção abaixo sem tratamento específico. Avaliar se deve ser tratada")
         print_log(trc_string)
         finalizar_erro("Falhou na tentativa de atualizar versão")
+
+    # Se atualizou com sucesso, efetua outras atividades
+    if atualizou:
+        limpa_log()
 
     # Para evitar sobrecarregar o servidor (com muitos clientes solicitando efetuando atualização)
     # durante períodos de problema (indisponibilidade do servidor SAPI, por exemplo)

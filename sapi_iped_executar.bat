@@ -11,7 +11,7 @@ pause
 :repete
 
 @echo off
-echo === sapi_iped_executar versão 1.3 ===
+echo === sapi_iped_executar versão 1.4 ===
 @echo Iniciando em: %date% %time%
 
 REM ===== Monta nome do arquivo de log ====
@@ -34,7 +34,7 @@ echo Arquivo de log associado: %nome_arquivo_log%
 REM ====== Atualização ================
 REM Inicialmente é feito uma atualização, copiando arquivos do servidor de deployment
 @echo on
-python e:\sistema\sapi_iped\sapi_atualiza_iped.py --background --log e:/sistema/log/%nome_arquivo_log%
+python e:\sistema\sapi_iped\sapi_atualiza_iped.py --background --logdir e:/sistema/log
 @echo off
 @echo Concluido atualizaçao em: %date% %time%
 
