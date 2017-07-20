@@ -2075,8 +2075,14 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
         if qtd_destino==0:
             print_centralizado(" ERRO ")
             print("- Você selecionou como método de entrega 'Material de destino'")
-            print("- Contudo, não foi localizado nenhum material de destino na lista de materiais devolvidos")
-            print("- Revise o método de entrega e/ou material de destino vinculado ao laudo")
+            print("- Contudo, não foi localizado nenhum material de destino na lista de materiais vinculados ao laudo")
+            print("- O material de destino deve atender as seguintes condições (no SisCrim):")
+            print("- 1) No cadastro do material de destino(Siscrim):")
+            print("     - O campo Finalidade deve ser 'EXAME' (não pode ser mídia para espelhamento, ou qualquer outra)")
+            print("     - O campo Item do auto de apreensão (da seção Busca e apreensão) deve ser preenchido com 'destino'")
+            print("- 2) O material de destino deve estar vinculado ao laudo: ")
+            print("     - Na consulta do laudo, este material deve aparecer na seção 'Material examinado'")
+            print("     - Se não aparecer, utilize opção 'Corrigir documento' e marque o material de destino'")
             return
 
     if metodo_entrega != 'midiadestino':

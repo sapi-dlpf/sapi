@@ -62,7 +62,7 @@ Garquivo_estado = Gprograma + "v" + Gversao.replace('.', '_') + ".sapi"
 # Base de dados (globais)
 GdadosGerais = dict()  # Dicionário com dados gerais
 Gtarefas = list()  # Lista de tarefas
-Gpfilhos = dict()  # Processos filhos
+
 
 # Diversos sem persistência
 Gicor = 1
@@ -82,7 +82,7 @@ Gmenu_comandos['comandos'] = {
     '*cr': 'Copiar a pasta de relatórios do Cellebrite para o STORAGE',
     '*ab': 'Abortar tarefa que está (ou deveria estar) em andamento',
     '*ri': 'Reiniciar tarefa que foi concluída com sucesso',
-    '*cs': 'Comparar a situação da tarefa indicada no SETEC3 com a situação observada no storage, e corrige, se necessário',
+    '*cs': 'Comparar (e ajustar) a situação da tarefa indicada no SETEC3 com a situação observada no storage',
     '*du': '(Dump) Mostrar todas as propriedades de uma tarefa (utilizado para Debug)',
     '*ex': 'Excluir tarefa',
     '*lo': 'Exibe log da tarefa',
@@ -1603,7 +1603,7 @@ def _excluir_tarefa():
     print("- Sugestão: Confira pela última vez se você selecionou a tarefa correta!!!")
     print()
     print("- Está tudo pronto para excluir tarefa.")
-    prosseguir = pergunta_sim_nao("< Prosseguir? ", default="n")
+    prosseguir = pergunta_sim_nao("< Excluir tarefa? ", default="n")
     if not prosseguir:
         return
 
@@ -1917,6 +1917,7 @@ def conectar_ponto_montagem_storage_ok(dados_storage):
     (sucesso, ponto_montagem, erro) = acesso_storage_windows(dados_storage)
     if not sucesso:
         print("- Acesso ao storage " + nome_storage + " falhou")
+        print(erro)
         print("- Verifique se servidor de storage está ativo e acessível (rede)")
         print("- Sugestão: Conecte no servidor via VNC com a conta consulta")
         return None
@@ -1944,12 +1945,6 @@ def troca_situacao_tarefa_ok(codigo_tarefa, codigo_nova_situacao, texto_status='
     # Tudo certo
     return True
 
-
-def registra_processo_filho(ix, proc):
-    global Gpfilhos
-
-    # Armazena processo na lista processos filhos
-    Gpfilhos[ix] = proc
 
 
 # ======================================================================================================================
@@ -2095,7 +2090,7 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
         print(
             "- Se você decidir prosseguir, o arquivo xml_em_copia será renomeado para xml, para permitir o reinício.")
         print()
-        prosseguir = pergunta_sim_nao("< Prosseguir?", default="n")
+        prosseguir = pergunta_sim_nao("< Utilizar esta pasta?", default="n")
         if not prosseguir:
             return
         print()
@@ -2242,7 +2237,7 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
     print("================")
     print()
     print("- Está tudo pronto para iniciar cópia.")
-    prosseguir = pergunta_sim_nao("< Prosseguir? ", default="n")
+    prosseguir = pergunta_sim_nao("< Iniciar cópia? ", default="n")
     if not prosseguir:
         return
 
@@ -3281,7 +3276,8 @@ def exibir_situacao_repetir():
                 exibir_situacao("*sgr")
                 print()
                 print("- Você está em modo *SGR, com refresh repetitivo da situação geral das tarefas a cada", intervalo, "segundos.")
-                print("- Uma vez que a maioria dos procedimentos atualizam o status no servidor apenas a cada 3 minutos, é normal que em alguns ciclos não haja alteração da situação.")
+                print("- Uma vez que a maioria dos procedimentos atualizam o status no servidor apenas a cada 3 minutos,")
+                print("  é normal que em alguns ciclos não haja alteração da situação.")
                 print("- Utilize <CTR><C> para sair deste modo e voltar ao menu de comandos")
             time.sleep(intervalo)
 

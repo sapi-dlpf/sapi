@@ -151,6 +151,10 @@ Ghttp_timeout_corrente=copy.copy(Ghttp_timeout_padrao)
 # Storages nos quais foi feita conexão para cópia de dados
 Gdic_storage=dict()
 
+# Multiprocessamento
+# -------------------------------
+Gpfilhos = dict()  # Processos filhos
+
 
 # Configuração de Tela
 # Todo: transferir para o sapicli
@@ -166,6 +170,17 @@ Glargura_tela = 129
 # Utilize preferencialmente estas funções, pois possuem uma probabilidade menor de alteração na interface (parâmetros).
 # Caso novos parâmetros sejam incluídos, serão opcionais.
 # =====================================================================================================================
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Multiprocessamento
+# ----------------------------------------------------------------------------------------------------------------------
+def registra_processo_filho(ix, proc):
+    global Gpfilhos
+
+    # Armazena processo na lista processos filhos
+    Gpfilhos[ix] = proc
+
+
 
 # ----------------------------------------------------------------------------------------------------------------------
 # Parâmetros de configuração
@@ -846,15 +861,14 @@ def sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status):
             debug("Atualização de status será efetuada, pois tarefa ainda está em execução")
         else:
             # Não está em execução
-            debug("Atualização de status não é possível, pois tarefa não está em execução")
+            debug("Atualização de status não é possível, pois tarefa não está mais em execução")
             # Ignora atualização
             return False
 
-        # Ok, tarefa em andamento, atualiza o status
-        codigo_situacao_tarefa = GEmAndamento
+        # Atualiza status informado
         (ok, msg_erro) = _sapisrv_atualizar_status_tarefa(
             codigo_tarefa=codigo_tarefa,
-            codigo_situacao_tarefa=codigo_situacao_tarefa,
+            codigo_situacao_tarefa=GManterSituacaoAtual,
             status=texto_status
         )
 
@@ -891,6 +905,37 @@ def sapisrv_troca_situacao_tarefa_obrigatorio(codigo_tarefa, codigo_situacao_tar
 
     return
 
+
+
+# Troca a situação da tarefa no servidor
+# Se ocorrer um erro, fica em loop ETERNO até conseguir efetuar a operação
+# Se for problema transiente, mais cedo ou mais tarde será resolvido
+# Caso contrário, algum humano irá intervir e cancelar o programa
+def sapisrv_troca_situacao_tarefa_loop(codigo_tarefa, codigo_situacao_tarefa, texto_status, dados_relevantes=None):
+    while True:
+
+        try:
+            print_log("Trocando situação da tarefa",codigo_tarefa,"para",codigo_situacao_tarefa)
+            # Registra situação
+            sapisrv_troca_situacao_tarefa_obrigatorio(codigo_tarefa=codigo_tarefa,
+                                                      codigo_situacao_tarefa=codigo_situacao_tarefa,
+                                                      texto_status=texto_status,
+                                                      dados_relevantes=dados_relevantes
+                                                      )
+
+            # Se chegou aqui, é porque conseguiu atualizar a situação
+            # Finaliza loop e função com sucesso
+            print_log("Ok, trocada situação")
+            return True
+
+        except Exception as e:
+            # Atualização de situação falhou
+            print_log("Falhou atualização de situação para tarefa", codigo_tarefa, ":",e)
+
+        # Pausa para evitar sobrecarregar o servidor
+        dormir=60
+        print_log("Tentando novamente em ",dormir, "segundos")
+        time.sleep(dormir)
 
 
 # Exclui tarefa
@@ -1897,14 +1942,8 @@ def acesso_storage_windows(conf_storage, utilizar_ip=True):
     caminho_storage=obter_caminho_storage(conf_storage, utilizar_ip=True)
     caminho_storage_netbios=obter_caminho_storage(conf_storage, utilizar_ip=False)
 
-    # # Ponto de montagem implícito
-    # # Não vou mapear para uma letra aqui, pois pode dar conflito
-    # # com algo mapeado pelo usuário
-    # # Logo, o caminho do storage é o ponto de montagem
-    # caminho_storage = (
-    #     "\\" + "\\" + maquina +
-    #     "\\" + conf_storage["pasta_share"]
-    # )
+    # Ponto de montagem implícito
+    # Não será mapeado para nenhuma letra, pois pode dar conflito
 
     ponto_montagem = caminho_storage + "\\"
 
@@ -1918,6 +1957,7 @@ def acesso_storage_windows(conf_storage, utilizar_ip=True):
         debug("Storage já estava montado em", caminho_storage_netbios)
         montar=False
 
+
     # Montagem do storage
     # --------------------
     if montar:
@@ -1926,29 +1966,46 @@ def acesso_storage_windows(conf_storage, utilizar_ip=True):
         # net use \\10.41.87.239\storage /user:sapi sapi
         # Para desmontar (para teste), utilizar:
         # net use \\10.41.87.239\storage /delete
+        caminho_arquivo_resultado=os.path.join(get_parini('pasta_execucao'),"net_use_resultado.txt")
         comando = (
             "net use " + caminho_storage +
             " /user:" + conf_storage["usuario"] +
             " " + conf_storage["senha"]
         )
 
+        # Teste de comando, para gerar erro
+        #comando="net use \\\\10.41.87.239\\xxx"
+        #debug("Comando net use dummy, apenas para gerar erro: ", comando)
+
+        # Redireciona resultado para arquivo, para pode examinar o erro
+        comando = comando + " >" + caminho_arquivo_resultado + " 2>&1 "
+
         #debug("Conectando com storage")
         #debug(comando)
 
         if not modo_background():
-            print("- Efetuando conexão ao storage de destino. Aguarde...")
+            print("- Efetuando conexão com storage de destino. Aguarde...")
 
         subprocess.call(comando, shell=True)
 
         # Guarda o ponto de montagem, o qual será utilizado posteriormente para desmontar
-        debug("Storage foi montado em ", caminho_storage_netbios)
+        debug("Ponto de montagem em ", caminho_storage_netbios)
 
     # Verifica se montou corretamente
     # -------------------------------
     if not os.path.exists(caminho_storage):
         # Falha
-        print_log("Montagem de storage falhou [",caminho_storage_netbios,"]")
-        return False, ponto_montagem, "Falhou na montagem"
+        print_log("Não conseguiu montar storage: ",caminho_storage_netbios)
+        # Le comando de resultado e joga no log, para registrar o problema
+        with open(caminho_arquivo_resultado, 'r') as f:
+            erro= f.read()
+        erro=erro.replace('\r','')
+        erro=erro.replace('\n','')
+        erro=erro.replace('  ','')
+        erro=erro.strip()
+        msg_log="Erro na conexão com storage: "+erro
+        print_log(msg_log)
+        return False, ponto_montagem, msg_log
 
     # Confere integridade do storage
     # ------------------------------

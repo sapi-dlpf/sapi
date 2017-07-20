@@ -16,3 +16,37 @@ Sapi_cellebrite 1.8.1:
 sapilib 0.8:
 - Tratamento para timeout e retentativas de requisição http
 -
+
+Quando for instalar no laboratório:
+- Instalar libreoffice
+- Mapear a pasta do sapi dos dois servidor GTPI-STO-01 e GTPI-STO-02
+- Instalar gravador de mídias (cdburner, imgburner)
+- Compartilhar impressora de impressão de etiqueta de mídia
+- No Chrome colocar link para o SisCrim
+- Colocar uma caixa com embalagens
+- Levar algumas embalagens para o laboratório.
+- Configurar para acessar a imprimir na impressora do corredor.
+- Colocar algumas canetas na bancada do cellebrite
+- Ajustar desktop:
+  - Limpar icones irrelevantes
+  - Criar shortcut para PA
+  - URLs do chrome (Wiki, Siscrim, SETEC3 direto no desktop)
+  - sapi_cellebrite
+  - sapi_laudo
+  - Libre office
+  - Teclas de atalho (para ajudar em operações repetitivas):
+    TeclaWindow D: Abre desktop
+    CTR SHIFT C: sapi_cellebrite.
+    CTR SHIFT L: Laudo
+    CTR SHIFT H: Ajuda
+    CTR ALT H: Ajuda
+  - Icone: Primeiro exame: Dicas básicas
+  - Colocar a teclas de atalho em figura (texto de fundo no desktop)
+  - Link de ajuda para "Ajuda estação Cellebrite", que aponta para uma página no Wiki
+
+
+Na divulgação, citar que se for de interesse, é possível executar todas as operações de exame de celular no laboratório,
+necessitando apenas que o perito leve o seu certificado digital.
+
+
+

@@ -1,45 +1,77 @@
 TODO - Lista de pendências do projeto SAPI
 ============================================
 
-Problemas para resolver por versão:
+Planejamento de versões:
+=========================
 
 1.8) Falhas relatadas pelos últimos usuários.
 ---------------------------------------------
 +/- Possibilidade de correção na estrutura de itens já processada.
+- Melhorar feedback do sapi_cellebrite
 - Problema de congelamento do sapi_iped
 - Tolerância a falha em caso de não resposta do SETEC3 (travamento do sapi_iped)
 - Novo servidor de deployment
 
+1.8.1)
+- Colocar uma semi-interface gráfica no sapi_cellebrite, para mostrar a lista de tarefas, com menu de contexto
+- Colocar uma semi-interface gráfica no sapi_laudo, para selecionar a itemização.
+
 
 1.9) Novas funcionalidades:
 ---------------------------------------------
-- Tratamento completo para inexiquibilidade.
-- Mais de uma versão do IPED
-- sapi_watchdog
+- Testar deployment em formato EXE:
+  Exemplo: pyinstaller --onefile sapi_laudo.py
 - sapi_imagem: Exame de celular completo, incluindo cartão de memória e pequenos dispositivos de mídia (pendrives) que possam estar
   acompanhando a solicitação.
-- Mecanismo para interromper uma tarefa em excução:
+
+1.10) Novas funcionalidades:
+---------------------------------------------
+- Tratamento completo para inexiquibilidade.
+- Mais de uma versão do IPED
+- sapi_watchdog_log: Fica monitorando pasta de log, e reseta servidor se detectar inatividade
+- Mecanismo para interromper uma tarefa em execução:
   - No servidor, possibilidade de mandar Abortar a tarefa
   - Nos clientes, quando for atualizar status e receber comando de abortar, interromper a execução.
 
+
 2.0) Tratamento para mídias de massa
 ---------------------------------------------
-- sapi_tableau
+2.1) Guymager
+- Revisar sapi_guymager
 
-2.1) ISO
----------
+2.2) Tableau
+- Desenvolver sapi_tableau
+
+2.3) Geração de ISO
+--------------------
 - Geração automática de ISO para mídia
+- Armazenar o tamanho das pastas de cada tarefa
+- Tem que permitir fazer o split por tamanho de mídia (máximo)
+- Se não couber, aborta a tarefa
 - Atualização no SETEC3 mídia anexa.
 - Consulta no SETEC3 para usuário baixar mídia (talvez...)
 
+2.4) Cópia para mídia externa
+------------------------------
+- sapi_midia_externa.py:
+  - Pede o caminho para o HD externo. Verifica, confere.
+  - Solicita um memorando que está em processamento.
+  - Quando todas as tarefas associadas ao memorando em processamento forem concluídas, faz o cópia para a mídia montada
+- O usuário pode deixar este program rodando na sua máquina, ou então em alguma máquina do laboratório.
+
+2.5) Cópia direta para storage
+------------------------------
+- Depende de conexão veloz e disponibilidade em disco.
+- Revisar sapi_copia.py
+
 3.0) Regime de produção
 ---------------------------------------------
-- Caracteres semi-graficos nos programas interativos
+- Faciliade de uso: Interface gráfica: Substituir uso da interface Web (tudo no cliente)
 - Arquivamento (ver detalhes abaixo).
 
 4.0) Ampliação de base de usuários
 ---------------------------------------------
-- Módulo de configuração.
+- Módulo de configuração
 
 
 =======================================================================================================================
@@ -195,9 +227,13 @@ SETEC3 sapi_exame.php:
 
 Modelos:
 * Ajustar MJSP para todos (revisar geral)
+- Quantidade de páginas, está ficando fixo depois que processa pelo sapi_laudo.py.
+  - Por enquanto, colocar em vermelho, e uma observação para alterar/revisar.
+  - Descobrir solução definitiva.
+- Pensar em deixar a folha de mídia anexa no laudo quando for DVD/Bluray, para facilitar
+  (e neste caso também deixar a folha para imprimir a etiqueta da mídia)
 - Separar modelo de mídia óptica de BLURAY e DVD
 - Etiqueta p/ RIMAGE P/ DVD: Colocar DVD na direita (como o bluray)
-- Quantidade de páginas, está ficando fixo depois que processa pelo sapi_laudo.py. Pesquisar....
 
 
 mídia anexa:

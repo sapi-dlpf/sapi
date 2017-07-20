@@ -60,7 +60,7 @@ if sys.version_info <= (3, 0):
 # GLOBAIS
 # =======================================================================
 Gprograma = "sapi_iped"
-Gversao = "1.7.5"
+Gversao = "1.8"
 
 # Controle de tempos/pausas
 GtempoEntreAtualizacoesStatus = 180
@@ -84,7 +84,7 @@ Gdados_laudo = None
 
 # Para código produtivo, o comando abaixo deve ser substituído pelo
 # código integral de sapi.py, para evitar dependência
-from sapilib_0_7_2 import *
+from sapilib_0_8 import *
 
 
 # **********************************************************************
@@ -235,45 +235,6 @@ def solicita_tarefas(lista_tipos, storage=None):
     return None
 
 
-# Atualiza status no servidor
-# fica em loop até conseguir
-def atualizar_status_servidor_loop(codigo_tarefa, codigo_situacao_tarefa, texto_status, dados_relevantes=None):
-    # Se a atualização falhar, fica tentando até conseguir
-    # Se for problema transiente, vai resolver
-    # Caso contrário, algum humano irá mais cedo ou mais tarde intervir
-    while True:
-
-        atualizou = False
-        try:
-            # Registra situação
-            sapisrv_atualizar_status_tarefa(codigo_tarefa=codigo_tarefa,
-                                            codigo_situacao_tarefa=codigo_situacao_tarefa,
-                                            status=texto_status,
-                                            dados_relevantes=dados_relevantes
-                                            )
-            atualizou = True
-        except Exception as e:
-            atualizou = False
-            print_log("Falhou atualização de situação para tarefa [", codigo_tarefa, "]. Tentando novamente")
-            dormir(60)  # Tenta novamente em 1 minuto
-
-        # Encerra se conseguiu atualizar
-        if atualizou:
-            # Ok, conseguiu atualizar
-            break
-
-    # Registra atualização com sucesso
-    msg_log="Tarefa [" +  codigo_tarefa + "]: Atualizada. "
-    if codigo_situacao_tarefa>0:
-        msg_log = msg_log + " Código da situação=[" + str(codigo_situacao_tarefa) + "]"
-    if texto_status != "":
-        msg_log = msg_log + " Texto Situação=[" +  texto_status + "]"
-    print_log(msg_log)
-
-
-# Atualiza apenas status no servidor
-def atualizar_apenas_status(codigo_tarefa, texto_status):
-    return atualizar_status_servidor_loop(codigo_tarefa, GManterSituacaoAtual, texto_status)
 
 
 # Atualiza arquivo de texto no servidor
@@ -333,15 +294,18 @@ def devolver(codigo_tarefa, texto_status):
     reportar_erro(erro)
 
     # Registra situação de devolução
-    codigo_situacao_tarefa = GAguardandoProcessamento
-    atualizar_status_servidor_loop(codigo_tarefa, codigo_situacao_tarefa, texto_status)
+    sapisrv_troca_situacao_tarefa_loop(
+        codigo_tarefa=codigo_tarefa,
+        codigo_situacao_tarefa=GAguardandoProcessamento,
+        texto_status=texto_status
+    )
 
     # Ok
     print_log("Tarefa devolvida")
 
     # Para garantir que a tarefa devolvida não será pega por este mesmo agente logo em seguida,
     # vamos dormir um pouco
-    dormir(60, "Pausa para dar oportunidade de outro agente pegar tarefa")
+    dormir(180, "Pausa para dar oportunidade de outro agente pegar tarefa")
 
     # Retorna false, para uso pelo chamador
     return False
@@ -360,8 +324,11 @@ def abortar(codigo_tarefa, texto_status):
     reportar_erro(erro)
 
     # Registra situação de devolução
-    codigo_situacao_tarefa = GAbortou
-    atualizar_status_servidor_loop(codigo_tarefa, codigo_situacao_tarefa, texto_status)
+    sapisrv_troca_situacao_tarefa_loop(
+        codigo_tarefa=codigo_tarefa,
+        codigo_situacao_tarefa=GAbortou,
+        texto_status=texto_status
+    )
 
     # Ok
     print_log("Execução da tarefa abortada")
@@ -385,49 +352,12 @@ def reportar_erro(erro):
         print_log("Não foi possível reportar o erro ao servidor: ", str(e))
 
 
-# Acompanha a execução do IPED e atualiza o status da tarefa
-def acompanhar_iped(codigo_tarefa, caminho_tela_iped):
-    # Inicializa sapilib, pois pode estar sendo executando em background (outro processo)
-    sapisrv_inicializar(Gprograma, Gversao)
-
-    print_log("Iniciado processo de acompanhamento de IPED")
-
-    # Um pequeno delay inicial, para dar tempo de começar a registrar algo no arquivo de resultado/tela
-    time.sleep(30)
-
-    # Fica em loop infinito. Será encerrado pelo pai (com terminate)
-    while True:
-
-        # Le arquivo de resultado (tela) e busca pela última mensagem de situação e projeção
-        # Exemplo:
-        # IPED-2017-01-31 17:14:11 [MSG] Processando 29308/39593 (25%) 31GB/h Termino em 0h 5m 33s
-
-        texto_status=None
-        with open(caminho_tela_iped, "r") as fentrada:
-            for linha in fentrada:
-                # Troca tabulação por espaço
-                linha=linha.replace('\t',' ')
-                # Procura por linha de status
-                if "[MSG] Processando" in linha:
-                    texto_status=linha
-
-        # Atualiza status
-        if texto_status is not None:
-            print_log("IPED status: ",texto_status)
-            atualizar_apenas_status(codigo_tarefa, texto_status)
-            print_log("Status atualizado para tarefa [",codigo_tarefa,"] : ", texto_status)
-            # Intervalo entre atualizações de status
-            dormir(GtempoEntreAtualizacoesStatus, "Dormindo entre atualização de status do IPED")
-        else:
-            # Como ainda não atualizou o status, vamos dormir por um período menor
-            # Assim pega a primeira atualização de status logo que sair
-            dormir(30)
-
-
+# ----------------------------------------------------------------------------------------------------------------------
 # Executa IPED
 # Retorna:
 #   True: Executado com sucesso
 #   False: Execução falhou
+# ----------------------------------------------------------------------------------------------------------------------
 def executa_iped(codigo_tarefa, comando, caminho_destino, caminho_log_iped, caminho_tela_iped):
 
     # ------------------------------------------------------------------------------------------------------------------
@@ -439,7 +369,13 @@ def executa_iped(codigo_tarefa, comando, caminho_destino, caminho_log_iped, cami
         print_log("Verificando se existe IPED rodado com sucesso")
         if verificar_sucesso_iped(caminho_tela_iped):
             # Tudo certo, IPED finalizado
-            atualizar_status_servidor_loop(codigo_tarefa, GIpedFinalizado, "Execução de IPED anterior foi concluída com sucesso.")
+            # O processo que executou anteriormente deve ter falhado na atualização da situação
+            # Desta forma, ajusta o situação da tarefa para IPED Finalizado e prossegue
+            sapisrv_troca_situacao_tarefa_loop(
+                codigo_tarefa=codigo_tarefa,
+                codigo_situacao_tarefa=GIpedFinalizado,
+                texto_status="Execução de IPED anterior foi concluída com sucesso."
+            )
             return True
 
     # Se pasta para armazenamento de resultado já existe, tem que limpar pasta antes
@@ -447,15 +383,21 @@ def executa_iped(codigo_tarefa, comando, caminho_destino, caminho_log_iped, cami
     if os.path.exists(caminho_destino):
         try:
             # Registra situação
-            atualizar_status_servidor_loop(codigo_tarefa, GPastaDestinoCriada,
-                                           "Pasta de destino ["+ caminho_destino + "] já existe, mas sem IPED finalizado ok."+
-                                           " Excluindo pasta para rodar iped desde o início")
-            print_log("Excluindo pasta ["+caminho_destino+"]")
+            sapisrv_troca_situacao_tarefa_loop(
+                codigo_tarefa=codigo_tarefa,
+                codigo_situacao_tarefa=GPastaDestinoCriada,
+                texto_status="Pasta de destino "+ caminho_destino + " já existe, mas sem IPED finalizado ok."+
+                         " Excluindo pasta para rodar iped desde o início"
+            )
+
+            print_log("Excluindo pasta: "+caminho_destino)
             # Limpa pasta de destino
             # shutil.rmtree(caminho_destino, ignore_errors=True)
             shutil.rmtree(caminho_destino)
-            atualizar_status_servidor_loop(codigo_tarefa, GPastaDestinoCriada,
-                                           "Pasta de destino ["+ caminho_destino + "] excluída")
+            sapisrv_atualizar_status_tarefa_informativo(
+                codigo_tarefa=codigo_tarefa,
+                texto_status="Pasta de destino excluída: "+ caminho_destino
+            )
         except Exception as e:
             erro = "Não foi possível limpar pasta de destino da tarefa: " + str(e)
             # Aborta tarefa
@@ -482,25 +424,110 @@ def executa_iped(codigo_tarefa, comando, caminho_destino, caminho_log_iped, cami
         return abortar(codigo_tarefa, erro)
 
     # Tudo certo, pasta criada
-    atualizar_status_servidor_loop(codigo_tarefa, GPastaDestinoCriada, "Pasta de destino criada")
+    sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa=codigo_tarefa, texto_status="Pasta de destino criada")
 
 
-    # ------------------------------------------------------------------------------------------------------------------
-    # Inicia em background processo para monitorar avanço do IPED
-    # Todo: Implementar
-    # ------------------------------------------------------------------------------------------------------------------
-    processo_acompanhar = multiprocessing.Process(target=acompanhar_iped,
-                                           args=(codigo_tarefa, caminho_tela_iped))
-    processo_acompanhar.start()
-    print_log("Iniciando processo background para acompanhamento de iped")
+    # Inicia subprocessos
+    # --------------------------------------------
+    print_log("Iniciando subprocesso para execução e acompanhamento do IPED")
+    # Os processo filhos irão atualizar o mesmo arquivo log do processo pai
+    nome_arquivo_log_para_processos_filhos = obter_nome_arquivo_log()
 
+    # Inicia processo filho para execução do iped
     # ------------------------------------------------------------------------------------------------------------------
-    # Executa comando do iped
+    label_processo = "executar:" + str(codigo_tarefa)
+    dados_pai_para_filho=obter_dados_para_processo_filho()
+    p_executar = multiprocessing.Process(
+        target=background_executar_iped,
+        args=(codigo_tarefa, comando, caminho_tela_iped, caminho_log_iped,
+              nome_arquivo_log_para_processos_filhos, label_processo, dados_pai_para_filho)
+    )
+    p_executar.start()
+
+    registra_processo_filho(label_processo, p_executar)
+
+    # Inicia processo filho para acompanhamento da cópia
     # ------------------------------------------------------------------------------------------------------------------
+    label_processo = "acompanhar:" + str(codigo_tarefa)
+    p_acompanhar = multiprocessing.Process(
+        target=background_acompanhar_iped,
+        args=(codigo_tarefa, caminho_tela_iped, nome_arquivo_log_para_processos_filhos, label_processo))
+    p_acompanhar.start()
+
+    registra_processo_filho(label_processo, p_acompanhar)
+
+    # Loop, aguardando IPED terminar
+    # O processo de execução é que irá atualizar o status para concluído
+    # Verifica se deve abortar a tarefa (se for recebido comando para excluir a tarefa)
+    while True:
+
+        time.sleep(60)
+
+        # Recupera situação da tarefa
+
+
+
+        # Se tarefa terminou,
+        # encerra processos filhos
+        # e finaliza
+
+
+
+
+        # Se recebeu comando para excluir tarefa
+        # encerra processos em execução e
+        # ajusta situação para AguardandoExclusao
+
+
+    # Como iped terminou, finaliza o processo de acompanhamento
+    processo_acompanhar.terminate()
+    print_log("Encerrando processo background de acompanhamento")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ------------------------------------------------------------------------------------------------------------------
+# Executa comando do iped em outro processo
+# ------------------------------------------------------------------------------------------------------------------
+def background_executar_iped(codigo_tarefa, comando, caminho_tela_iped, caminho_log_iped,
+                             nome_arquivo_log, label_processo,
+                             dados_pai_para_filho):
+
+    # Inicializa sapilib
+    # Será utilizado o mesmo arquivo de log do processo pai
+    sapisrv_inicializar(nome_programa=Gprograma,
+                        versao=Gversao,
+                        nome_arquivo_log=nome_arquivo_log,
+                        label_processo=label_processo
+                        )
+
+    # Restaura dados herdados do processo pai
+    restaura_dados_no_processo_filho(dados_pai_para_filho)
+
+    #
+    print_log("Processo de execução do IPED")
+
     deu_erro = False
+    erro_exception=None
     try:
-        # Registra comando iped na situação
-        atualizar_status_servidor_loop(codigo_tarefa, GIpedExecutando, "Chamando IPED: " + comando)
+        # Registra comando de execução do IPED
+        sapisrv_troca_situacao_tarefa_loop(
+            codigo_tarefa=codigo_tarefa,
+            codigo_situacao_tarefa=GIpedExecutando,
+            texto_status="Chamando IPED: " + comando
+        )
+
         # Executa comando
         # Simula um erro de java não instalado
         # comando=comando.replace("java", "javaX")
@@ -514,9 +541,6 @@ def executa_iped(codigo_tarefa, comando, caminho_destino, caminho_log_iped, cami
         erro_exception = str(e)
         deu_erro = True
 
-    # Como iped terminou, finaliza o processo de acompanhamento
-    processo_acompanhar.terminate()
-    print_log("Encerrando processo background de acompanhamento")
 
     # Faz upload da tela de resultado do IPED (mensagens que seriam exibidas na tela)
     conteudo_tela=""
@@ -532,7 +556,7 @@ def executa_iped(codigo_tarefa, comando, caminho_destino, caminho_log_iped, cami
 
     if deu_erro:
         # Aborta tarefa
-        erro = "Chamada de IPED falhou (retornou exit code de erro). Analise arquivo de resultado. Tarefa devolvida para reiniciar processamento."
+        erro = "Chamada de IPED falhou (retornou exit code de erro). Analisar arquivo de resultado. Tarefa devolvida para reiniciar processamento."
         if erro_exception!="":
             erro = erro + ": " + erro_exception
         # Tolerância a Falhas: Permite que outro agente execute
@@ -558,8 +582,60 @@ def executa_iped(codigo_tarefa, comando, caminho_destino, caminho_log_iped, cami
         return abortar(codigo_tarefa, erro)
 
     # Tudo certo, IPED finalizado com sucesso
-    atualizar_status_servidor_loop(codigo_tarefa, GIpedFinalizado, "IPED finalizado com sucesso")
+    sapisrv_troca_situacao_tarefa_loop(
+        codigo_tarefa=codigo_tarefa,
+        codigo_situacao_tarefa=GIpedFinalizado,
+        texto_status="IPED finalizado com sucesso")
     return True
+
+
+# Acompanha a execução do IPED e atualiza o status da tarefa
+def background_acompanhar_iped(codigo_tarefa, caminho_tela_iped,
+                               nome_arquivo_log, label_processo, dados_pai_para_filho):
+
+    # Inicializa sapilib
+    # Será utilizado o mesmo arquivo de log do processo pai
+    sapisrv_inicializar(nome_programa=Gprograma,
+                        versao=Gversao,
+                        nome_arquivo_log=nome_arquivo_log,
+                        label_processo=label_processo
+                        )
+
+    # Restaura dados herdados do processo pai
+    restaura_dados_no_processo_filho(dados_pai_para_filho)
+
+    print_log("Processo de acompanhamento de IPED")
+
+    # Um pequeno delay inicial, para dar tempo de começar a registrar algo no arquivo de resultado/tela
+    time.sleep(30)
+
+    # Fica em loop infinito. Será encerrado pelo pai (com terminate)
+    while True:
+
+        # Le arquivo de resultado (tela) e busca pela última mensagem de situação e projeção
+        # Exemplo:
+        # IPED-2017-01-31 17:14:11 [MSG] Processando 29308/39593 (25%) 31GB/h Termino em 0h 5m 33s
+
+        texto_status=None
+        with open(caminho_tela_iped, "r") as fentrada:
+            for linha in fentrada:
+                # Troca tabulação por espaço
+                linha=linha.replace('\t',' ')
+                # Procura por linha de status
+                if "[MSG] Processando" in linha:
+                    texto_status=linha
+
+        # Atualiza status
+        if texto_status is not None:
+            print_log("Atualizando status para tarefa",codigo_tarefa,":", texto_status)
+            sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status)
+            # Intervalo entre atualizações de status
+            dormir(GtempoEntreAtualizacoesStatus, "Dormindo entre atualização de status do IPED")
+        else:
+            # Como ainda não atualizou o status, vamos dormir por um período menor
+            # Assim pega a primeira atualização de status logo que sair
+            dormir(30)
+
 
 # Verifica se existe indicação que iped foi finalizado com sucesso
 def verificar_sucesso_iped(caminho_tela_iped):
@@ -603,6 +679,8 @@ def calcula_sha256_arquivo(caminho_arquivo, blocksize=2 ** 20):
 
 def calcula_hash_iped(codigo_tarefa, caminho_destino):
 
+    global Gdados_laudo
+
     print_log("Calculando hash do resultado do IPED")
 
     # Monta linha de comando
@@ -613,7 +691,10 @@ def calcula_hash_iped(codigo_tarefa, caminho_destino):
     try:
         algoritmo_hash = 'sha256'
         texto_status = "Calculando hash " + algoritmo_hash + " para " + caminho_arquivo_calcular_hash
-        atualizar_status_servidor_loop(codigo_tarefa, GManterSituacaoAtual, texto_status)
+        sapisrv_atualizar_status_tarefa_informativo(
+            codigo_tarefa=codigo_tarefa,
+            texto_status=texto_status
+        )
         valor_hash =calcula_sha256_arquivo(caminho_arquivo_calcular_hash)
     except Exception as e:
         erro = "Não foi possível calcular hash para " + nome_arquivo + " => " + str(e)
@@ -639,7 +720,11 @@ def calcula_hash_iped(codigo_tarefa, caminho_destino):
     print_log("Hash calculado para resultado do IPED: ", valor_hash, "(",algoritmo_hash,")")
 
     # Tudo certo, Hash calculado
-    atualizar_status_servidor_loop(codigo_tarefa, GIpedHashCalculado, "Hash calculado com sucesso")
+    sapisrv_troca_situacao_tarefa_loop(
+        codigo_tarefa=codigo_tarefa,
+        codigo_situacao_tarefa=GIpedHashCalculado,
+        texto_status="Hash calculado com sucesso"
+    )
     return True
 
 
@@ -854,12 +939,17 @@ REM Executa Ferramenta de Pesquisa, passando os parâmetros para multicase
 
 
     # Tudo certo, ajuste multicase concluído
-    atualizar_status_servidor_loop(codigo_tarefa, GIpedMulticaseAjustado, "Ajuste multicase efetuado")
+    sapisrv_troca_situacao_tarefa_loop(
+        codigo_tarefa=codigo_tarefa,
+        codigo_situacao_tarefa=GIpedMulticaseAjustado,
+        texto_status="Ajuste multicase efetuado")
     return True
 
 
 # Recupera dados relevantes do log do IPED
 def recupera_dados_laudo(codigo_tarefa, caminho_log_iped):
+
+    global Gdados_laudo
 
     # Será lido o arquivo de log
     print_log("Recuperando dados para laudo de log do IPED: [", caminho_log_iped, "]")
@@ -932,7 +1022,7 @@ def executar_uma_tarefa(lista_ipeds_suportados):
         tarefa = solicita_tarefas(lista_ipeds_suportados, Gconfiguracao["storage_preferencial"])
         outros_storages = True
     else:
-        print_log("Este agente trabalha com qualquer storage")
+        print_log("Este agente trabalha com QUALQUER storage")
         outros_storages = True
 
     # Se ainda não tem tarefa, e agente trabalha com outros storages, solicita para qualquer storage
@@ -947,7 +1037,7 @@ def executar_uma_tarefa(lista_ipeds_suportados):
 
     # Ok, temos trabalho a fazer
     # ------------------------------------------------------------------
-    codigo_tarefa = tarefa["codigo_tarefa"]  # Identificador único da tarefa
+    codigo_tarefa = tarefa["codigo_tarefa"]
     codigo_situacao_tarefa = int(tarefa["codigo_situacao_tarefa"])
 
     # Verifica se é uma retomada de tarefa, ou seja,
@@ -1028,7 +1118,7 @@ def executar_uma_tarefa(lista_ipeds_suportados):
     comando = comando + " -d " + caminho_origem + " -o " + caminho_destino
 
     # Define arquivo para log
-    caminho_log_iped = caminho_destino + "\\iped.log"
+    caminho_log_iped = os.path.join(caminho_destino, "iped.log")
     comando = comando + " -log " + caminho_log_iped
 
     # Sem interface gráfica
@@ -1039,13 +1129,14 @@ def executar_uma_tarefa(lista_ipeds_suportados):
     comando = comando + " --portable "
 
     # Redireciona saída de tela (normal e erro) para arquivo
-    caminho_tela_iped = caminho_destino + "\\iped_tela.txt"
+    caminho_tela_iped = os.path.join(caminho_destino, "iped_tela.txt")
     comando = comando + " >" + caminho_tela_iped + " 2>&1 "
 
     # Para teste
     # comando='dir'
     # comando='java -version'
     # comando='java' #Executa mas com exit code =1
+
     # Para teste
     # caminho_origem  ="C:\\teste_iped\\Memorando_1086-16\\item11\\item11_extracao"
     # caminho_destino ="C:\\teste_iped\\Memorando_1086-16\\item11\\item11_extracao_iped"
@@ -1083,8 +1174,12 @@ def executar_uma_tarefa(lista_ipeds_suportados):
     # Tudo certo, finalizado com sucesso
     dados_relevantes=dict()
     dados_relevantes['laudo'] = Gdados_laudo
-    atualizar_status_servidor_loop(codigo_tarefa, GFinalizadoComSucesso, "Tarefa de IPED completamente concluída",
-                                   dados_relevantes)
+    sapisrv_troca_situacao_tarefa_loop(
+        codigo_tarefa=codigo_tarefa,
+        codigo_situacao_tarefa=GFinalizadoComSucesso,
+        texto_status="Tarefa de IPED completamente concluída",
+        dados_relevantes=dados_relevantes
+    )
     return True
 
 
@@ -1107,30 +1202,36 @@ def main():
     # ------------------------------------------------------------------------------------------------------------------
     # Verifica se programa já está rodando (outra instância)
     if existe_outra_instancia_rodando(Gcaminho_pid):
-        print("Já existe uma instância deste programa rodando. Abortando execução, pois só pode haver uma única instância deste programa")
+        print("Já existe uma instância deste programa rodando.")
+        print("Abortando execução, pois só pode haver uma única instância deste programa")
         sys.exit(0)
 
 
     # Inicialização do programa
     # -----------------------------------------------------------------------------------------------------------------
-    print_log(" ===== INÍCIO ", Gprograma, " - (Versao " + Gversao + ")")
+    print_log(" ===== INÍCIO ", Gprograma, " - (Versao", Gversao, ")")
+
+    # Inicializa e obtem a lista de ipeds que estão aptos a serem executados nesta máquina
+    lista_ipeds = inicializar()
 
     while True:
-        lista_ipeds = inicializar()
         if lista_ipeds is None or len(lista_ipeds)==0:
-            # Requer atualização para continuar
-            # Interrompe o loop, e finaliza
+            # Se existe alguma condição que impede a execução,
+            # interrompe o loop, e finaliza
+            # Mensagens adequadas já foram dadas na função inicializar()
             break
 
         executou = executar_uma_tarefa(lista_ipeds)
-        if not executou:
-            # Se não tem atividade, faz uma pausa para evitar sobrecarregar o servidor com requisições
-            dormir(GdormirSemServico)
 
+        if not executou:
+            # Se não executou nada, faz uma pausa para evitar sobrecarregar o servidor com requisições
+            dormir(GdormirSemServico)
+            # Depois que volta da soneca da ociosidade, reinicializa pois algo pode ter mudado (versão por exemplo)
+            lista_ipeds = inicializar()
 
     # Finalização do programa
     # -----------------------------------------------------------------------------------------------------------------
-    print_log("===== FIM SAPI - ", Gprograma, " (Versao " + Gversao + ")")
+    print_log(" ===== FINAL ", Gprograma, " - (Versao", Gversao, ")")
 
 
 if __name__ == '__main__':
