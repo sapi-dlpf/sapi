@@ -43,11 +43,17 @@ import tempfile
 import multiprocessing
 import signal
 
+
 # Verifica se está rodando versão correta de Python
 # ====================================================================================================
 if sys.version_info <= (3, 0):
     sys.stdout.write("Versao do intepretador python (" + str(platform.python_version()) + ") inadequada.\n")
     sys.stdout.write("Este programa requer Python 3 (preferencialmente Python 3.5.2).\n")
+    sys.exit(1)
+
+# Roda apenas em Windows
+if platform.system() != "Windows":
+    sys.stdout.write("Este programa roda apenas em Windows.\n")
     sys.exit(1)
 
 # =======================================================================
@@ -86,11 +92,13 @@ Gmenu_comandos['comandos'] = {
     '*du': '(Dump) Mostrar todas as propriedades de uma tarefa (utilizado para Debug)',
     '*ex': 'Excluir tarefa',
     '*lo': 'Exibe log da tarefa',
+    '*sto': 'Exibir pasta da tarefa no storage através do File Explorer',
 
     # Comandos gerais
     '*sg': 'Exibir situação atualizada das tarefas (com refresh do servidor). ',
     '*sgr': 'Exibir situação repetidamente (Loop) com refresh do servidor. ',
     '*tt': 'Trocar memorando',
+    '*s3': 'Abre SETEC3 na página da solicitação de exame',
     '*qq': 'Finalizar',
 
     # Comandos para diagnóstico de problemas
@@ -101,8 +109,8 @@ Gmenu_comandos['comandos'] = {
 
 Gmenu_comandos['cmd_exibicao'] = ["*sg", "*sgr"]
 Gmenu_comandos['cmd_navegacao'] = ["+", "-"]
-Gmenu_comandos['cmd_item'] = ["*cr", "*cs", "*ab", "*ri","*ex", "*lo"]
-Gmenu_comandos['cmd_geral'] = ["*tt", "*qq"]
+Gmenu_comandos['cmd_item'] = ["*cr", "*sto" , "*cs", "*ab", "*ri","*ex", "*lo"]
+Gmenu_comandos['cmd_geral'] = ["*s3", "*tt", "*qq"]
 Gmenu_comandos['cmd_diagnostico'] = ["*db", "*lg"]
 
 # **********************************************************************
@@ -1713,13 +1721,16 @@ def background_executar_exclusao(codigo_tarefa, caminho_destino,
 
         # 2) Exclui pasta de destino
         # ---------------------------
-        texto_status = "Excluindo pasta de destino"
+        texto_status = "Excluindo pasta da tarefa"
         sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status)
         # Exclui pasta de destino
         shutil.rmtree(caminho_destino, ignore_errors=True)
         # Ok, exclusão concluída
-        texto_status = "Pasta de destino excluída"
+        texto_status = "Pasta da tarefa foi excluída"
         sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status)
+
+        # Se não sobrou mais nenhuma pasta abaixo da pasta do memorando, exclui a pasta do memorando também
+
 
         # Se chegou aqui, sucesso
         print_log("Exclusão de pasta da tarefa efetuada com sucesso")
@@ -1883,7 +1894,7 @@ def _background_acompanhar_exclusao(codigo_tarefa, caminho_destino):
 # ---------------------------------------------------------------------------------------------------------------------
 # Diversas funções de apoio
 # ---------------------------------------------------------------------------------------------------------------------
-def carrega_exibe_tarefa_corrente():
+def carrega_exibe_tarefa_corrente(exibir=True):
 
     # Recupera tarefa corrente
     (tarefa, item) = obter_tarefa_item_corrente()
@@ -1903,18 +1914,21 @@ def carrega_exibe_tarefa_corrente():
         print("- Consulte o log (*EL) em caso de dúvida.")
         return None
 
-    # Ok, tarefa recuperada
+    # Ok, tarefa recuperada, exibe dados
     # ------------------------------------------------------------------
-    exibe_dados_tarefa(tarefa)
+    if exibir:
+        exibe_dados_tarefa(tarefa)
+
+    # Retorna dados da tarefa
     return tarefa
 
 # Efetua conexão no ponto de montagem, dando tratamento em caso de problemas
-def conectar_ponto_montagem_storage_ok(dados_storage):
+def conectar_ponto_montagem_storage_ok(dados_storage, utilizar_ip=True):
 
     nome_storage = dados_storage['maquina_netbios']
     print("- Verificando conexão com storage",nome_storage,": Aguarde...")
 
-    (sucesso, ponto_montagem, erro) = acesso_storage_windows(dados_storage)
+    (sucesso, ponto_montagem, erro) = acesso_storage_windows(dados_storage, utilizar_ip=utilizar_ip)
     if not sucesso:
         print("- Acesso ao storage " + nome_storage + " falhou")
         print(erro)
@@ -1945,6 +1959,82 @@ def troca_situacao_tarefa_ok(codigo_tarefa, codigo_nova_situacao, texto_status='
     # Tudo certo
     return True
 
+
+
+# ======================================================================================================================
+# @*sto - Exibe pasta da tarefa no storage invocando o File Explorer
+# ======================================================================================================================
+
+# Escolhe pasta para exibição, seguindo ordem: Tarefa, item, memorando, raiz do storage
+def escolhe_pasta_para_abrir(ponto_montagem, tarefa):
+
+    #var_dump(tarefa)
+    #die('ponto1972')
+
+    # 1) Pasta da tarefa
+    pasta_tarefa = ponto_montagem + tarefa["caminho_destino"]
+    if os.path.exists(pasta_tarefa):
+        print("- Exibindo pasta da tarefa")
+        return pasta_tarefa
+    else:
+        print("- Ainda não existe pasta para a tarefa")
+
+    # 2) Pasta do item
+    pasta_item = os.path.join(ponto_montagem,
+                                   tarefa["dados_solicitacao_exame"]["pasta_memorando"],
+                                   tarefa["pasta_item"])
+    print(pasta_item)
+    if os.path.exists(pasta_item):
+        print("- Exibindo pasta raiz do item")
+        return pasta_item
+    else:
+        print("- Ainda não existe pasta para o item")
+
+
+    # 3) Pasta do memorando
+    pasta_memorando = os.path.join(ponto_montagem,tarefa["dados_solicitacao_exame"]["pasta_memorando"])
+    print(pasta_memorando)
+    if os.path.exists(pasta_memorando):
+        print("- Exibindo pasta da solicitação do exame")
+        return pasta_memorando
+    else:
+        print("- Ainda não existe pasta para a solicitação de exame")
+
+
+    # Se chegou aqui, não tem jeito, tem que abrir na raiz do storage mesmo
+    print("- Exibindo pasta raiz do storage")
+    return ponto_montagem
+
+
+def exibir_pasta_tarefa_file_explorer():
+
+    print()
+    print("- Exibir pasta da tarefa no storage")
+    print()
+
+    tarefa=carrega_exibe_tarefa_corrente(exibir=False)
+
+    print("- Storage da tarefa: ", tarefa["dados_storage"]["maquina_netbios"])
+
+    # Montagem de storage
+    # -------------------
+    # Confirma que tem acesso ao storage escolhido
+    # print("- Verificando conexão com storage de destino. Aguarde...")
+    ponto_montagem = conectar_ponto_montagem_storage_ok(
+        dados_storage=tarefa["dados_storage"],
+        utilizar_ip=False
+    )
+    if ponto_montagem is None:
+        # Mensagens de erro já foram apresentadas pela função acima
+        return
+
+    # Determina a pasta
+    pasta=escolhe_pasta_para_abrir(ponto_montagem, tarefa)
+
+    # Abre pasta no File Explorers
+    os.startfile(pasta)
+    print("- Pasta aberta no file explorer: ")
+    print(" ", pasta)
 
 
 # ======================================================================================================================
@@ -2223,7 +2313,7 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
         print("- Confira se a pasta de destino (exibida acima) está bem formada, ou seja, se o memorando e o item estão ok,")
         print("  pois será assim que ficará na mídia de destino.")
         print("- IMPORTANTE: Se a estrutura não estiver ok (por exemplo, o item está errado), cancele comando,")
-        print("  ajuste no SETEC3 e depois retome esta tarefa.")
+        print("  ajuste no SETEC3 (*s3) e depois retome esta tarefa.")
         print()
         prosseguir = pergunta_sim_nao("< Estrutura da pasta está ok?", default="n")
         if not prosseguir:
@@ -2290,7 +2380,7 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
     print("- Ok, procedimento de cópia foi iniciado em background.")
     print("- Você pode continuar trabalhando, inclusive efetuar outras cópias simultaneamente.")
     print("- Para acompanhar a situação da cópia, utilize o comando *SG, ou então *SGR (repetitivo)")
-    print("- Também é possível acompanhar a situação através do SETEC3")
+    print("- Também é possível acompanhar a situação através do SETEC3 (*s3)")
     print("- Em caso de problema/dúvida, utilize *EL para visualizar o log")
     print("- IMPORTANTE: Não encerre este programa enquanto houver cópias em andamento, ")
     print("  pois as mesmas serão interrompidas e terão que ser reiniciadas")
@@ -3026,7 +3116,13 @@ def _obter_solicitacao_exame():
         # Matricula ok, vamos ver se tem solicitacoes de exame
         if (len(lista_solicitacoes) == 0):
             print_tela_log(
-                "Não existe nenhuma solicitacao de exame com tarefas SAPI para esta matrícula. Verifique no setec3")
+                "- Não existe nenhuma solicitacao de exame com tarefas SAPI para esta matrícula. Verifique no setec3")
+            print()
+            abrir_setec3 = pergunta_sim_nao("< Deseja abrir SETEC3 no browser? ", default="s")
+            if abrir_setec3:
+                abrir_browser_setec3_sapi()
+
+            print()
             continue
 
         # Tudo certo, encerra loop
@@ -3048,7 +3144,8 @@ def _obter_solicitacao_exame():
     print()
     print("- Estas são as solicitações de exames que estão preparadas para serem executadas no SAPI.")
     print("- Se a solicitação de exame que você procura não está na lista, ")
-    print("  vá para SETEC3 => Perícia => SAPI e prepare a solicitação, criando tarefas SAPI.")
+    print("  vá para SETEC3 (utilizando o comando *s3), localize a solicitação de exame desejada, ")
+    print("  e prepare a solicitação de exame para o SAPI, definindo as tarefas a serem executadas.")
 
     # Usuário escolhe a solicitação de exame de interesse
     # --------------------------------------------------------
@@ -3057,10 +3154,17 @@ def _obter_solicitacao_exame():
         #
         print()
         num_solicitacao = input(
-            "< Selecione a solicitação de exame, indicando o número de sequencia (Sq) na lista acima: ")
+            "< Indique o número de sequência (Sq) da solicitação na lista acima (ou digite *S3 => SETEC3): ")
         num_solicitacao = num_solicitacao.strip()
+
+        if num_solicitacao=='*s3':
+            abrir_browser_setec3_sapi()
+            continue
+
         if not num_solicitacao.isdigit():
-            print("Entre com o numero da solicitacao")
+            print("- Entre com o número sequencial da solicitacao (coluna Sq)")
+            print("- Digite *s3 para abrir o SETEC3 no browser")
+            print("- Digite <CTR><C> para cancelar")
             continue
 
         # Verifica se existe na lista
@@ -3389,15 +3493,21 @@ def main():
             recuar_item()
             exibir_situacao()
 
-        # Comandos de item
+        # Comandos de tarefa
         if (comando == '*du'):
             dump_tarefa()
             continue
         elif (comando == '*cr'):
             copiar_relatorio_cellebrite()
             continue
+        elif (comando == '*sto'):
+            exibir_pasta_tarefa_file_explorer()
+            continue
         elif (comando == '*cs'):
             comparar_sistema_com_storage()
+            continue
+        elif (comando == '*lo'):
+            exibir_log_tarefa(filtro_usuario=argumento)
             continue
         elif (comando == '*ab'):
             abortar_tarefa()
@@ -3420,8 +3530,8 @@ def main():
         elif (comando == '*lg'):
             exibir_log(comando='*lg', filtro_base='', filtro_usuario=argumento)
             continue
-        elif (comando == '*lo'):
-            exibir_log_tarefa(filtro_usuario=argumento)
+        elif (comando == '*s3'):
+            abrir_browser_setec3_exame(GdadosGerais["codigo_solicitacao_exame_siscrim"])
             continue
         elif (comando == '*db'):
             if modo_debug():
@@ -3444,7 +3554,7 @@ def main():
 
     # Encerrando conexão com storage
     print()
-    desconectar_storage_windows()
+    desconectar_todos_storages()
 
     # Finaliza
     print()

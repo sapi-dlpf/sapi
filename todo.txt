@@ -11,6 +11,11 @@ Planejamento de versões:
 - Problema de congelamento do sapi_iped
 - Tolerância a falha em caso de não resposta do SETEC3 (travamento do sapi_iped)
 - Novo servidor de deployment
+- O BAT que invoca o multicase não está funcionando sem ter letra mapeada.
+  - Tem solução? Fazer exe que trata isto...Como resolver....
+  - Talvez o pushd e popd (testar se funciona ok tando em rede, como em disco local)
+  https://technet.microsoft.com/pt-br/library/bb490978.aspx
+
 
 1.8.1)
 - Colocar uma semi-interface gráfica no sapi_cellebrite, para mostrar a lista de tarefas, com menu de contexto
@@ -26,6 +31,7 @@ Planejamento de versões:
 
 1.10) Novas funcionalidades:
 ---------------------------------------------
+- Controle de acesso, para impedir que um usuário mexa em coisas do outro.
 - Tratamento completo para inexiquibilidade.
 - Mais de uma versão do IPED
 - sapi_watchdog_log: Fica monitorando pasta de log, e reseta servidor se detectar inatividade
@@ -67,6 +73,7 @@ Planejamento de versões:
 3.0) Regime de produção
 ---------------------------------------------
 - Faciliade de uso: Interface gráfica: Substituir uso da interface Web (tudo no cliente)
+- Na interface gráfica, trocar para usuário/senha (ao invés de matrícula)
 - Arquivamento (ver detalhes abaixo).
 
 4.0) Ampliação de base de usuários

@@ -76,6 +76,7 @@ from tkinter import filedialog
 import ssl
 import shutil
 from optparse import OptionParser
+import webbrowser
 
 
 # Desativa a verificação de ceritificado no SSL
@@ -117,7 +118,8 @@ Gconf_ambiente['desenv'] = {
     'servidor_protocolo': 'http',
     'ips': ['10.41.84.5', '10.41.84.5'],
     'servidor_porta': 80,
-    'servidor_sistema': 'setec3_dev'
+    'servidor_sistema': 'setec3_dev',
+    'url_base_s3': 'http://10.41.84.5/setec3_dev/'
 }
 # --- Produção ---
 Gconf_ambiente['prod'] = {
@@ -125,9 +127,9 @@ Gconf_ambiente['prod'] = {
     'servidor_protocolo': 'https',
     'ips': ['10.41.84.5', '10.41.84.5'],
     'servidor_porta': 443,
-    'servidor_sistema': 'setec3'
+    'servidor_sistema': 'setec3',
+    'url_base_s3': 'https://setecpr.dpf.gov.br/setec3/'
 }
-
 
 
 # Definido durante inicializacao
@@ -212,6 +214,26 @@ def _obter_parini_obrigatorio(campo):
         erro_fatal("_obter_parini('" + str(campo) + "') => Parâmetro inválido. Revise código.")
 
     return str(valor)
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Invocando o browser
+# ----------------------------------------------------------------------------------------------------------------------
+def abrir_browser_setec3_sapi():
+    # Monta url
+    url = urllib.parse.urljoin(get_parini('url_base_s3'),"sapi_pcf.php")
+    webbrowser.open(url)
+    print("- Aberto no browser default a página sapi do usuário")
+    debug("Aberto URL", url)
+
+
+def abrir_browser_setec3_exame(codigo_solicitacao_exame_siscrim):
+    # Monta url
+    url = urllib.parse.urljoin(get_parini('url_base_s3'),"sapi_exame.php?codigo="+str(codigo_solicitacao_exame_siscrim))
+    webbrowser.open(url)
+    print("- Aberto no browser default a página de exame sapi da solicitação de exame corrente.")
+    debug("Aberto URL",url)
+
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -530,6 +552,7 @@ def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambie
             set_parini('servidor_porta', amb['servidor_porta'])
             set_parini('servidor_sistema', amb['servidor_sistema'])
             set_parini('url_base', url_base)
+            set_parini('url_base_s3', amb['url_base_s3'])
             # Como token, por equanto será utilizado um valor fixo
             set_parini('servidor_token', 'token_fixo_v0_7')
             # ok
@@ -1558,7 +1581,8 @@ def ajusta_texto_saida(s):
 
     for caminho_storage in Gdic_storage:
         nome_storage=Gdic_storage[caminho_storage]
-        s=s.replace(caminho_storage, nome_storage)
+        if nome_storage not in caminho_storage:
+            s=s.replace(caminho_storage, "* "+nome_storage)
 
     # Para teste, coloca uma marcador...só para saber que está passando por aqui
     #s=s+" (1)"
@@ -1939,12 +1963,11 @@ def acesso_storage_windows(conf_storage, utilizar_ip=True):
 
     global dic_storage
 
-    caminho_storage=obter_caminho_storage(conf_storage, utilizar_ip=True)
+    caminho_storage=obter_caminho_storage(conf_storage, utilizar_ip=utilizar_ip)
     caminho_storage_netbios=obter_caminho_storage(conf_storage, utilizar_ip=False)
 
     # Ponto de montagem implícito
     # Não será mapeado para nenhuma letra, pois pode dar conflito
-
     ponto_montagem = caminho_storage + "\\"
 
     debug("Verificando acesso ao storage: ",caminho_storage_netbios)
@@ -2024,14 +2047,16 @@ def acesso_storage_windows(conf_storage, utilizar_ip=True):
     # Não deveria chegar neste ponto
     return False, ponto_montagem, "[1658] Erro inesperado Comunique desenvolvedor"
 
-def  desconectar_storage_windows():
+
+
+def  desconectar_todos_storages():
 
     for caminho_storage in Gdic_storage:
 
         nome_storage=Gdic_storage[caminho_storage]
 
         # Desconect share
-        # net use \\10.41.87.239\storage /del
+        # net use \\gtpi-sto-01\storage /del
         comando = (
             "net use " + caminho_storage + " /del 1>nul 2>nul"
         )

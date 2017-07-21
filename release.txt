@@ -1,25 +1,53 @@
+O que foi solicitado (e possivelmente resolvido):
+- Facilidade para fazer ajuste em estrutura caso exame seja iniciado com item incorreto (Brunori)
+- Utilização do sistema é pouco intuitiva em função das diversas interfaces: python, setec3, SisCrim (Brunori)
+- Opção para renomear automaticamente arquivo xml_em_copia (caso cópia tenha sido interrompida) (Dante)
+- Melhoria no acompanhamento da situação da cópia (Dante)
+- Possibilidade de visualizar as pastas do storage nas máquinas do cellebrite (Marcos)
+- Calcular percentual de avanço da cópia (Marcos)
+- Surgiram muitas dúvidas na utilização: melhoria na amigabilidade (Ronaldo)
+- Agentes python devem ser tolerante a falha do SETEC3 em responder em tempo hábil (Ronaldo)
 
 Sapi_cellebrite 1.8.1:
-- Opção para renomear arquivo xml_em_copia (caso cópia tenha sido interrompida)
-- Comando *AB: Abortar tarefa
-- Comando *RI: Reinicia tarefa
-- Comando *EX: Exclui tarefa
-- Comando *LO: Exibe log da tarefa
-- Comando *DG: Incluir mensagens de debug no log
-- Comando *SGR: Exibição contínua (loop) da situação com refresh.
-- Cópia exclusivamente em background, com feedback contínuo.
+O que tem de novo no pograma sapi_cellebrite:
+- Novos comandos para tarefa:
+ - *AB: Abortar tarefa
+ - *RI: Reiniciar tarefa
+ - *EX: Excluir tarefa
+ - *LO: Exibe log da tarefa
+ - *STO: Exibe pasta da tarefa no storage (invoca File Explorer)
+ - *DG: Incluir mensagens de debug no log
+- Novos comandos gerais:
+  - Comando *SGR: Exibição contínua (loop) da situação com refresh.
+- Acompanhamento de tarefa:
+  - Cópia exclusivamente em background, com feedback contínuo e cálculo de percentual.
+- Verificação de sucesso da cópia através de checagem de tamanho total e quantidade de arquivos copiados.
 - Melhorias nas mensagens e interface para deixar mais intuitivo
-- Verificação de cópia através de checagem de tamanho total e quantidade de arquivos copiados.
 - No término da execução, pede um <ENTER> para permitir maior clareza de funcionamento na console como shortcut, caso ocorra algum erro.
-- sapilib 0.8
+- Tolerância a falta de resposta do servidor (sapilib 0.8)
 
-sapilib 0.8:
-- Tratamento para timeout e retentativas de requisição http
+
+sapi_laudo:
 -
 
-Quando for instalar no laboratório:
+Setec3:
+  - Ampliação do campo de equipe para 8 caracteres (Dante)
+
+sapi_iped:
+  - Capacidade para excluir tarefa de IPED, refazendo o multicase.
+
+
+sapilib 0.8:
+- Tratamento para timeout na conexão http
+
+
+Mudanças no laborário:
+Objetivo: Como o laboratório vair ter conexão de rede rápida,
+      é provavel que os PCFs optem por executar diversar tarefas,
+      talvez efetuando o ciclo completo (desde o início do exame até o término do laudo).
+
 - Instalar libreoffice
-- Mapear a pasta do sapi dos dois servidor GTPI-STO-01 e GTPI-STO-02
+- Mapear a pasta do sapi dos dois servidor GTPI-STO-01 e GTPI-STO-02 de forma permanente
 - Instalar gravador de mídias (cdburner, imgburner)
 - Compartilhar impressora de impressão de etiqueta de mídia
 - No Chrome colocar link para o SisCrim
@@ -43,6 +71,7 @@ Quando for instalar no laboratório:
   - Icone: Primeiro exame: Dicas básicas
   - Colocar a teclas de atalho em figura (texto de fundo no desktop)
   - Link de ajuda para "Ajuda estação Cellebrite", que aponta para uma página no Wiki
+
 
 
 Na divulgação, citar que se for de interesse, é possível executar todas as operações de exame de celular no laboratório,
