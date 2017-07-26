@@ -290,7 +290,8 @@ def obter_dados_para_processo_filho():
     # Desta forma, pai e filhos compartilham o estado inicial
 
     r = dict()
-    r['Gdic_storage']=Gdic_storage
+    r['Gdic_storage']   =Gdic_storage
+    r['Gparini']        =Gparini
 
     return r
 
@@ -298,8 +299,10 @@ def obter_dados_para_processo_filho():
 # -----------------------------------------------------
 def restaura_dados_no_processo_filho(r):
     global Gdic_storage
+    global Gparini
 
-    Gdic_storage=r['Gdic_storage']
+    Gdic_storage    =r['Gdic_storage']
+    Gparini         =r['Gparini']
     return
 
 
@@ -490,6 +493,16 @@ def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambie
     # Processa parâmetros do usuário, caso isto ainda não tenha sido feito
     sapi_processar_parametros_usuario()
 
+    debug('_sapisrv_inicializar_internal parâmetros => ',
+          'nome_programa:', nome_programa,
+          'versao:', versao,
+          'nome_agente:', nome_agente,
+          'ambiente:', ambiente,
+          'auto_atualizar:', auto_atualizar,
+          'nome_arquivo_log:', nome_arquivo_log,
+          'label_processo:', label_processo
+          )
+
     # Nome do programa
     if nome_programa is None:
         # obrigatório
@@ -512,7 +525,7 @@ def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambie
 
     # Nome do arquivo de log
     if nome_arquivo_log is not None:
-        set_parini('log', nome_arquivo_log)
+        renomear_arquivo_log_default(nome_arquivo_log)
 
     # Label do processo será utilizado para rotular as linhas de log
     if label_processo is not None:
@@ -564,7 +577,6 @@ def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambie
 
     # Inicializado
     Ginicializado = True
-    obter_nome_arquivo_log(resetar=True)
 
 
     debug("Inicializado SAPILIB Agente=", _obter_parini_obrigatorio('nome_agente'),
@@ -573,7 +585,6 @@ def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambie
               " arquivo_log=", obter_nome_arquivo_log())
 
     # Verifica se versão do programa está habilitada a rodar, através de chamada ao servidor
-    # Todo: Implementar verificações no servidor (agente, programa/versão)
     # simulação de erros:
     # raise SapiExceptionAgenteDesautorizado("Máquina com ip 10.41.58.58 não autorizada para executar tal programa")
     # raise SapiExceptionProgramaDesautorizado("Este programa xxxx na versão kkkk não está autorizado")
@@ -845,7 +856,10 @@ def _sapisrv_atualizar_status_tarefa(codigo_tarefa, codigo_situacao_tarefa, stat
 
     # Registra em log
     if sucesso:
-        print_log("Tarefa ", codigo_tarefa, ": atualizado status: ", codigo_situacao_tarefa, status)
+        texto_codigo_situacao=status
+        if int(codigo_situacao_tarefa)>0:
+            texto_codigo_situacao=str(codigo_situacao_tarefa) + "-" +status
+        print_log("Tarefa ", codigo_tarefa, ": atualizado status: ", texto_codigo_situacao)
     else:
         # Se der erro, registra no log e prossegue (tolerância a falhas)
         print_log("Tarefa ", codigo_tarefa, ": Não foi possível atualizar status no SETEC3: ", msg_erro)
@@ -948,7 +962,7 @@ def sapisrv_troca_situacao_tarefa_loop(codigo_tarefa, codigo_situacao_tarefa, te
 
             # Se chegou aqui, é porque conseguiu atualizar a situação
             # Finaliza loop e função com sucesso
-            print_log("Ok, trocada situação")
+            print_log("Nova situação atualizada no SETEC3")
             return True
 
         except Exception as e:
@@ -1516,23 +1530,14 @@ def obter_timestamp(remover_milisegundo=True):
 # Funções relacionadas com log
 # ----------------------------------------------------------------------------------------------------------------------
 
-# Nome do arquivo de log
-# resestar=True: Remonta o nome do arquivo de log, com os parâmetros vigentes
-# ----------------------------------------------------------------------------
-def obter_nome_arquivo_log(resetar=False):
-
-    # Se já está definido, retorna
-    # exceto se o parâmetro resetar=True. Neste caso irá remontar o nome do arquivo de log
-    if get_parini('log') is not None and not resetar:
-        return get_parini('log')
-
-    # Determina nome/caminho para arquivo de log
-    # ------------------------------------------
+# Determina nome/caminho para arquivo de log
+# baseado em parâmetros de inicialização
+def _montar_nome_arquivo_log():
 
     # Usuário forneceu parâmetro com o caminho completo para o arquivo de log
     logfile=get_parini('logfile')
     if logfile is not None:
-        return set_parini('log', logfile)
+        return logfile
 
     # Default para nome de arquivo de log
     # log_XXXXX_AAAA-MM-DD_HH-MM-SS_ssssss.txt, onde:
@@ -1548,18 +1553,84 @@ def obter_nome_arquivo_log(resetar=False):
         if not os.path.isdir(logdir):
             erro_fatal("--logdir ",logdir," : Pasta inexistente. Crie primeiro a pasta")
         # Será criado arquivo com nome padrão na pasta indicada
-        return set_parini('log', os.path.join(logdir, nome_arquivo_default))
+        logfile=os.path.join(logdir, nome_arquivo_default)
+        return logfile
 
     # Usuário não especificou pasta de log e nem caminho para o arquivo
     # Desta forma, o log será gravado na pasta default, com nome default
-    return set_parini('log', nome_arquivo_default)
+    return nome_arquivo_default
 
-# Força a mudança para um nome de arquivo de log arbitrário
+
+# Nome do arquivo de log
+# resestar=True: Remonta o nome do arquivo de log, com os parâmetros vigentes
+# ----------------------------------------------------------------------------
+def obter_nome_arquivo_log():
+
+    if get_parini('log') is not None:
+        return get_parini('log')
+
+    # Monta caminho para arquivo de logo
+    logfile = _montar_nome_arquivo_log()
+
+    # Guarda nome do arquivo de log
+    set_parini('log', logfile)
+
+    return logfile
+
+
+# Força a mudança para um nome de arquivo de log
 # ----------------------------------------------------------------------
-def definir_nome_arquivo_log(nome_arquivo_log):
+def renomear_arquivo_log_default(nome_novo):
 
-    print_log("Mudando nome do arquivo de log. Log continua em: ", nome_arquivo_log)
-    set_parini('log', nome_arquivo_log)
+    # Se o usuário especificou um arquivo de log específico na linha de comando,
+    # ignora operação de renomear, pois a vontade final é do usuário
+    if (get_parini('logfile') is not None):
+        debug("Arquivo de log não foi renomeado, pois usuário definiu parâmetro logfile")
+        return False
+
+    try:
+        # recupera nome atual
+        nome_atual=get_parini('log')
+
+        # Troca nome de log para nome_novo
+        set_parini('log', nome_novo)
+
+        # Se não tem nome atual, nada a fazer, pois arquivo de log ainda não tinha sido criado
+        if nome_atual is None:
+            return False
+
+        # Se o arquivo atual ainda não existe, não tem nada a fazer, pelo mesmo motivo
+        if not os.path.isfile(nome_atual):
+            return True
+
+        # Ok, arquivo atual existe
+        debug("nome nome de arquivo de log atual", nome_atual)
+
+        # Verifica se o arquivo novo existe
+        novo_existe=os.path.isfile(nome_novo)
+
+        # Se o arquivo novo ainda não existe, simplesmente renomeia o atual para o novo
+        if not novo_existe:
+            os.rename(nome_atual, nome_novo)
+            debug("Arquivo de log renomeado de",nome_atual, "para", nome_novo)
+            return True
+
+        # Se o arquivo existe, temos que ler o conteúdo do arquivo atual,
+        # transferir para o final do novo arquivo
+        # e por último excluir o arquivo antigo
+        with codecs.open(nome_novo, 'a', "utf-8") as arquivo_novo:
+            with codecs.open(nome_atual, 'r', "utf-8") as arquivo_atual:
+                for linha in arquivo_atual:
+                    arquivo_novo.write(linha)
+
+        debug("Conteúdo do arquivo", nome_atual, "transferido para", nome_novo)
+
+        # Exclui arquivo atual
+        os.remove(nome_atual)
+        debug("Arquivo", nome_atual, "excluído")
+
+    except BaseException as e:
+        print_log("Erro durante ajuste do nome do arquivo de log para",nome_novo, "erro: ",e)
 
 
 # Definir label que será utilizando no arquivo de log
@@ -1831,6 +1902,29 @@ def converte_bytes_humano(size, precision=1):
         suffix_index += 1  # increment the index of the suffix
         size /= 1024.0  # apply the division
     return "%.*f%s" % (precision, size, suffixes[suffix_index])
+
+# Converte segundo para formato humano, para previsão de conclusão de tarefa
+def converte_segundos_humano(sec):
+    m, s = divmod(sec, 60)
+    h, m = divmod(m, 60)
+    d, h = divmod(h, 24)
+
+    # Se só tem segundo
+    if sec<60:
+        return ('%s seg') % (s)
+
+    # Menor que uma hora, mostra apenas os minutos
+    if (sec<3600):
+        return ('%s min') % (m)
+
+    formato = r'%d h %02d min'
+
+    # Zero dias
+    if d == 0:
+        return formato % (h, m)
+
+    # Mais de um dia
+    return ('%d dia %d h') % (d, h)
 
 
 # Navega em uma pasta até o nível (level) de profundidade definido

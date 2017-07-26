@@ -94,11 +94,14 @@ Gmenu_comandos['comandos'] = {
     '*lo': 'Exibe log da tarefa',
     '*sto': 'Exibir pasta da tarefa no storage através do File Explorer',
 
-    # Comandos gerais
+    # Comandos exibição
     '*sg': 'Exibir situação atualizada das tarefas (com refresh do servidor). ',
     '*sgr': 'Exibir situação repetidamente (Loop) com refresh do servidor. ',
+
+    # Comandos gerais
+    '*s3': 'Abre SETEC3 na página da solicitação de exame corrente',
+    '*s3s': 'Abre SETEC3 na página geral de pendências SAPI',
     '*tt': 'Trocar memorando',
-    '*s3': 'Abre SETEC3 na página da solicitação de exame',
     '*qq': 'Finalizar',
 
     # Comandos para diagnóstico de problemas
@@ -110,7 +113,7 @@ Gmenu_comandos['comandos'] = {
 Gmenu_comandos['cmd_exibicao'] = ["*sg", "*sgr"]
 Gmenu_comandos['cmd_navegacao'] = ["+", "-"]
 Gmenu_comandos['cmd_item'] = ["*cr", "*sto" , "*cs", "*ab", "*ri","*ex", "*lo"]
-Gmenu_comandos['cmd_geral'] = ["*s3", "*tt", "*qq"]
+Gmenu_comandos['cmd_geral'] = ["*s3", "*s3s", "*tt", "*qq"]
 Gmenu_comandos['cmd_diagnostico'] = ["*db", "*lg"]
 
 # **********************************************************************
@@ -165,6 +168,10 @@ class Janela(tkinter.Frame):
 # Recupera os componentes da tarefa correntes e retorna em tupla
 # ----------------------------------------------------------------------
 def obter_tarefa_item_corrente():
+    # Não tem nenhuma tarefa na lista
+    if len(Gtarefas)==0:
+        return (None, None)
+
     x = Gtarefas[Gicor - 1]
     return (x.get("tarefa"), x.get("item"))
 
@@ -1377,6 +1384,10 @@ def _reiniciar_tarefa():
 def exibir_log_tarefa(filtro_usuario):
 
     (tarefa, item) = obter_tarefa_item_corrente()
+    if tarefa is None:
+        print("- Não existe nenhuma tarefa corrente. Utilize *SG para dar refresh na lista de tarefas")
+        return None
+
     codigo_tarefa = tarefa["codigo_tarefa"]
 
     print()
@@ -1504,7 +1515,7 @@ def pode_excluir(tarefa):
     # ------------------------------------------
     if codigo_situacao_tarefa == GEmAndamento:
         # Tarefas com outras situações não são permitidas
-        print("- Tarefa NÃO pode ser excluída, pois está em andamento. Apenas tarefas 'paradas' podem ser excluídas")
+        print("- Tarefa NÃO pode ser excluída, pois está em andamento.")
         print("- Utilize comando *AB (abortar tarefa) para interromper execução e depois reaplique comando *EX")
         return False
 
@@ -1573,7 +1584,7 @@ def _excluir_tarefa():
         # Mensagens de erro já foram apresentadas pela função acima
         return
 
-    caminho_destino = ponto_montagem + tarefa["caminho_destino"]
+    caminho_destino = os.path.join(ponto_montagem, tarefa["caminho_destino"])
 
     print("- Pasta de destino no storage:")
     print(" ", tarefa["caminho_destino"])
@@ -1581,11 +1592,13 @@ def _excluir_tarefa():
     # Verifica se pasta de destino já existe
     limpar_pasta_destino = False
     if os.path.exists(caminho_destino):
+        entradas = os.listdir(caminho_destino)
         print_atencao()
         print()
-        print("- A pasta de destino da tarefa já existe.")
+        print("- A pasta de destino da tarefa já existe e contém ", len(entradas)," arquivos/pastas.")
         print("- A exclusão da tarefa irá apagar definitivamente todos os dados desta pasta.")
-        print("- Se você precisa dos dados da pasta, conecte no servidor e efetue uma cópia dos dados antes de prosseguir.")
+        print("- Se você precisa dos dados da pasta, conecte no servidor (*sto) ")
+        print("  e efetue uma cópia dos dados antes de prosseguir.")
         print()
         prosseguir = pergunta_sim_nao(
             "< Você concorda que a pasta de destino da tarefa seja excluída?",
@@ -1615,10 +1628,12 @@ def _excluir_tarefa():
     if not prosseguir:
         return
 
+
+
     # Decide o método a utilizar.
     # Se houver pasta da tarefa, efetua exclusão em background. Caso contrário, faz exclusão em foreground
     if limpar_pasta_destino:
-        efetuar_exclusao_background(codigo_tarefa, caminho_destino, )
+        efetuar_exclusao_background(tarefa, ponto_montagem)
         return
 
     # Efetua exclusão em foreground
@@ -1627,18 +1642,28 @@ def _excluir_tarefa():
         # Exclui tarefa no SETEC3
         # -----------------------
         sapisrv_excluir_tarefa(codigo_tarefa=codigo_tarefa)
-        print_log("Tarefa excluida com sucesso")
     except BaseException as e:
         print_tela_log("- Não foi possível excluir tarefa: ", str(e))
         print_falha_comunicacao()
         return
 
+
     # Ok, exclusão finalizada
+    print("- Tarefa excluida com sucesso")
+    exibir_situacao_apos_comando()
     return
 
 
 
-def efetuar_exclusao_background(codigo_tarefa, caminho_destino):
+def efetuar_exclusao_background(tarefa, ponto_montagem):
+
+    codigo_tarefa = tarefa["codigo_tarefa"]
+
+    # Caminhos para cada um dos componente
+    pasta_memorando = os.path.join(ponto_montagem, tarefa["dados_solicitacao_exame"]["pasta_memorando"])
+    pasta_item = os.path.join(pasta_memorando, tarefa["pasta_item"])
+    pasta_tarefa = os.path.join(ponto_montagem, tarefa["caminho_destino"])
+
     # Troca situação da tarefa
     # ------------------------
     texto_status = "Excluindo tarefa"
@@ -1662,7 +1687,7 @@ def efetuar_exclusao_background(codigo_tarefa, caminho_destino):
     dados_pai_para_filho=obter_dados_para_processo_filho()
     p_executar = multiprocessing.Process(
         target=background_executar_exclusao,
-        args=(codigo_tarefa, caminho_destino,
+        args=(codigo_tarefa, pasta_memorando, pasta_item, pasta_tarefa,
               nome_arquivo_log_para_processos_filhos, label_processo, dados_pai_para_filho)
     )
     p_executar.start()
@@ -1674,7 +1699,7 @@ def efetuar_exclusao_background(codigo_tarefa, caminho_destino):
     label_processo = "acompanhar:" + str(codigo_tarefa)
     p_acompanhar = multiprocessing.Process(
         target=background_acompanhar_exclusao,
-        args=(codigo_tarefa, caminho_destino, nome_arquivo_log_para_processos_filhos, label_processo))
+        args=(codigo_tarefa, pasta_tarefa, nome_arquivo_log_para_processos_filhos, label_processo))
     p_acompanhar.start()
 
     registra_processo_filho(label_processo, p_acompanhar)
@@ -1697,7 +1722,7 @@ def efetuar_exclusao_background(codigo_tarefa, caminho_destino):
 
 
 # Efetua a exclusão da tarefa, incluindo sua pasta de destino
-def background_executar_exclusao(codigo_tarefa, caminho_destino,
+def background_executar_exclusao(codigo_tarefa, pasta_memorando, pasta_item, pasta_tarefa,
                                  nome_arquivo_log, label_processo, dados_pai_para_filho):
 
     # Impede interrupção por sigint
@@ -1719,18 +1744,42 @@ def background_executar_exclusao(codigo_tarefa, caminho_destino,
         # 1) Marca início em background
         print_log("Início da exclusão em background para tarefa", codigo_tarefa)
 
-        # 2) Exclui pasta de destino
+        # 2) Verifica o tamanho da pasta de destino, antes de excluir
+        # -----------------------------------------------------------
+        r = obter_caracteristicas_pasta(pasta_tarefa)
+        tam_pasta_tarefa = r.get("tamanho_total", None)
+        print_log("Pasta a ser excluída possui ", converte_bytes_humano(tam_pasta_tarefa))
+
+        # Uma pequena pausa aqui, para dar tempo ao processo de acompanhamento coletar o tamanho da pasta
+        time.sleep(15)
+
+        # 3) Exclui pasta da tarefa
         # ---------------------------
         texto_status = "Excluindo pasta da tarefa"
         sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status)
-        # Exclui pasta de destino
-        shutil.rmtree(caminho_destino, ignore_errors=True)
+        # Exclui pasta da tarefa
+        shutil.rmtree(pasta_tarefa, ignore_errors=True)
         # Ok, exclusão concluída
         texto_status = "Pasta da tarefa foi excluída"
         sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status)
 
-        # Se não sobrou mais nenhuma pasta abaixo da pasta do memorando, exclui a pasta do memorando também
+        # Se não sobrou mais nenhuma pasta abaixo da pasta do item, exclui a pasta do item também
+        time.sleep(5) #Pausa para dar tempo de excluir
+        entradas=os.listdir(pasta_item)
+        qtd_entradas = len(entradas)
+        if (qtd_entradas==0):
+            shutil.rmtree(pasta_item, ignore_errors=True)
+            print_log("Pasta do item",  pasta_item, "também foi excluída, pois não continha mais nenhuma entrada")
+        else:
+            print_log("Pasta do item não foi excluída pois ainda contém ",qtd_entradas, "entradas: ", entradas)
 
+        # Se não sobrou mais nenhuma pasta abaixo da pasta do memorando, exclui a pasta do memorando também
+        time.sleep(5) #Pausa para dar tempo de excluir
+        entradas=os.listdir(pasta_memorando)
+        qtd_entradas = len(entradas)
+        if (qtd_entradas==0):
+            shutil.rmtree(pasta_memorando, ignore_errors=True)
+            print_log("Pasta do memorando",  pasta_memorando, "também foi excluída, pois não continha mais nenhuma entrada")
 
         # Se chegou aqui, sucesso
         print_log("Exclusão de pasta da tarefa efetuada com sucesso")
@@ -1784,9 +1833,9 @@ def background_executar_exclusao(codigo_tarefa, caminho_destino,
         print_falha_comunicacao()
         sys.exit(0)
 
-    # Tudo certo
+    # Tudo certo, avisa na tela
     print()
-    print_tela_log("- Tarefa", codigo_tarefa, "excluída com sucesso")
+    print("- Tarefa", codigo_tarefa, "excluída com sucesso")
     print("- Utilize comando *SG para conferir a situação atual da lista de tarefas")
     print("- Esta tarefa não aparecerá mais na lista de tarefas")
 
@@ -1794,7 +1843,7 @@ def background_executar_exclusao(codigo_tarefa, caminho_destino,
     sys.exit(0)
 
 # Acompanhamento de copia em background
-def background_acompanhar_exclusao(codigo_tarefa, caminho_destino, nome_arquivo_log, label_processo):
+def background_acompanhar_exclusao(codigo_tarefa, pasta_tarefa, nome_arquivo_log, label_processo):
 
     # Impede interrupção por sigint
     signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -1809,7 +1858,7 @@ def background_acompanhar_exclusao(codigo_tarefa, caminho_destino, nome_arquivo_
         # simula erro
         #i=5/0
 
-        _background_acompanhar_exclusao(codigo_tarefa, caminho_destino)
+        _background_acompanhar_exclusao(codigo_tarefa, pasta_tarefa)
 
     except BaseException as e:
         # Erro fatal: Mesmo que esteja em background, exibe na tela
@@ -1823,13 +1872,13 @@ def background_acompanhar_exclusao(codigo_tarefa, caminho_destino, nome_arquivo_
 
 
 # Processo em background para efetuar o acompanhamento da cópia
-def _background_acompanhar_exclusao(codigo_tarefa, caminho_destino):
+def _background_acompanhar_exclusao(codigo_tarefa, pasta_tarefa):
 
     # intervalo entre as atualizações
     pausa=15
 
-    # Recupera características da pasta de destino
-    r=obter_caracteristicas_pasta(caminho_destino)
+    # Recupera características da pasta da tarefa
+    r=obter_caracteristicas_pasta(pasta_tarefa)
     tam_pasta_destino = r.get("tamanho_total", None)
     if tam_pasta_destino is None:
         # Se não tem conteúdo, encerrra....Não deveria acontecer nunca
@@ -1864,7 +1913,7 @@ def _background_acompanhar_exclusao(codigo_tarefa, caminho_destino):
 
         # Verifica o tamanho atual da pasta de destino
         try:
-            tamanho_atual = tamanho_pasta(caminho_destino)
+            tamanho_atual = tamanho_pasta(pasta_tarefa)
         except OSError as e:
             # Quando a pasta está sendo excluída, é comum que o procedimento
             # de verificação de tamanho falhe,
@@ -1882,8 +1931,9 @@ def _background_acompanhar_exclusao(codigo_tarefa, caminho_destino):
         print_log(texto_status)
         sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status)
 
-        if percentual>=100:
-            print_log("Encerrando acompanhamento de exclusão, pois foi excluido 100% da pasta da tarefa")
+        if percentual==0:
+            # Encerra acompanhamento pois já exclui integralmente
+            debug("Encerrando acompanhamento de exclusão, pois foi excluído todo o conteúdo da pasta da tarefa")
             return
 
 
@@ -1898,7 +1948,14 @@ def carrega_exibe_tarefa_corrente(exibir=True):
 
     # Recupera tarefa corrente
     (tarefa, item) = obter_tarefa_item_corrente()
+    if tarefa is None:
+        print("- Não existe nenhuma tarefa corrente. Utilize *SG para dar refresh na lista de tarefas")
+        return None
     codigo_tarefa = tarefa["codigo_tarefa"]
+    # Se tarefa foi excluída, não está disponível para ser utilizada
+    if tarefa['excluida']=='f' is None:
+        print("- Esta tarefa foi excluída. Utilize *SG para dar refresh na lista de tarefas")
+        return None
 
     print("- Contactando SETEC3 para obter dados atualizados da tarefa",codigo_tarefa,": Aguarde...")
 
@@ -1968,11 +2025,10 @@ def troca_situacao_tarefa_ok(codigo_tarefa, codigo_nova_situacao, texto_status='
 # Escolhe pasta para exibição, seguindo ordem: Tarefa, item, memorando, raiz do storage
 def escolhe_pasta_para_abrir(ponto_montagem, tarefa):
 
-    #var_dump(tarefa)
-    #die('ponto1972')
-
     # 1) Pasta da tarefa
     pasta_tarefa = ponto_montagem + tarefa["caminho_destino"]
+    print("- Pasta da tarefa:")
+    print("  ", pasta_tarefa)
     if os.path.exists(pasta_tarefa):
         print("- Exibindo pasta da tarefa")
         return pasta_tarefa
@@ -1983,7 +2039,8 @@ def escolhe_pasta_para_abrir(ponto_montagem, tarefa):
     pasta_item = os.path.join(ponto_montagem,
                                    tarefa["dados_solicitacao_exame"]["pasta_memorando"],
                                    tarefa["pasta_item"])
-    print(pasta_item)
+    print("- Pasta do item:")
+    print("  ", pasta_item)
     if os.path.exists(pasta_item):
         print("- Exibindo pasta raiz do item")
         return pasta_item
@@ -1993,13 +2050,13 @@ def escolhe_pasta_para_abrir(ponto_montagem, tarefa):
 
     # 3) Pasta do memorando
     pasta_memorando = os.path.join(ponto_montagem,tarefa["dados_solicitacao_exame"]["pasta_memorando"])
-    print(pasta_memorando)
+    print("- Pasta do exame:")
+    print("  ", pasta_memorando)
     if os.path.exists(pasta_memorando):
         print("- Exibindo pasta da solicitação do exame")
         return pasta_memorando
     else:
-        print("- Ainda não existe pasta para a solicitação de exame")
-
+        print("- Ainda não existe pasta para o exame")
 
     # Se chegou aqui, não tem jeito, tem que abrir na raiz do storage mesmo
     print("- Exibindo pasta raiz do storage")
@@ -2013,6 +2070,8 @@ def exibir_pasta_tarefa_file_explorer():
     print()
 
     tarefa=carrega_exibe_tarefa_corrente(exibir=False)
+    if tarefa is None:
+        return False
 
     print("- Storage da tarefa: ", tarefa["dados_storage"]["maquina_netbios"])
 
@@ -2096,10 +2155,11 @@ def _copiar_relatorio_cellebrite():
     else:
         # Tarefas com outras situações não são permitidas
         print("- Tarefa com situação ", codigo_situacao_tarefa, "-",
-              tarefa['descricao_situacao_tarefa'] + " NÃO pode ser processada")
-        print("- Apenas tarefas com situação 'Aguardando ação PCF' ou 'Abortada' podem ser processadas")
-        print("- Se você quer reexecutar esta tarefa, utilize o comando *RI")
-        print("- Em caso de divergência, efetue em Refresh na lista de tarefas (*SG)")
+              tarefa['descricao_situacao_tarefa'] + " NÃO está apta para este comando.")
+        print("- O comando *CR pode sera aplicado apenas para tarefas com situação 'Aguardando ação PCF' ou 'Abortada'.")
+        print("- Se você precisa refazer esta tarefa (caso, por exemplo, tenha feito a cópia da pasta errada)")
+        print("  utilize primeiramente o comando *RI para reinicializar a tarefa.")
+        print("- Em caso de divergência, efetue em Refresh na lista de tarefas (*SG).")
         return
 
     # ------------------------------------------------------------------
@@ -2597,6 +2657,9 @@ def background_acompanhar_copia(codigo_tarefa, caminho_origem, caminho_destino, 
 # Processo em background para efetuar o acompanhamento da cópia
 def _background_acompanhar_copia(codigo_tarefa, caminho_origem, caminho_destino, nome_arquivo_log):
 
+    # TODO: Calcular o tempo previsto de conclusão
+    start_time = time.time()
+
     # intervalo entre as atualizações
     pausa=15
 
@@ -2654,10 +2717,18 @@ def _background_acompanhar_copia(codigo_tarefa, caminho_origem, caminho_destino,
         if tamanho_copiado>0 and tamanho_anterior>0 and tamanho_copiado>tamanho_anterior:
 
             tamanho_copiado_humano = converte_bytes_humano(tamanho_copiado)
+            tempo_decorrido = time.time() - start_time
+
+            taxa_byte_por_segundos = tamanho_copiado/tempo_decorrido
+            taxa_byte_por_segundos_humano = converte_bytes_humano(taxa_byte_por_segundos,0)
+
+            termino_segundos = round((tam_pasta_origem-tamanho_copiado)/taxa_byte_por_segundos)
 
             # Atualiza status
             percentual = (tamanho_copiado / tam_pasta_origem) * 100
-            texto_status = tamanho_copiado_humano + " (" + str(round(percentual, 1)) + "%)"
+            texto_status = (tamanho_copiado_humano + " (" + str(round(percentual, 0)) + "%)" +
+                           " Taxa: " + taxa_byte_por_segundos_humano + "/s" +
+                           " Término: " + converte_segundos_humano(termino_segundos))
             print_log(texto_status)
             sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status)
 
@@ -2891,6 +2962,17 @@ def print_linha_cabecalho():
 # ----------------------------------------------------------------------
 def exibir_situacao(comando=''):
 
+    global Gicor
+
+    # Antes de mais nada, sanitiza Gicor no range de tarefas
+    # É possível que uma exclusão de tarefa tenha feito o Gicor ficar maior que o tamanho da lista
+    # de tarefas
+    if Gicor>len(Gtarefas):
+        # Posiciona no primeiro
+        Gicor=1
+    if Gicor<1:
+        Gicor=1
+
     # Cabeçalho da lista de elementos
     # --------------------------------------------------------------------------------
     cls()
@@ -2916,16 +2998,14 @@ def exibir_situacao(comando=''):
             situacao = t['status_ultimo']
 
         # Calcula largura da última coluna, que é variável (item : Descrição)
-        # Esta constantes de 60 é a soma de todos os campos e espaços antes do campo "Item : Descrição"
-        lid = Glargura_tela - 58
+        # Esta constantes que está sendo subtraida é a soma de todos os campos e espaços antes do campo "Item : Descrição"
+        lid = Glargura_tela - 78
         lid_formatado = "%-" + str(lid) + "." + str(lid) + "s"
 
-        string_formatacao = '%2s %2s %6s %-30.30s %-13s ' + lid_formatado
+        string_formatacao = '%2s %2s %6s %-50.50s %-13s ' + lid_formatado
 
         # cabecalho
         if (q == 1):
-            # print('%2s %2s %6s %-30.30s %15s %-69.69s' % (
-            #    " ", "Sq", "tarefa", "Situação", "Material", "Item : Descrição"))
             print(string_formatacao % (
                 " ", "Sq", "tarefa", "Situação", "Material", "Item : Descrição"))
             print_centralizado()
@@ -2941,9 +3021,15 @@ def exibir_situacao(comando=''):
             # print('    ' + "^")
             print_centralizado()
 
+    if q==0:
+        print("*** Não existe nenhuma tarefa de extração para este exame ***")
+        print()
+        print("- Efetue a criação de tarefas no SETEC3 (comando *S3)")
+
     print()
     if comando=='':
         print("- Dica: Para recuperar a situação atualizada do servidor (Refresh), utilize os comando *SG ou *SGR (repetitivo)")
+
 
     return
 
@@ -3118,7 +3204,7 @@ def _obter_solicitacao_exame():
             print_tela_log(
                 "- Não existe nenhuma solicitacao de exame com tarefas SAPI para esta matrícula. Verifique no setec3")
             print()
-            abrir_setec3 = pergunta_sim_nao("< Deseja abrir SETEC3 no browser? ", default="s")
+            abrir_setec3 = pergunta_sim_nao("< Deseja abrir página SAPI do SETEC3? ", default="s")
             if abrir_setec3:
                 abrir_browser_setec3_sapi()
 
@@ -3144,7 +3230,7 @@ def _obter_solicitacao_exame():
     print()
     print("- Estas são as solicitações de exames que estão preparadas para serem executadas no SAPI.")
     print("- Se a solicitação de exame que você procura não está na lista, ")
-    print("  vá para SETEC3 (utilizando o comando *s3), localize a solicitação de exame desejada, ")
+    print("  vá para SETEC3 (utilizando o comando *s3s), localize a solicitação de exame desejada, ")
     print("  e prepare a solicitação de exame para o SAPI, definindo as tarefas a serem executadas.")
 
     # Usuário escolhe a solicitação de exame de interesse
@@ -3154,16 +3240,16 @@ def _obter_solicitacao_exame():
         #
         print()
         num_solicitacao = input(
-            "< Indique o número de sequência (Sq) da solicitação na lista acima (ou digite *S3 => SETEC3): ")
+            "< Indique o número de sequência (Sq) da solicitação na lista acima (ou digite *S3s => SAPI no SETEC3): ")
         num_solicitacao = num_solicitacao.strip()
 
-        if num_solicitacao=='*s3':
+        if num_solicitacao=='*s3s':
             abrir_browser_setec3_sapi()
             continue
 
         if not num_solicitacao.isdigit():
             print("- Entre com o número sequencial da solicitacao (coluna Sq)")
-            print("- Digite *s3 para abrir o SETEC3 no browser")
+            print("- Digite *s3s para abrir a página de seus exames SAPI no SETEC3")
             print("- Digite <CTR><C> para cancelar")
             continue
 
@@ -3201,12 +3287,12 @@ def _obter_solicitacao_exame():
 
         # Analisa as tarefas recuperadas
         # ------------------------------
-        if (len(Gtarefas) == 0):
-            print()
-            print("- Solicitação de exame NÃO TEM NENHUMA TAREFA DE EXTRAÇÃO. Verifique no SETEC3.")
-            print()
+        #if (len(Gtarefas) == 0):
+            #print()
+            #print("- Esta solicitação de exame NÃO TEM NENHUMA TAREFA DE EXTRAÇÃO. Verifique no SETEC3.")
+            #print()
             # Continua no loop
-            continue
+            #continue
 
         # Muda log para o arquivo com nome
         partes=solicitacao["identificacao"].split('-')
@@ -3215,7 +3301,7 @@ def _obter_solicitacao_exame():
         nome_arquivo_log=nome_arquivo_log.replace('/','-')
         nome_arquivo_log=nome_arquivo_log.replace(' ','')
 
-        definir_nome_arquivo_log(nome_arquivo_log)
+        renomear_arquivo_log_default(nome_arquivo_log)
 
         # Tudo certo, interrompe loop e retorna
         return True
@@ -3224,6 +3310,7 @@ def _obter_solicitacao_exame():
 def refresh_tarefas():
     # Irá atualizar a variáel global de tarefas
     global Gtarefas
+    global Gicor
 
     print()
     print("- Consultando situação de tarefas no SETEC3 para", GdadosGerais["identificacaoSolicitacao"], ": Aguarde...")
@@ -3243,6 +3330,10 @@ def refresh_tarefas():
 
     # Guarda na global de tarefas
     Gtarefas = tarefas
+
+    # Ajusta índice, pois pode ter ocorrido exclusão de tarefas, deixando o índice com valor inválido
+    if Gicor>len(Gtarefas):
+        Gicor=1
 
     # Guarda data hora do último refresh de tarefas
     GdadosGerais["data_hora_ultima_atualizacao_status"] = datetime.datetime.now().strftime('%H:%M:%S')
@@ -3397,6 +3488,13 @@ def exibir_situacao_repetir():
 
 def main():
 
+    #print(converte_segundos_humano(30))
+    #print(converte_segundos_humano(600))
+    #print(converte_segundos_humano(3700))
+    #print(converte_segundos_humano(72412))
+    #print(converte_segundos_humano(90000))
+    #die('ponto3433')
+
     #print_formulario(label="Campo1", largura_label=10, valor="valor do campo1")
     #print_formulario(label="Campo2", valor="valor do campo2")
     #print_formulario(label="Campo 3 é muito grande", largura_label=10, valor="valor do campo3", truncar=True)
@@ -3442,8 +3540,7 @@ def main():
         refresh_tarefas()
     else:
         # Obtem lista de tarefas, solicitando o memorando
-        obter_solicitacao_exame()
-        if len(Gtarefas)==0:
+        if not (obter_solicitacao_exame()):
             # Se usuário interromper sem selecionar, finaliza
             print("- Execução finalizada.")
             # sys.exit()
@@ -3475,6 +3572,7 @@ def main():
                 # Finaliza
                 print()
                 print("- Finalizando por solicitação do usuário. Aguarde...")
+                print_log("Finalizado por comando de usuário (*qq)")
                 break
             else:
                 # Continua recebendo comandos
@@ -3533,6 +3631,9 @@ def main():
         elif (comando == '*s3'):
             abrir_browser_setec3_exame(GdadosGerais["codigo_solicitacao_exame_siscrim"])
             continue
+        elif (comando == '*s3s'):
+            abrir_browser_setec3_sapi()
+            continue
         elif (comando == '*db'):
             if modo_debug():
                 desligar_modo_debug()
@@ -3586,5 +3687,4 @@ if __name__ == '__main__':
     main()
 
     print()
-    print("< Pressione qualquer tecla para concluir, ou feche a janela")
-    espera_enter()
+    espera_enter("Programa finalizado. Pressione <ENTER> para fechar janela.")

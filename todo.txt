@@ -16,22 +16,34 @@ Planejamento de versões:
   - Talvez o pushd e popd (testar se funciona ok tando em rede, como em disco local)
   https://technet.microsoft.com/pt-br/library/bb490978.aspx
 
+1.9) sapi_imagem e melhorias no sapi_laudo
+---------------------------------------------
+- Sapi_laudo:
+  - Integração com siscrim para criação de laudo (comando *CL)
+  - Pequenos ajustes em dados do laudo
+- Possibilidade de fazer upload de imagens já criadas (para cartões de memória, por exemplo):
+  - sapi_imagem: programa para fazer upload
+  - sapi_laudo: precisa de modelo e tratamento para modelo para esta situação,
+    misturando em um mesmo laudo dispositivos de memória com celular
 
-1.8.1)
+
+1.10) Interface semi-gráfica
+---------------------------------------------
 - Colocar uma semi-interface gráfica no sapi_cellebrite, para mostrar a lista de tarefas, com menu de contexto
 - Colocar uma semi-interface gráfica no sapi_laudo, para selecionar a itemização.
 
-
-1.9) Novas funcionalidades:
+1.11) Novas funcionalidades:
 ---------------------------------------------
 - Testar deployment em formato EXE:
   Exemplo: pyinstaller --onefile sapi_laudo.py
-- sapi_imagem: Exame de celular completo, incluindo cartão de memória e pequenos dispositivos de mídia (pendrives) que possam estar
-  acompanhando a solicitação.
+- Ferramenta_pesquisa.bat => Fazer um substituto em python, convertido para exe.
 
-1.10) Novas funcionalidades:
+1.13) Novas funcionalidades:
 ---------------------------------------------
 - Controle de acesso, para impedir que um usuário mexa em coisas do outro.
+- Incluir o terceiro storage
+- Opção (X) Escolher automaticamente, que irá definir o storage baseado nas características
+  (carga, xxxx)
 - Tratamento completo para inexiquibilidade.
 - Mais de uma versão do IPED
 - sapi_watchdog_log: Fica monitorando pasta de log, e reseta servidor se detectar inatividade
@@ -85,27 +97,38 @@ Planejamento de versões:
 Por programa/componente:
 =======================================================================================================================
 
-sapi_lib
+@sapi_lib
 * Nas requisições http, tratar ausência de resposta (timeout e retentativas)
 - Na conexão com o storage, tratar senha diferenciada (hash)
 
-sapi_cellebrite:
+@sapi_cellebrite:
   *OK Tolerância a falha na atualização do status
   *OK Tratamento adequado no caso de não conseguir modificar o status
   *OK Log significativo.
   *OK Comando EX, que exclui tarefa.
+  *OK Na cópia, além do %, calcular também o tempo estimado de término.
+  * No acompanhamento da cópia, exibir também a quantidade de arquivos que já foi copiado...para dar um feedback quando o tamanho fica "parado"
+  * Está dando erro para arquivo com mais de 256 caracteres...tem que tratar isto
+    - Problema de unicode??
+    https://stackoverflow.com/questions/24046509/python-copy-long-file-path-shutil-copyfile
+    - Arquivos:
+    \\GTPI-STO-02\storage\Memorando_3377-17_CF_GO164\item03Arrecadacao03\item03Arrecadacao03_extracao\files\Database
+
+  * Incluir novos campos (serial, ....), ver dados que marcos passou em
+    I:\desenvolvimento\sapi\novos_campos_laudo\marcos_01
   - Parsing de campos: pegar todos os modelos, selecionado pelo usuário, detectado, se houver mais do que um.
   - Permitir que o usuário descreva a inexquilidade (Lista com as mais comuns), que será atualizada no servidor.
   - Problema de cópia de relatório gigante do Fernando que deu erro (HD externo)
 
-sapi_iped_executar_bat:
+@sapi_iped_executar_bat:
 - Está gerando ano_dia_mes.log (revisar....)
+- No log do servidor, está aparecendo sapi_iped@10.2.192.23. Motivo???
 
-sapi_atualiza_iped:
+@sapi_atualiza_iped:
 OK* Limpar logs: Está ficando muitos arquivos de log na pasta.
 * Limpar pasta indexador no final da execução (IPED não está conseguindo limpar)
 
-sapi_iped
+@sapi_iped
 1) Novo servidor de deployment
 Bug:
 * Está invocando perfil setecpr_ocr ou ocr, revisar, testar
@@ -145,7 +168,7 @@ Novos conceitos:
 - Nao processar o UFDR e o XML: Mover poara outra pasta, e depois retornar novamente para a pasta original
   O XML podia até elmininar no destino, para não ocupar espaço.
 
-sapi_watchdog (NOVO)
+@sapi_watchdog (NOVO)
 - Novo programa, que ficará monitorando se pasta de arquivo de log está sendo modificidado.
 - Parâmetros:
   - pasta a ser monitorada:
@@ -154,7 +177,7 @@ sapi_watchdog (NOVO)
 - Pode ter até mais de um watchdog rodando. Um pode por exemplo mandar email, etc, e outro pode restart o servidor.
 - sapi_watchdog não pode usar sapilib, para evitar "se congelar" pelo mesmo motivo que os outros programas...tem que ser leve.
 
-sapi_imagem (NOVO):
+@sapi_imagem (NOVO):
   - Funcionalidade de submeter uma imagem a processamento
   - Reconhece formato do guymager (log)
   - Reconhece formato do tableu (log)
@@ -166,15 +189,24 @@ sapi_imagem (NOVO):
        - Se tiver vários arquivos que formam um conjunto, tem que dar algum tratamento.
 
 
-sapi_laudo:
-  - converter para sapilib0.8
+@sapi_laudo:
+  * converter para sapilib0.8
   - Criar sapicli, que irá agrupar todas as funções comumente utilizadas pelos clientes sapi.
   - Ajustar interface com novos comandos.
   - MSISDN: Quando não existir, já preencher como 'INDISPONÍVEL'
   - Preencher com descrição de inexequibilidade.
+  * Pedir solicitação de exame, e verificar se tem laudo
+    - Se não tiver, dar opção para criar *CL, que irá invocar diretamente a tela de cadastro de laudo do SisCrim
+  - Comando para criar laudo no setec3 avulso no menu, caso usuário queira criar mais um laudo
+    - Confirma que já existe um laudo
+    - Informa que se usuário quer criar laudo para outro memorando, deve utilizar comando de troca de memorando
+  - Mudança de conceito, autenticação por usuário senha:
+      - Solicitar login/senha através de tkinter:
+      - Utilizando usuário e senha informado, obter a lista de laudos
+      - Quando for baixar modelo de laudo, fazer conexão diretamento no SisCrim, baixando o modelo adequado.
 
 
-sapi_tableau (NOVO):
+@sapi_tableau (NOVO):
   - Primeiro fazer o parser no sapi_imagem, para ter uma solução razoável para o pessoal ir utilizando.
   - Controlar interface web
 
@@ -224,16 +256,24 @@ SETEC3 sapi_tarefa:
 
 SETEC3 sapi_exame.php:
 * Tratar ; ou , no final do item. Está aparecendo item nulo na tela de itens.
+* Incluir [x] Eu conferi a estrutura das pastas e está de acordo.
+  - Se não tem nenhuma tarefa, exibir apenas o bloco de conferência da estrutura.
+  - Quando usuário clicar no [x], faz submit...pode ser um botão também [Conferido]
+  - Se foi conferido (armazenar como hidden), não faz mais este tratamento.
+- Não permitir indicar material de destino, se não houver material de destino devidamento incluído na lista de materiais
 - Botão [Gerar], deixar mais claro que também serve para fazer ajustes em tarefas que já foram geradas
   (exemplo: mídia de entrega)
   - Permitir mais de uma versão de IPED, para poder colocar uma versão "Homologada" e outras "novas"
 - Quadro para orientar a confecção do laudo:
   - Explicar procedimento (Cadastar laudo, gerar modelo, invocar sapi_laudo.py)
+  - Exibir laudos cadastrados
   - Botão para Cadastrar Laudo
   - Botão para gerar modelo do Laudo (Talvez já deixar amarrado aqui o código dos laudos do SAPI....boa)
 
+
 Modelos:
 * Ajustar MJSP para todos (revisar geral)
+- Tem um espaço em cinza que aparece depois entre o nO. e IPL, entre o No. e outros números...
 - Quantidade de páginas, está ficando fixo depois que processa pelo sapi_laudo.py.
   - Por enquanto, colocar em vermelho, e uma observação para alterar/revisar.
   - Descobrir solução definitiva.
