@@ -108,6 +108,7 @@ Por programa/componente:
   *OK Comando EX, que exclui tarefa.
   *OK Na cópia, além do %, calcular também o tempo estimado de término.
   * No acompanhamento da cópia, exibir também a quantidade de arquivos que já foi copiado...para dar um feedback quando o tamanho fica "parado"
+  - Testar se gerando para VHD local e depois copiando para o storage, e reabrindo no VHD de destino tem ganho
   * Está dando erro para arquivo com mais de 256 caracteres...tem que tratar isto
     - Problema de unicode??
     https://stackoverflow.com/questions/24046509/python-copy-long-file-path-shutil-copyfile
@@ -129,12 +130,12 @@ OK* Limpar logs: Está ficando muitos arquivos de log na pasta.
 * Limpar pasta indexador no final da execução (IPED não está conseguindo limpar)
 
 @sapi_iped
-1) Novo servidor de deployment
-Bug:
+OK * Refactor: Utilizar paradigma do sapi_cellebrite
+* Exclusão de tarefa
+* Mudar estrutura de log:
+  gerar log em arquivo do memorando, que fica na pasta do Memorando de destino (log_sapi_iped.txt)
+* Novo servidor de deployment
 * Está invocando perfil setecpr_ocr ou ocr, revisar, testar
-Novos conceitos:
-* Refactor: Utilizar paradigma do sapi_cellebrite
-* Mudar estrutura de log: geral (do programa) e por tarefa (assim que a tarefa é definida)
 * Quando uma tarefa for devolvida (volta para estado AguardandoProcessamento),
   tem que excluir pasta antes...para ficar na situação original.
   Se não for possível excluir a pasta, o estado tem que ficar como abortada
@@ -150,9 +151,6 @@ Novos conceitos:
 * Receber comando do servidor Web de exclusão.
   - Utilizar o mesmo paradigma dos agentes com interface, ou seja, fica lendo um comando que será passado
     (ao invés de passar o comando pela linha de comando, vem via http)
-* Exclusão de tarefa parada:
-  - Neste caso será uma tarefa para ser executada, com o comando previamente setado.
-  - Ou seja, começa executando a tarefa, verifica que o comando é de exclusão e faz o que tem que fazer.
 * Na mensagem do hash, está aparecendo o texto listaArquivos.csv, quando deveria ser "Lista de Arquivos.csv" (Dante)
 * Quando for montar multicase, desprezar pastas que não possuam conteúdo (acho que já faz isto...)
 * Receber comando de exclusão de tarefa.
@@ -197,6 +195,9 @@ Novos conceitos:
   - Preencher com descrição de inexequibilidade.
   * Pedir solicitação de exame, e verificar se tem laudo
     - Se não tiver, dar opção para criar *CL, que irá invocar diretamente a tela de cadastro de laudo do SisCrim
+  * Tratar material de destino compartilhado, que esteja sendo referenciado em mais de um laudo.
+    - Na árvore, este material aparece em um só lugar, mas existem vários laudos citando este material
+    (exemplo flashback, feita pelo Marcos/Brunori)
   - Comando para criar laudo no setec3 avulso no menu, caso usuário queira criar mais um laudo
     - Confirma que já existe um laudo
     - Informa que se usuário quer criar laudo para outro memorando, deve utilizar comando de troca de memorando
@@ -273,7 +274,8 @@ SETEC3 sapi_exame.php:
 
 Modelos:
 * Ajustar MJSP para todos (revisar geral)
-- Tem um espaço em cinza que aparece depois entre o nO. e IPL, entre o No. e outros números...
+* Colocar todos os campos que vem de digitação manual (secretaria) em fundo verde (nome do delegado, número do IPL) para que seja revisado.
+* Tem um espaço em cinza que aparece depois entre o nO. e IPL, entre o No. e outros números...
 - Quantidade de páginas, está ficando fixo depois que processa pelo sapi_laudo.py.
   - Por enquanto, colocar em vermelho, e uma observação para alterar/revisar.
   - Descobrir solução definitiva.
@@ -281,7 +283,6 @@ Modelos:
   (e neste caso também deixar a folha para imprimir a etiqueta da mídia)
 - Separar modelo de mídia óptica de BLURAY e DVD
 - Etiqueta p/ RIMAGE P/ DVD: Colocar DVD na direita (como o bluray)
-
 
 mídia anexa:
   - Reativar mídia anexa para permitir upload de dados gravados.

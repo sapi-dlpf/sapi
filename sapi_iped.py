@@ -74,9 +74,13 @@ GnomeProgramaInterface="IPED-SearchApp.exe"
 #
 Glista_ipeds_suportados = None
 
-# Controle de tarefas
+# Execução de tarefa
 Gcodigo_tarefa_executando = None
-Glabel_processo_executar = None
+Glabel_processo_executando = None
+
+# Exclusão de tarefa
+Gcodigo_tarefa_excluindo = None
+Glabel_processo_excluindo = None
 
 # Dados para laudo
 Gdados_laudo = None
@@ -218,6 +222,29 @@ def solicita_tarefas(lista_tipos, storage=None):
     return None
 
 
+# Tenta obter uma tarefa para exclusão
+def solicita_tarefa_exclusao(lista_tipos, storage=None):
+    for tipo in lista_tipos:
+
+        # Registra em log
+        log = "Solicitando tarefa para exclusão com tipo=[" + tipo + "]"
+        if storage is not None:
+            log += " para storage =[" + storage + "]"
+        else:
+            log += " para qualquer storage"
+        print_log(log)
+
+        # Requisita tarefa
+        (disponivel, tarefa) = sapisrv_obter_excluir_tarefa(tipo, storage=storage)
+        if disponivel:
+            print_log("Tarefa para exclusão disponível")
+            return tarefa
+
+    print_log("Nenhuma tarefa na fila de exclusão")
+    return None
+
+
+
 
 
 # Atualiza arquivo de texto no servidor
@@ -262,32 +289,6 @@ def armazenar_texto_log_iped(codigo_tarefa, caminho_log_iped):
 
     armazenar_texto_tarefa(codigo_tarefa, 'Arquivo de log do IPED', conteudo)
 
-
-# Devolve ao servidor uma tarefa
-# Retorna sempre False
-def devolver(codigo_tarefa, texto_status):
-
-    erro="Devolvendo [[tarefa:" + codigo_tarefa+ "]] ao servidor (para ser executada por outro agente) em função de ERRO: " + texto_status
-
-    # Registra em log
-    print_log(erro)
-
-    # Reportar erro para ficar registrado no servidor
-    # Desta forma, é possível analisar os erros diretamente
-    reportar_erro(erro)
-
-    # Registra situação de devolução
-    sapisrv_troca_situacao_tarefa_loop(
-        codigo_tarefa=codigo_tarefa,
-        codigo_situacao_tarefa=GAguardandoProcessamento,
-        texto_status=texto_status
-    )
-
-    # Ok
-    print_log("Tarefa devolvida")
-
-    # Retorna false, para uso pelo chamador
-    return False
 
 # Aborta tarefa.
 # Retorna False sempre, para repassar para cima
@@ -674,19 +675,23 @@ def calcula_hash_iped(codigo_tarefa, caminho_destino):
 # Ajuste para execução multicase
 def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
 
+    # Situação informativa
+    # -------------------------------------------------------------
     sapisrv_atualizar_status_tarefa_informativo(
         codigo_tarefa=codigo_tarefa,
         texto_status="Efetuando ajuste para IPED multicase"
     )
 
-    # Ajusta caminho de destino
-    caminho_destino = caminho_destino + "\\"
+    # Montar storage
+    # ------------------------------------------------------------------
+    ponto_montagem=conectar_ponto_montagem_storage_ok(tarefa["dados_storage"])
+    if ponto_montagem is None:
+        # Mensagens de erro já foram apresentadas pela função acima
+        erro="Não foi possível conectar no storage"
+        return (False, erro)
 
-    # Extraí pasta do memorando
-    # Localiza pasta do item no caminho de destino
-    inicio_pasta_item = caminho_destino.find(tarefa["pasta_item"])
-    caminho_memorando = caminho_destino[0:inicio_pasta_item]
-
+    # ------------------------------------------------------------------------------------------------------------------
+    # Pastas relacionadas
     # ------------------------------------------------------------------------------------------------------------------
     # O iped multicase possui a seguinte estrutura:
     # Memorando_xxxx_xx
@@ -696,112 +701,217 @@ def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
     #       + conf
     #       + Ferramenta de Pesquisa.exe
     #       + iped-itens.txt
+    #
+    # Cada item possui a seguinte estrutura
+    # Memorando_xxxx_xx
+    #   + item01Arrecadacao01
+    #   + item01Arrecadacao01_iped
+    #     + IPED-SearchApp.exe
+    #     + Lista de Arquivos.csv
+    #     + indexador
+    #       + lib
+    #       + conf
+    #       + ....
+    #
     # ------------------------------------------------------------------------------------------------------------------
 
-    caminho_iped_multicase = caminho_memorando + "multicase\\"
-    caminho_indexador = caminho_iped_multicase + "indexador\\"
+    # Ajusta caminho de destino
+    caminho_destino = caminho_destino + "\\"
 
+    # Extraí pasta do memorando
+    # Localiza pasta do item no caminho de destino
+    inicio_pasta_item = caminho_destino.find(tarefa["pasta_item"])
+    caminho_memorando = caminho_destino[0:inicio_pasta_item]
+
+    # Caminho para bat
+    nome_bat = "ferramenta_pesquisa.bat"
+    caminho_bat = os.path.join(caminho_memorando, nome_bat)
+
+    caminho_iped_multicase      = os.path.join(caminho_memorando,"multicase")
+
+    # Recupera a lista de pasta das tarefas IPED que foram concluídas com sucesso
+    # ---------------------------------------------------------------------------
+    codigo_solicitacao_exame_siscrim=tarefa["dados_solicitacao_exame"]["codigo_documento_externo"]
+    try:
+        (sucesso, msg_erro, tarefas_iped_sucesso) = sapisrv_chamar_programa(
+            "sapisrv_obter_tarefas.php",
+            {'tipo': 'iped%',
+             'codigo_solicitacao_exame_siscrim': codigo_solicitacao_exame_siscrim
+             }
+        )
+    except BaseException as e:
+        erro="Não foi possível recuperar a situação atualizada das tarefas do servidor"
+        return (False, erro)
+
+    if not sucesso:
+        return (False, msg_erro)
+
+
+    # Processa tarefas iped,
+    # selecionando apenas as que já passaram pela fase do IPED
+    # ---------------------------------------------------------------------
+    caminhos_tarefas_iped_finalizado=list()
+    for t in tarefas_iped_sucesso:
+        tarefa_finalizada=t["tarefa"]
+        # Problema: O teste >=GIpedFinalizado pode ser um problema no futuro...
+        # se algum dia for inserido um código de erro maior que 62...
+        # Códigos de erro (abortado, por exemplo) tem que ser pequenos,
+        # obrigatoriamente no início do range
+        codigo_situacao_tarefa=int(tarefa_finalizada["codigo_situacao_tarefa"])
+        if codigo_situacao_tarefa>=GIpedFinalizado:
+            caminhos_tarefas_iped_finalizado.append(tarefa_finalizada["caminho_destino"])
+
+    # Se não tem nenhuma tarefa com iped Finalizado
+    # exclui a extrutura multicase e encerra
+    if len(caminhos_tarefas_iped_finalizado) == 0:
+        print_log("Não possui nenhuma tarefa com iped finalizado. Multicase será excluído")
+        return excluir_multicase(caminho_iped_multicase, caminho_bat)
+
+    # Ok, existem tarefas concluídas com sucesso, prossegue na montagem do multicase
+
+    # Confere se todas as pastas das tarefas finalizadas estão ok
+    # -------------------------------------------------------------
+    for caminho_destino in caminhos_tarefas_iped_finalizado:
+        pasta_iped=os.path.join(ponto_montagem, caminho_destino)
+        if not os.path.exists(pasta_iped):
+            erro="[756] Não foi encontrada pasta de IPED de tarefa concluída"+pasta_iped
+            return (False, erro)
+
+        # Verifica integridade da pasta
+        if os.path.exists(os.path.join(pasta_iped, "indexador", "lib")) \
+                and os.path.exists(os.path.join(pasta_iped, "indexador", "conf")) \
+                and os.path.isfile(os.path.join(pasta_iped, GnomeProgramaInterface)):
+            print_log("Pasta", pasta_iped," está íntegra")
+        else:
+            erro="[765] Pasta de IPED danificada: "+pasta_iped
+            return (False, erro)
+
+    # A primeira pasta de IPED será utilizada como modelo, para copiar lib e outros componentes
+    # para o multicase
+    caminho_iped_origem=os.path.join(ponto_montagem, caminhos_tarefas_iped_finalizado[0])
+
+    # Código antigo, para verificar pastas _iped
+    # Confere se todas as pastas de tarefas iped concluídas existem
+    # -------------------------------------------------------------
+    # qtd_pastas_iped=0
+    # lista_pastas=list()
+    # caminho_iped_origem=None
+    # for root, subdirs, files in os_walklevel(caminho_memorando, level=1):
+    #     if ("_iped" in root):
+    #         # Converte caminho absoluto em relativo
+    #         # Exemplo:
+    #         # De    \\gtpi-sto-01\storage\Memorando_1086-16\item11\item11_extracao_iped
+    #         # para  ..\item11\item11_extracao_iped'
+    #         pasta="..\\" +root.replace(caminho_memorando,'')
+    #         lista_pastas.append(pasta)
+    #         qtd_pastas_iped=qtd_pastas_iped+1
+    #         # Verifica se abaixo deste pasta existe uma pasta indexador/lib
+    #         # Se existir, guarda para uso futuro
+    #         if caminho_iped_origem is None:
+    #             if      os.path.exists(os.path.join(root,"indexador", "lib"))\
+    #                 and os.path.exists(os.path.join(root,"indexador", "conf"))\
+    #                 and os.path.isfile(os.path.join(root,GnomeProgramaInterface)):
+    #                 caminho_iped_origem=root
+
+
+    # Cria estrutura multicase, copiando elementos da pasta caminho_iped_origem para caminho_iped_multicase
+    # -----------------------------------------------------------------------------------------------------
+
+    # Pasta para o indexador do multicase
+    caminho_indexador_multicase = os.path.join(caminho_iped_multicase, "indexador")
+
+    # Cria pastas para multicase, se ainda não existirem
     try:
         if not os.path.exists(caminho_iped_multicase):
             os.makedirs(caminho_iped_multicase)
 
-        if not os.path.exists(caminho_indexador):
-            os.makedirs(caminho_indexador)
+        if not os.path.exists(caminho_indexador_multicase):
+            os.makedirs(caminho_indexador_multicase)
     except Exception as e:
-        erro = "Não foi possível criar estrutura de pasta para multicase " + str(e)
-        # Neste caso, aborta tarefa, pois este erro deve ser analisado
+        erro = "[818] Não foi possível criar estrutura de pasta para multicase " + str(e)
         return (False, erro)
 
     # Confere criação de pasta
     if os.path.exists(caminho_iped_multicase):
         print_log("Encontrada pasta" + caminho_iped_multicase)
     else:
-        erro = "Situação inesperada: Pasta " + caminho_iped_multicase + " não existe"
-        # Neste caso, aborta tarefa, pois este erro deve ser analisado
+        erro = "[791] Situação inesperada: Pasta " + caminho_iped_multicase + " não existe"
         return (False, erro)
 
-    if os.path.exists(caminho_indexador):
-        print_log("Encontrada pasta" + caminho_indexador)
+    if os.path.exists(caminho_indexador_multicase):
+        print_log("Encontrada pasta" + caminho_indexador_multicase)
     else:
-        erro = "Situação inesperada: Pasta [" + caminho_indexador + "] não existe"
-        # Neste caso, aborta tarefa, pois este erro deve ser analisado
+        erro = "[797] Situação inesperada: Pasta " + caminho_indexador_multicase + " não existe"
         return (False, erro)
 
 
     # ------------------------------------------------------------------------------------------------------------------
     # Pasta LIB => Esta pasta contém os programas java e bibliotecas utilizados na pesquisa
-    # Efetua a cópia da pasta lib do item para a pasta do iped multicase, caso isto já não tenha sido feito anteriormente
+    # Efetua a cópia da pasta lib de um item para a pasta do multicase caso isto não tenha sido feito anteriormente
     # ------------------------------------------------------------------------------------------------------------------
-    caminho_lib = caminho_indexador + "lib"
+    caminho_lib_origem      =os.path.join(caminho_iped_origem   , "indexador", "lib")
+    caminho_lib_multicase   =os.path.join(caminho_iped_multicase, "indexador", "lib")
 
     # Se pasta lib não existe, cria pasta, copiando da pasta de processamento de IPED do item
-    if not os.path.exists(caminho_lib):
+    if not os.path.exists(caminho_lib_multicase):
         try:
-            caminho_lib_do_item = caminho_destino + "/indexador/lib"
-            print_log("Copiando lib do item [" + caminho_lib_do_item + "] " +
-                      " para lib da pasta raiz [" + caminho_lib + "], para rodar multicase")
-            shutil.copytree(caminho_lib_do_item, caminho_lib)
+            # Cria pasta de lib
+            print_log("Copiando lib " + caminho_iped_origem +
+                      " para lib da pasta multicase " + caminho_lib_multicase)
+            shutil.copytree(caminho_lib_origem, caminho_lib_multicase)
         except Exception as e:
-            erro = "Não foi possível copiar lib do item para lib da pasta raiz: " + str(e)
-            # Neste caso, aborta tarefa, pois este erro deve ser analisado
+            erro = "Não foi possível copiar lib para multicase: " + str(e)
             return (False, erro)
 
     # Confere se lib existe
-    if os.path.exists(caminho_lib):
-        print_log("Encontrada pasta [" + caminho_lib + "]: ok")
+    if os.path.exists(caminho_lib_multicase):
+        print_log("Encontrada pasta " + caminho_lib_multicase + ": ok")
     else:
-        erro = "Situação inesperada: Pasta [" + caminho_lib + "] não existe"
-        # Neste caso, aborta tarefa, pois este erro deve ser analisado
+        erro = "[823] Situação inesperada: Pasta [" + caminho_lib_multicase + "] foi copiada MAS NÃO existe"
         return (False, erro)
 
     # ------------------------------------------------------------------------------------------------------------------
     # Pasta CONF => Copia a pasta conf do item para a pasta do iped multicase, caso isto ainda não tenha sido feito
-    # A rigor, cada item pode ter uma configuração indepenente, logo existe um problema conceitual aqui.
+    # A rigor, cada item pode ter uma configuração independente, logo existe um problema conceitual aqui.
     # Mas como todos são rodados pelo sistema, isto não deve dar diferença
     # ------------------------------------------------------------------------------------------------------------------
-    caminho_conf = caminho_indexador + "conf"
+    caminho_conf_origem     =os.path.join(caminho_iped_origem,      "indexador", "conf")
+    caminho_conf_multicase  =os.path.join(caminho_iped_multicase,   "indexador", "conf")
 
     # Se pasta conf não existe, cria pasta, copiando da pasta de processamento de IPED do item
-    if not os.path.exists(caminho_conf):
+    if not os.path.exists(caminho_conf_multicase):
         try:
-            caminho_conf_do_item = caminho_destino + "/indexador/conf"
-            print_log("Copiando conf do item [" + caminho_conf_do_item + "] " +
-                      " para conf da pasta raiz [" + caminho_conf + "], para rodar multicase")
-            shutil.copytree(caminho_conf_do_item, caminho_conf)
+            print_log("Copiando conf do item" + caminho_conf_origem +
+                      " para conf da pasta multicase" + caminho_conf_multicase)
+            shutil.copytree(caminho_conf_origem, caminho_conf_multicase)
         except Exception as e:
-            erro = "Não foi possível copiar conf do item para conf da pasta raiz: " + str(e)
-            # Neste caso, aborta tarefa, pois este erro deve ser analisado
+            erro = "Não foi possível copiar para multicase: " + str(e)
             return (False, erro)
 
     # Confere se conf existe
-    if os.path.exists(caminho_conf):
-        print_log("Encontrada pasta [" + caminho_conf + "]: ok")
+    if os.path.exists(caminho_conf_multicase):
+        print_log("Encontrada pasta", caminho_conf_multicase, ": ok")
     else:
-        erro = "Situação inesperada: Pasta [" + caminho_conf + "] não existe"
-        # Neste caso, aborta tarefa, pois este erro deve ser analisado
+        erro = "[848] Situação inesperada: Pasta" + caminho_conf_multicase + "não existe"
         return (False, erro)
 
-
-
     # ------------------------------------------------------------------------------------------------------------------
-    # Arquivo Ferramenta de Pesquisa.exe => Copia do item para a pasta do iped multicase
+    # Copia IPED-SearchApp.exe para pasta do multicase
     # ------------------------------------------------------------------------------------------------------------------
-    nome_arquivo=GnomeProgramaInterface
-    caminho_de = caminho_destino + nome_arquivo
-    caminho_para = caminho_iped_multicase + nome_arquivo
+    caminho_de   = os.path.join(caminho_iped_origem,  GnomeProgramaInterface)
+    caminho_para = os.path.join(caminho_iped_multicase, GnomeProgramaInterface)
     try:
+        print_log("Copiando arquivo" + caminho_de + "para" + caminho_para)
         shutil.copy(caminho_de, caminho_para)
     except Exception as e:
-        erro = "Não foi possível copiar [" + caminho_de + "] para [" + caminho_para +"] : " + str(e)
-        # Neste caso, aborta tarefa, pois este erro deve ser analisado
+        erro = "Não foi possível copiar" + caminho_de + "para" + caminho_para +": " + str(e)
         return (False, erro)
 
     # Confere se copiou ok
     if os.path.isfile(caminho_para):
-        print_log("Encontrado arquivo" + caminho_para)
+        print_log("Encontrado arquivo", caminho_para)
     else:
-        erro = "Situação inesperada: Arquivo [" + caminho_para + "] não existe"
-        # Neste caso, aborta tarefa, pois este erro deve ser analisado
+        erro = "[867] Situação inesperada: Arquivo " + caminho_para + " não existe"
         return (False, erro)
 
     # ------------------------------------------------------------------------------------------------------------------
@@ -811,16 +921,27 @@ def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
     arquivo_pastas="iped-itens.txt"
     caminho_arquivo_pastas = caminho_iped_multicase + arquivo_pastas
 
-    # Recupera lista de pastas
-    lista_pastas=list()
-    for root, subdirs, files in os_walklevel(caminho_memorando, level=1):
-        if ("_iped" in root):
-            # Converte caminho absoluto em relativo
-            # Exemplo:
-            # De    \\gtpi-sto-01\storage\Memorando_1086-16\item11\item11_extracao_iped
-            # para  ..\item11\item11_extracao_iped'
-            pasta="..\\" +root.replace(caminho_memorando,'')
-            lista_pastas.append(pasta)
+    # # Recupera lista de pastas com processamento por IPED
+    # qtd_pastas_iped=0
+    # lista_pastas=list()
+    # for root, subdirs, files in os_walklevel(caminho_memorando, level=1):
+    #     if ("_iped" in root):
+    #         # Converte caminho absoluto em relativo
+    #         # Exemplo:
+    #         # De    \\gtpi-sto-01\storage\Memorando_1086-16\item11\item11_extracao_iped
+    #         # para  ..\item11\item11_extracao_iped'
+    #         pasta="..\\" +root.replace(caminho_memorando,'')
+    #         lista_pastas.append(pasta)
+    #         qtd_pastas_iped=qtd_pastas_iped+1
+    lista_pastas = list()
+    for p in caminhos_tarefas_iped_finalizado:
+        # Converte caminho absoluto em relativo
+        # Exemplo:
+        # De    \\gtpi-sto-01\storage\Memorando_1086-16\item11\item11_extracao_iped
+        # para  ..\item11\item11_extracao_iped'
+        pasta="..\\" +p.replace(caminho_memorando,'')
+        lista_pastas.append(pasta)
+
 
     # Criar/recria arquivo
     try:
@@ -840,7 +961,6 @@ def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
     # Cria arquivo bat "ferramenta_pesquisa.bat"
     # Este será o arquivo que o usuário irá clicar para invocar o IPED multicase
     # ------------------------------------------------------------------------------------------------------------------
-    nome_bat = "ferramenta_pesquisa.bat"
 
     conteudo_bat="""
 @echo off
@@ -859,10 +979,6 @@ REM Executa Ferramenta de Pesquisa, passando os parâmetros para multicase
     # Troca o nome do programa do executavel
     conteudo_bat=conteudo_bat.replace("xxx_programa_interface.exe", GnomeProgramaInterface)
 
-
-    # Caminho para bat
-    caminho_bat = caminho_memorando + nome_bat
-
     # Se não existe, cria
     if not os.path.isfile(caminho_bat):
         try:
@@ -880,10 +996,8 @@ REM Executa Ferramenta de Pesquisa, passando os parâmetros para multicase
     if os.path.isfile(caminho_bat):
         print_log("Encontrado arquivo [" + caminho_bat + "]: ok")
     else:
-        erro = "Situação inesperada: Arquivo [" + caminho_bat + "] não existe"
-        # Neste caso, aborta tarefa, pois este erro deve ser analisado
+        erro = "[976] Situação inesperada: Arquivo [" + caminho_bat + "] não existe"
         return (False, erro)
-
 
     # Tudo certo, ajuste multicase concluído
     sapisrv_troca_situacao_tarefa_loop(
@@ -891,6 +1005,33 @@ REM Executa Ferramenta de Pesquisa, passando os parâmetros para multicase
         codigo_situacao_tarefa=GIpedMulticaseAjustado,
         texto_status="Ajuste multicase efetuado")
     return (True, "")
+
+# Retorna: (sucess/insucesso, erro)
+def excluir_multicase(caminho_iped_multicase, caminho_bat):
+
+    print_log("Efetuando exclusão de componentes multicase")
+    try:
+        # Exclui pasta multicase
+        if os.path.exists(caminho_iped_multicase):
+            shutil.rmtree(caminho_iped_multicase)
+            print_log("Excluída pasta:", caminho_iped_multicase)
+        else:
+            print_log("Pasta multicase", caminho_iped_multicase, "não existe")
+        # Exclui bat de pesquisa
+        if os.path.isfile(caminho_bat):
+            os.remove(caminho_bat)
+            print_log("Excluído arquivo:", caminho_bat)
+        else:
+            print_log("Arquivo", caminho_bat, "não existe")
+
+        # Sucesso
+        return (True, "")
+
+    except Exception as e:
+        erro = "Erro na exclusão de multicase: " + str(e)
+        # Neste caso, aborta tarefa, pois este erro deve ser analisado
+        return (False, erro)
+
 
 
 # Recupera dados relevantes do log do IPED
@@ -955,19 +1096,338 @@ def recupera_dados_laudo(codigo_tarefa, caminho_log_iped):
     # Ok, finalizado com sucesso
     return (True, "")
 
+
+# ------------------------------------------------------------------------------------------------------------------
+# Conexão com storage
+# ------------------------------------------------------------------------------------------------------------------
+
+# Efetua conexão no ponto de montagem, dando tratamento em caso de problemas
+def conectar_ponto_montagem_storage_ok(dados_storage):
+
+    # Confirma que tem acesso ao storage escolhido
+    nome_storage = dados_storage['maquina_netbios']
+    print_log("Verificando conexão com storage", nome_storage)
+
+    (sucesso, ponto_montagem, erro) = acesso_storage_windows(dados_storage, utilizar_ip=True)
+    if not sucesso:
+        erro = "Acesso ao storage " + nome_storage + " falhou. Verifique se servidor está acessível (rede) e disponível."
+        # Talvez seja um problema de rede (trasiente)
+        reportar_erro(erro)
+        print_log("Problema insolúvel neste momento, mas possivelmente transiente")
+        return False
+
+    print_log("Storage", nome_storage, "acessível")
+
+    return ponto_montagem
+
+
+# ------------------------------------------------------------------------------------------------------------------
+# Exclusão de tarefa
+# ------------------------------------------------------------------------------------------------------------------
+
 # Executa uma tarefa de iped que esteja ao alcance do agente
 # Retorna verdadeiro se executou uma tarefa e falso se não executou nada
-def executar_uma_tarefa():
+def ciclo_excluir():
+
+    # Se já tem tarefa sendo excluída
+    # verifica a situação da tarefa
+    if Gcodigo_tarefa_excluindo is not None:
+        return tarefa_excluindo()
+    else:
+        return excluir_tarefa()
+
+# Retorna verdadeiro se tarefa ainda está sendo excluída
+def tarefa_excluindo():
+
+    global Gcodigo_tarefa_excluindo
+
+    print_log("Verificando se tarefa", Gcodigo_tarefa_excluindo, "ainda está sendo excluída")
+    tarefa=recupera_tarefa_do_setec3(Gcodigo_tarefa_excluindo)
+
+    excluindo=False
+    excluindo_setec3 = False
+    if tarefa is None:
+        print_log("Não foi possível recuperar situação de tarefa do SETEC3. Presumindo que foi excluída com sucesso")
+    else:
+        codigo_situacao_tarefa = int(tarefa['codigo_situacao_tarefa'])
+        if codigo_situacao_tarefa==GEmExclusao:
+            print_log("Tarefa ainda está sendo excluída de acordo com SETEC3")
+            excluindo=True
+            excluindo_setec3=True
+        else:
+            print_log("Segundo SETEC3 tarefa não está mais sendo excluída. codigo_situacao_tarefa=",codigo_situacao_tarefa)
+
+    # Verifica se o subprocesso de execução da tarefa ainda está rodando
+    nome_processo="excluir:"+str(Gcodigo_tarefa_excluindo)
+    processo=Gpfilhos.get(nome_processo, None)
+    if processo is not None and processo.is_alive():
+        # Ok, tarefa está sendo executada
+        print_log("Subprocesso de exclusão da tarefa ainda está rodando")
+        excluindo = True
+    else:
+        print_log("Subprocesso de exclusão da tarefa NÃO ESTÁ mais rodando")
+        if excluindo_setec3:
+            print_log("Como no setec3 ainda está em exclusão, isto provavelmente indica que o subprocesso de exclusão abortou")
+            print_log("Desta forma, a tentativa de exclusão será abandonada. Isto gerará uma nova tentativa de exclusão")
+            excluindo=False
+
+    # Retorna se alguma condição acima indica que tarefa está excluindo
+    if excluindo:
+        print_log("Tarefa continua em exclusão")
+        return True
+
+    # Se não está mais excluindo
+    print_log("Tarefa não está mais em exclusão")
+    Gcodigo_tarefa_excluindo = None
+    return False
+
+
+
+# Retorna verdadeiro se uma tarefa foi excluída
+def excluir_tarefa():
+
+    global Gcodigo_tarefa_excluindo
+    global Glabel_processo_excluindo
+
+    print_log("Verificando se existe tarefa a ser excluída")
+
+    # Solicita tarefa, dependendo da configuração de storage do agente
+    outros_storages = True
+    tarefa = None
+    if Gconfiguracao["storage_unico"] != "":
+        print_log("Este agente trabalha apenas com storage:", Gconfiguracao["storage_unico"])
+        tarefa = solicita_tarefa_exclusao(Glista_ipeds_suportados, Gconfiguracao["storage_unico"])
+        outros_storages = False
+    elif Gconfiguracao["storage_preferencial"] != "":
+        print_log("Este agente trabalha com storage preferencial:", Gconfiguracao["storage_preferencial"])
+        tarefa = solicita_tarefa_exclusao(Glista_ipeds_suportados, Gconfiguracao["storage_preferencial"])
+        outros_storages = True
+    else:
+        print_log("Este agente trabalha com QUALQUER storage")
+        outros_storages = True
+
+    # Se ainda não tem tarefa, e agente trabalha com outros storages, solicita para qualquer storage
+    if tarefa is None and outros_storages:
+        # Solicita tarefa para qualquer storage
+        tarefa = solicita_tarefa_exclusao(Glista_ipeds_suportados)
+
+    # Se não tem nenhuma tarefa para exdisponível, não tem o que fazer
+    if tarefa is None:
+        print_log("Nenhuma tarefa de para exclusão na fila. Nada a ser excluído por enquanto.")
+        return False
+
+    # Ok, temos tarefa para ser excluída
+    # ------------------------------------------------------------------
+    codigo_tarefa = tarefa["codigo_tarefa"]
+    print_log("Tarefa a ser excluída: ", codigo_tarefa)
+
+    # Montar storage
+    # ------------------------------------------------------------------
+    ponto_montagem=conectar_ponto_montagem_storage_ok(tarefa["dados_storage"])
+    if ponto_montagem is None:
+        # Mensagens de erro já foram apresentadas pela função acima
+        return False
+
+    # ------------------------------------------------------------------
+    # Pastas de destino da tarefa
+    # ------------------------------------------------------------------
+    caminho_destino = os.path.join(ponto_montagem, tarefa["caminho_destino"])
+
+    # Inicia procedimentos em background para excluir tarefa
+    # --------------------------------------------
+    print_log("Iniciando subprocesso para exclusão da tarefa IPED")
+    # Os processo filhos irão atualizar o mesmo arquivo log do processo pai
+    nome_arquivo_log = obter_nome_arquivo_log()
+
+    # Inicia subprocesso para exclusão da tarefa
+    # ------------------------------------------------------------------------------------------------------------------
+    label_processo_excluir = "excluir:" + str(codigo_tarefa)
+    dados_pai_para_filho = obter_dados_para_processo_filho()
+    p_excluir = multiprocessing.Process(
+        target=background_excluir_tarefa_iped,
+        args=(tarefa, nome_arquivo_log, label_processo_excluir, dados_pai_para_filho,
+              caminho_destino)
+    )
+    p_excluir.start()
+
+    registra_processo_filho(label_processo_excluir, p_excluir)
+
+    # Exclusão de tarefa foi iniciada em background
+    Gcodigo_tarefa_excluindo = codigo_tarefa
+    Glabel_processo_excluindo = label_processo_excluir
+    print_log("Subprocesso para exclusão de tarefa iniciado. Retornado ao loop principal")
+    return True
+
+
+def background_excluir_tarefa_iped(tarefa, nome_arquivo_log, label_processo, dados_pai_para_filho,
+              caminho_destino):
+
+    # Preparativos para executar em background
+    # ---------------------------------------------------
+    # Restaura dados herdados do processo pai
+    restaura_dados_no_processo_filho(dados_pai_para_filho)
+
+    # Se não estiver em modo background (opção do usuário),
+    # liga modo dual, para exibir saída na tela e no log
+    if not modo_background():
+        ligar_log_dual()
+
+
+    # Inicializa sapilib
+    # Será utilizado o mesmo arquivo de log do processo pai
+    sapisrv_inicializar(nome_programa=Gprograma,
+                        versao=Gversao,
+                        nome_arquivo_log=nome_arquivo_log,
+                        label_processo=label_processo
+                        )
+
+    # Execução em background
+    # ---------------------------------------------------
+    print_log("Início do subprocesso background_excluir_tarefa_iped")
+
+    codigo_tarefa = tarefa["codigo_tarefa"]
+
+    # Montar storage
+    # ------------------------------------------------------------------
+    ponto_montagem=conectar_ponto_montagem_storage_ok(tarefa["dados_storage"])
+    if ponto_montagem is None:
+        # Mensagens de erro já foram apresentadas pela função acima
+        return False
+
+    # Executa sequencia de tarefas para exclusão da tarefa
+    # -----------------------------------------------------
+    (sucesso, msg_erro)=executa_sequencia_exclusao_tarefa(
+        tarefa,
+        caminho_destino
+    )
+
+    if sucesso:
+        print_log("Todas as etapas da exclusão efetuadas com sucesso")
+    else:
+        # Se ocorreu um erro, retorna a tarefa para o estado original, para tentar novamente
+        # Reportar erro para ficar registrado no servidor
+        # Desta forma, é possível analisar os erros diretamente
+        erro = "Retornado tarefa [[tarefa:" + codigo_tarefa + "]] para início da exclusão em função de ERRO: " + msg_erro
+        reportar_erro(erro)
+
+        # Registra situação de devolução
+        texto_status="Exclusão falhou: " + msg_erro
+        sapisrv_troca_situacao_tarefa_loop(
+            codigo_tarefa=codigo_tarefa,
+            codigo_situacao_tarefa=GFilaExclusao,
+            texto_status=texto_status
+        )
+        print_log("Exclusão finalizada SEM SUCESSO")
+
+    print_log("Fim subprocesso background_excluir_tarefa_iped")
+
+
+# Executa cada um dos componentes do processamento do IPED em sequencia
+def executa_sequencia_exclusao_tarefa(
+        tarefa,
+        caminho_destino,
+):
+
+
+    codigo_tarefa = tarefa["codigo_tarefa"]
+    erro_excecao=False
+
+    try:
+
+        # 1) Ajusta status para indicar que exclusão foi iniciada
+        # =======================================================
+        sapisrv_atualizar_status_tarefa_informativo(
+            codigo_tarefa=codigo_tarefa,
+            texto_status="Exclusão de tarefa iniciada."
+        )
+
+        # 2) Exclui pasta da tarefa
+        # ====================================
+        (sucesso, msg_erro)=exclui_pasta_tarefa(codigo_tarefa, caminho_destino)
+        if not sucesso:
+            return (False, msg_erro)
+
+        # 3) Ajusta ambiente Multicase (remove pasta da tarefa da lista de evidências)
+        # ============================================================================
+        (sucesso, msg_erro)=ajusta_multicase(tarefa, codigo_tarefa, caminho_destino)
+        if not sucesso:
+            return (False, msg_erro)
+
+        # 4) Exclui tarefa no SETEC3
+        # =========================
+        sapisrv_excluir_tarefa_loop(codigo_tarefa=codigo_tarefa)
+
+    except BaseException as e:
+        # Pega qualquer exceção não tratada aqui, para jogar no log
+        trc_string=traceback.format_exc()
+        erro_excecao = True
+
+
+    if erro_excecao:
+        print_log(trc_string)
+        # Tenta registrar no log o erro ocorrido
+        sapisrv_atualizar_status_tarefa_informativo(
+            codigo_tarefa=codigo_tarefa,
+            texto_status="[1169] ERRO em exclusão de tarefa: " + trc_string
+        )
+        reportar_erro("Tarefa " + str(Gcodigo_tarefa_executando) + "Erro => " + trc_string)
+        # subprocesso será abortado, e deixa o processo principal decidir o que fazer
+        os._exit(1)
+
+
+    # Tudo certo, todos os passos foram executados com sucesso
+    # ========================================================
+    return (True, "")
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Exclusão de uma tarefa IPED
+# ----------------------------------------------------------------------------------------------------------------------
+def exclui_pasta_tarefa(codigo_tarefa, caminho_destino):
+
+    print_log("Pasta de destino para excluir: ", caminho_destino)
+
+    # Se pasta da tarefa não existe, não tem mais nada a fazer
+    if not os.path.exists(caminho_destino):
+        print_log("Pasta de destino não existe.")
+        return (True, "")
+
+    # Exclui pasta da tarefa
+    try:
+        print_log("Excluindo pasta: ",caminho_destino)
+        shutil.rmtree(caminho_destino)
+        sapisrv_atualizar_status_tarefa_informativo(
+            codigo_tarefa=codigo_tarefa,
+            texto_status="Pasta de destino excluída: "+ caminho_destino
+        )
+    except Exception as e:
+        erro = "Não foi possível excluir pasta de destino da tarefa: " + str(e)
+        return (False, erro)
+
+    # Não pode existir. Se existir, exclusão acima falhou
+    if os.path.exists(caminho_destino):
+        erro = "Tentativa de excluir pasta de destino falhou: Verifique se existe algo aberto na pasta, que esteja criando um lock em algum dos seus recursos"
+        return (False, erro)
+
+    # Tudo certo
+    print_log("Exclusão efetuada com sucesso")
+    return (True, "")
+
+
+# ------------------------------------------------------------------------------------------------------------------
+# Execução de tarefa
+# ------------------------------------------------------------------------------------------------------------------
+
+# Executa uma tarefa de iped que esteja ao alcance do agente
+# Retorna verdadeiro se executou uma tarefa e falso se não executou nada
+def ciclo_executar():
 
     # Se já tem tarefa rodando IPED,
     # Verifica a situação da tarefa, comandos, etc
     if Gcodigo_tarefa_executando is not None:
         return tarefa_executando()
     else:
-        return iniciar_nova_tarefa()
-
-    # Não deveria chegar aqui
-    erro_fatal("Ponto943 inesperado")
+        return executar_nova_tarefa()
 
 # Retorna verdadeiro se tarefa ainda está executando
 def tarefa_executando():
@@ -1026,10 +1486,10 @@ def tarefa_executando():
 
 
 # Retorna verdadeiro se uma nova tarefa foi iniciada
-def iniciar_nova_tarefa():
+def executar_nova_tarefa():
 
     global Gcodigo_tarefa_executando
-    global Glabel_processo_executar
+    global Glabel_processo_executando
 
     print_log("Tentando iniciar uma nova tarefa")
 
@@ -1077,23 +1537,12 @@ def iniciar_nova_tarefa():
 
     # Montar storage
     # ------------------------------------------------------------------
-    # Confirma que tem acesso ao storage escolhido
-    dados_storage=tarefa["dados_storage"]
-    nome_storage = dados_storage['maquina_netbios']
-    print_log("Verificando conexão com storage",nome_storage)
-
-    (sucesso, ponto_montagem, erro) = acesso_storage_windows(dados_storage, utilizar_ip=True)
-    if not sucesso:
-        erro = "Acesso ao storage " + nome_storage + " falhou. Verifique se servidor está acessível (rede) e disponível."
-        # Talvez seja um problema de rede (trasiente)
-        reportar_erro(erro)
-        print_log("Problema insolúvel neste momento, mas possivelmente transiente")
-        # Devolve tarefa para ser executada por outro agente e finaliza
-        devolver(codigo_tarefa, erro)
+    ponto_montagem=conectar_ponto_montagem_storage_ok(tarefa["dados_storage"])
+    if ponto_montagem is None:
+        # Mensagens de erro já foram apresentadas pela função acima
+        erro="Não foi possível conectar no storage"
+        abortar(codigo_tarefa, erro)
         return False
-
-    print_log("Storage",nome_storage, "acessível")
-
 
     # ------------------------------------------------------------------
     # Pastas de origem e destino
@@ -1164,7 +1613,7 @@ def iniciar_nova_tarefa():
 
     # Tarefa foi iniciada em background
     Gcodigo_tarefa_executando = codigo_tarefa
-    Glabel_processo_executar = label_processo_executar
+    Glabel_processo_executando = label_processo_executar
     print_log("Subprocessos para execução iniciado. Retornado ao loop principal")
     return True
 
@@ -1340,10 +1789,9 @@ def main():
             # que podem vir a regularizar a situação
             break
 
-        algo_executado = executar_uma_tarefa()
+        algo_executado = ciclo_executar()
 
-        #Todo: implementar excluido = excluir_uma_tarefa(lista_ipeds)
-        algo_excluido=False
+        algo_excluido = ciclo_excluir()
 
         if algo_executado or algo_excluido:
             # Como servidor não está ocioso, faz uma pequena pausa e prossegue

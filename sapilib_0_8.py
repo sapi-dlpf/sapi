@@ -93,6 +93,7 @@ GAguardandoPCF = 1
 GSemPastaNaoIniciado = 1
 GAguardandoProcessamento = 5
 GAbortou = 8
+GFilaExclusao = 9
 GDespachadoParaAgente = 20
 GPastaDestinoCriada = 30
 GEmExclusao = 35
@@ -295,7 +296,7 @@ def obter_dados_para_processo_filho():
 
     return r
 
-# Restaura dados gllobias no processo filho
+# Restaura dados globais no processo filho
 # -----------------------------------------------------
 def restaura_dados_no_processo_filho(r):
     global Gdic_storage
@@ -780,7 +781,7 @@ def sapisrv_obter_iniciar_tarefa(
         storage=None,
         dispositivo=None,
         tamanho_minimo=None,
-        tamanho_maximo=None,
+        tamanho_maximo=None
 ):
     # Lista de parâmetros
     param = dict()
@@ -813,6 +814,110 @@ def sapisrv_obter_iniciar_tarefa(
     # Logo, iremos registrar no log e devolver ao chamador como uma simples "Ausência" de tarefas
     if not sucesso:
         print_log_dual("Erro na chamada do sapisrv_obter_iniciar_tarefa", msg_erro)
+        # Não tem tarefa disponível para processamento
+        return (False, None)
+
+    # Chamada respondida com sucesso
+    # Servidor pode retornar dois valores possíveis:
+    #  disponivel=0: Não tem tarefa
+    #  disponivel=1: Tem tarefa para processamento
+    if resultado["disponivel"] == 0:
+        # Não tem nenhuma tarefa disponível
+        return (False, None)
+    else:
+        # Retornou uma tarefa para processamento
+        return (True, resultado["tarefa"])
+
+    # Obtem e inicia (atômico) uma tarefa de um certo tipo (iped-ocr, ief, etc)
+    # Parâmetros opcionais:
+    #  storage: Quando o agente tem conexão limitada (apenas um storage)
+    #  tamanho_minimo e tamanho_maximo (em bytes): Util para selecionar
+    #    tarefas grandes ou pequenas, o que possivelmente irá corresponder
+    #    ao esforço computacional.
+    def sapisrv_obter_iniciar_tarefa(
+            tipo,
+            storage=None,
+            dispositivo=None,
+            tamanho_minimo=None,
+            tamanho_maximo=None
+    ):
+        # Lista de parâmetros
+        param = dict()
+        param['tipo'] = tipo
+        if (storage is not None):
+            param['storage'] = storage
+        if (dispositivo is not None):
+            param['dispositivo'] = dispositivo
+        if (tamanho_minimo is not None):
+            param['tamanho_minimo'] = tamanho_minimo
+        if (tamanho_maximo is not None):
+            param['tamanho_maximo'] = tamanho_maximo
+
+        # Invoca sapi_srv
+        try:
+            (sucesso, msg_erro, resultado) = sapisrv_chamar_programa(
+                programa="sapisrv_obter_iniciar_tarefa.php",
+                parametros=param,
+                abortar_insucesso=False,
+                registrar_log=True
+            )
+        except BaseException as e:
+            print_log("Exception na chamada do sapisrv_obter_iniciar_tarefa.php: ", e)
+            print_log("Presumindo erro intermitente. Continuando para tentar novamente mais tarde")
+            return (False, None)
+
+        # Chamada respondida com falha
+        # Talvez seja um erro intermitente.
+        # Agente tem que ser tolerante a erros, e ficar tentando sempre.
+        # Logo, iremos registrar no log e devolver ao chamador como uma simples "Ausência" de tarefas
+        if not sucesso:
+            print_log_dual("Erro na chamada do sapisrv_obter_iniciar_tarefa", msg_erro)
+            # Não tem tarefa disponível para processamento
+            return (False, None)
+
+        # Chamada respondida com sucesso
+        # Servidor pode retornar dois valores possíveis:
+        #  disponivel=0: Não tem tarefa
+        #  disponivel=1: Tem tarefa para processamento
+        if resultado["disponivel"] == 0:
+            # Não tem nenhuma tarefa disponível
+            return (False, None)
+        else:
+            # Retornou uma tarefa para processamento
+            return (True, resultado["tarefa"])
+
+# Obtem uma tarefa para excluir
+# Parâmetros opcionais:
+#  storage: Quando o agente tem conexão limitada (apenas um storage)
+def sapisrv_obter_excluir_tarefa(
+        tipo,
+        storage=None
+):
+    # Lista de parâmetros
+    param = dict()
+    param['tipo'] = tipo
+    if (storage is not None):
+        param['storage'] = storage
+
+    # Invoca sapi_srv
+    try:
+        (sucesso, msg_erro, resultado) = sapisrv_chamar_programa(
+            programa="sapisrv_obter_excluir_tarefa.php",
+            parametros=param,
+            abortar_insucesso=False,
+            registrar_log=True
+        )
+    except BaseException as e:
+        print_log("Exception na chamada do sapisrv_obter_excluir_tarefa.php: ", e)
+        print_log("Presumindo erro intermitente. Continuando para tentar novamente mais tarde")
+        return (False, None)
+
+    # Chamada respondida com falha
+    # Talvez seja um erro intermitente.
+    # Agente tem que ser tolerante a erros, e ficar tentando sempre.
+    # Logo, iremos registrar no log e devolver ao chamador como uma simples "Ausência" de tarefas
+    if not sucesso:
+        print_log("Erro na chamada do sapisrv_obter_iniciar_tarefa", msg_erro)
         # Não tem tarefa disponível para processamento
         return (False, None)
 
@@ -1001,6 +1106,32 @@ def sapisrv_excluir_tarefa(codigo_tarefa):
 
 
 
+# Exclui tarefa no servidor
+# Se ocorrer um erro, fica em loop ETERNO até conseguir efetuar a operação
+# Se for problema transiente, mais cedo ou mais tarde será resolvido
+# Caso contrário, algum humano irá intervir e cancelar o programa
+def sapisrv_excluir_tarefa_loop(codigo_tarefa):
+
+    while True:
+
+        try:
+            print_log("Excluindo tarefa ", codigo_tarefa, " no SETEC3")
+            # Registra situação
+            sapisrv_excluir_tarefa(codigo_tarefa=codigo_tarefa)
+
+            # Se chegou aqui, é porque conseguiu excluir
+            # Finaliza loop e função com sucesso
+            print_log("Tarefa excluída no SETEC3")
+            return True
+
+        except Exception as e:
+            # Atualização de situação falhou
+            print_log("Exclusão no SETEC3 dae tarefa", codigo_tarefa, "falhou:",e)
+
+        # Pausa para evitar sobrecarregar o servidor
+        dormir=60
+        print_log("Tentando novamente em ",dormir, "segundos")
+        time.sleep(dormir)
 
 
 # Atualiza status da tarefa do sapisrv
