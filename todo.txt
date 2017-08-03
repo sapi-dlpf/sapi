@@ -6,15 +6,15 @@ Planejamento de versões:
 
 1.8) Falhas relatadas pelos últimos usuários.
 ---------------------------------------------
-+/- Possibilidade de correção na estrutura de itens já processada.
-- Melhorar feedback do sapi_cellebrite
-- Problema de congelamento do sapi_iped
+OK Melhorar feedback do sapi_cellebrite
++/- Possibilidade de correção na estrutura de itens já processada (excluir tarefas, itens).
 - Tolerância a falha em caso de não resposta do SETEC3 (travamento do sapi_iped)
 - Novo servidor de deployment
 - O BAT que invoca o multicase não está funcionando sem ter letra mapeada.
   - Tem solução? Fazer exe que trata isto...Como resolver....
   - Talvez o pushd e popd (testar se funciona ok tando em rede, como em disco local)
   https://technet.microsoft.com/pt-br/library/bb490978.aspx
+
 
 1.9) sapi_imagem e melhorias no sapi_laudo
 ---------------------------------------------
@@ -47,6 +47,7 @@ Planejamento de versões:
 - Tratamento completo para inexiquibilidade.
 - Mais de uma versão do IPED
 - sapi_watchdog_log: Fica monitorando pasta de log, e reseta servidor se detectar inatividade
+  https://stackoverflow.com/questions/32053618/how-to-to-terminate-process-using-pythons-multiprocessing
 - Mecanismo para interromper uma tarefa em execução:
   - No servidor, possibilidade de mandar Abortar a tarefa
   - Nos clientes, quando for atualizar status e receber comando de abortar, interromper a execução.
@@ -107,16 +108,28 @@ Por programa/componente:
   *OK Log significativo.
   *OK Comando EX, que exclui tarefa.
   *OK Na cópia, além do %, calcular também o tempo estimado de término.
-  * No acompanhamento da cópia, exibir também a quantidade de arquivos que já foi copiado...para dar um feedback quando o tamanho fica "parado"
-  - Testar se gerando para VHD local e depois copiando para o storage, e reabrindo no VHD de destino tem ganho
-  * Está dando erro para arquivo com mais de 256 caracteres...tem que tratar isto
-    - Problema de unicode??
-    https://stackoverflow.com/questions/24046509/python-copy-long-file-path-shutil-copyfile
-    - Arquivos:
-    \\GTPI-STO-02\storage\Memorando_3377-17_CF_GO164\item03Arrecadacao03\item03Arrecadacao03_extracao\files\Database
-
+  *OK Está dando erro para arquivo com mais de 256 caracteres...tem que tratar isto
+  * Comando *h: Exibe página de ajuda no Wiki
   * Incluir novos campos (serial, ....), ver dados que marcos passou em
     I:\desenvolvimento\sapi\novos_campos_laudo\marcos_01
+  * Comando *SI => Exibe situação de todas as tarefas de cada item. Algo como:
+        Item                   Tarefa          Situação
+        01/01: xxxxx           514-Extração    Sucesso
+                               515-Iped-basico Sucesso
+        -----------------------------------------------------------------------
+        02/03: xxxxx           525-Extração    Aguardando ação PCF
+                               526-iped-basico Aguardando Processamento
+        -----------------------------------------------------------------------
+  * Comando *iped: Invoca IPED para conferir resultado
+  * Comando *VNC: Invoca VNC para o storage associado a este exame.
+    Invocar em outro processo, para não travar...ver como o módulo webbrowser faz para invocar o browser...
+    Tem que passar como parâmetro o nome (ou IP da storage)
+      https://www.realvnc.com/en/docs/man/vncviewer.html
+	Colocar instrução na tela de como acessar:
+	  - Fazer login com conta 'consulta', senha: 'sapi'
+  - No acompanhamento da cópia, exibir também a quantidade de arquivos que já foi copiado...para dar um feedback quando o tamanho fica "parado" (arquivos muito pequenos)..Ou se o campo humando for igual ao anterior, aumentar o número de casas, para deixar claro que está evoluindo. Ou ainda, só mostrar a quantidade de arquivos se o tamanho ficar "congelado".
+  - Armazenar log de execução da tarefa no servidor ao término de cada comando relevante (*cr, *ex, etc)
+  - Testar se gerando para VHD local e depois copiando para o storage, e reabrindo no VHD de destino tem ganho
   - Parsing de campos: pegar todos os modelos, selecionado pelo usuário, detectado, se houver mais do que um.
   - Permitir que o usuário descreva a inexquilidade (Lista com as mais comuns), que será atualizada no servidor.
   - Problema de cópia de relatório gigante do Fernando que deu erro (HD externo)
@@ -132,6 +145,7 @@ OK* Limpar logs: Está ficando muitos arquivos de log na pasta.
 @sapi_iped
 OK * Refactor: Utilizar paradigma do sapi_cellebrite
 * Exclusão de tarefa
+* Ajuste para path com mais de 256 caracteres
 * Mudar estrutura de log:
   gerar log em arquivo do memorando, que fica na pasta do Memorando de destino (log_sapi_iped.txt)
 * Novo servidor de deployment
@@ -161,6 +175,7 @@ OK * Refactor: Utilizar paradigma do sapi_cellebrite
 * Atualização de status intermediários, se não tiverem sucesso, tudo bem, tenta algumas vezes e desiste.
 * Atualização de status final, se não tiver sucesso após algumas tentativas, coloca tarefa como abortada (para ser retomada adiante)
   e prossegue para a próxima.
+- Fazer upload da pasta "lista arquivos.csv"
 - Permitir executar mais de uma versão do IPED.
 - Quando terminar a execução de uma tarefa, fazer o upload do log da tarefa (teria utilidade?)
 - Nao processar o UFDR e o XML: Mover poara outra pasta, e depois retornar novamente para a pasta original
@@ -168,6 +183,7 @@ OK * Refactor: Utilizar paradigma do sapi_cellebrite
 
 @sapi_watchdog (NOVO)
 - Novo programa, que ficará monitorando se pasta de arquivo de log está sendo modificidado.
+  https://stackoverflow.com/questions/32053618/how-to-to-terminate-process-using-pythons-multiprocessing
 - Parâmetros:
   - pasta a ser monitorada:
   - tempo de espera:
@@ -189,6 +205,7 @@ OK * Refactor: Utilizar paradigma do sapi_cellebrite
 
 @sapi_laudo:
   * converter para sapilib0.8
+  - Renomear Locica(1), Logica(2) para "Cartão SIM (1)", "Cartão SIM (2)"
   - Criar sapicli, que irá agrupar todas as funções comumente utilizadas pelos clientes sapi.
   - Ajustar interface com novos comandos.
   - MSISDN: Quando não existir, já preencher como 'INDISPONÍVEL'
@@ -201,11 +218,20 @@ OK * Refactor: Utilizar paradigma do sapi_cellebrite
   - Comando para criar laudo no setec3 avulso no menu, caso usuário queira criar mais um laudo
     - Confirma que já existe um laudo
     - Informa que se usuário quer criar laudo para outro memorando, deve utilizar comando de troca de memorando
+  - Wizard...talvez seja útil para diálogos encadeados, se for necessário:
+    https://stackoverflow.com/questions/41332955/creating-a-wizard-in-tkinter
   - Mudança de conceito, autenticação por usuário senha:
       - Solicitar login/senha através de tkinter:
-      - Utilizando usuário e senha informado, obter a lista de laudos
+	    http://effbot.org/tkinterbook/tkinter-dialog-windows.htm
+		https://stackoverflow.com/questions/2416486/how-to-create-a-password-entry-field-using-tkinter
+      - Utilizando usuário e senha informado, obter a lista de solicitação de exame do usuário.
+	    - Depois que usuário escolhe a solicitação de exame, se não existir laudo, solicitar se usuário deseja criar.
+		- Se deseja criar, invocar a URL do Siscrim correspondente à criação do laudo:
       - Quando for baixar modelo de laudo, fazer conexão diretamento no SisCrim, baixando o modelo adequado.
-
+  - Download automático do modelo do laudo (sem usuário ter que salvar na sua área):
+    - Precisa fazer a autenticação no SisCrim automaticamente (com login/senha fornecidos durantes autenticação no SAPI) e guardar em cookies:
+      https://stackoverflow.com/questions/9548729/how-to-authenticate-a-site-with-python-using-urllib2
+      https://stackoverflow.com/questions/923296/keeping-a-session-in-python-while-making-http-requests
 
 @sapi_tableau (NOVO):
   - Primeiro fazer o parser no sapi_imagem, para ter uma solução razoável para o pessoal ir utilizando.
@@ -254,8 +280,10 @@ SETEC3 sapi_tarefa:
       - Parar execução se ainda estiver executando e excluir pasta
       - Excluir pasta de uma execução já concluída, e corrigir o multicase, para não sobrar rastro da tarefa
         (utilizar tipo 'excluir'...??? ou reprocessar normalmente?...talvez seja melhor)
+  - Exibir a lista de arquivos associados à tarefa (que foi feito upload)
 
 SETEC3 sapi_exame.php:
+* Não permitir CLIQUE DUPLO no botão (se clicar, desabilitar o botão)
 * Tratar ; ou , no final do item. Está aparecendo item nulo na tela de itens.
 * Incluir [x] Eu conferi a estrutura das pastas e está de acordo.
   - Se não tem nenhuma tarefa, exibir apenas o bloco de conferência da estrutura.

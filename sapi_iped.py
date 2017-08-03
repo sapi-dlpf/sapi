@@ -359,6 +359,73 @@ def recupera_tarefa_do_setec3(codigo_tarefa):
 
 
 # ----------------------------------------------------------------------------------------------------------------------
+# Remove da pasta de origem alguns arquivos que não serão processados pelo IPED
+# Retorna:
+#   Sucesso: True => Executado com sucesso,  False => Execução falhou
+#   msg_erro: Se a execução falhou
+#   lista_movidos: Lista de tuplas de pastas movidas (origem, destino)
+# ----------------------------------------------------------------------------------------------------------------------
+def mover_arquivos_sem_iped(caminho_origem, pasta_item):
+
+    die('ponto370') #Ainda não testado..
+
+    lista_mover = list()
+
+    # ------------------------------------------------------------------------------------------------------------------
+    # Verifica se pasta de origem contém algum arquivo que não deve ser indexado pelo IPED
+    # ------------------------------------------------------------------------------------------------------------------
+    print_log("Verifica se na pasta de origem existem arquivos que não devem ser indexados pelo IPED")
+    dirs = os.listdir(caminho_origem)
+    for file in dirs:
+        print(file)
+        if ".UFDR" in file:
+            lista_mover.append(file)
+
+    if len(lista_mover)==0:
+        print_log("Não existe nenhum arquivo a ser movido antes de rodar o IPED")
+        return (True, "", [])
+
+
+    # ------------------------------------------------------------------------------------------------------------------
+    # Move arquivos que não devem ser indexados para a pasta do item
+    # ------------------------------------------------------------------------------------------------------------------
+    lista_movidos=list()
+    try:
+
+        for arquivo in lista_mover:
+            nome_atual = os.path.join(caminho_origem, arquivo)
+            nome_novo = os.path.join(pasta_item, arquivo)
+            print_log("Renomeando arquivo", nome_atual, "para", nome_novo)
+            os.rename(nome_atual, nome_novo)
+
+        # Confere se renomeou
+        if os.path.isfile(nome_atual):
+            raise Exception("Falhou: Arquivo", nome_atual, "ainda existe")
+        if not os.path.isfile(nome_novo):
+            raise Exception("Falhou: Arquivo", nome_novo, "não existe")
+
+        # Tudo certo, moveu
+        # Inclui tupla na lista (nome_atual, nome_novo)
+        lista_movidos.append((nome_atual, nome_novo))
+
+    except OSError as e:
+        # Falhou o rename
+        return (False, "exceção: "+str(e), [])
+
+    # Ok, tudo certo
+    return (True, "", lista_movidos)
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Restaura arquivo movidos (para não serem processados pelo iped)
+# Retorna:
+#   Sucesso: True => Executado com sucesso,  False => Execução falhou
+#   msg_erro: Se a execução falhou
+# ----------------------------------------------------------------------------------------------------------------------
+def restaura_arquivos_movidos(lista_arquivos):
+    die('ponto426')
+
+# ----------------------------------------------------------------------------------------------------------------------
 # Executa IPED
 # Retorna (sucesso, msg_erro)
 #   Sucesso: True => Executado com sucesso,  False => Execução falhou
@@ -919,7 +986,7 @@ def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
     # Este passo sempre é executado e o arquivo é refeito, refletindo o conteúdo completo da pasta
     # ------------------------------------------------------------------------------------------------------------------
     arquivo_pastas="iped-itens.txt"
-    caminho_arquivo_pastas = caminho_iped_multicase + arquivo_pastas
+    caminho_arquivo_pastas = os.path.join(caminho_iped_multicase, arquivo_pastas)
 
     # # Recupera lista de pastas com processamento por IPED
     # qtd_pastas_iped=0
@@ -939,7 +1006,24 @@ def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
         # Exemplo:
         # De    \\gtpi-sto-01\storage\Memorando_1086-16\item11\item11_extracao_iped
         # para  ..\item11\item11_extracao_iped'
-        pasta="..\\" +p.replace(caminho_memorando,'')
+        #pasta="..\\" +p.replace(caminho_memorando,'')
+        inicio_pasta_item = p.find("\\item")
+        if inicio_pasta_item==-1:
+            inicio_pasta_item = p.find("/item")
+            if inicio_pasta_item == -1:
+                erro = "[945] Não foi encontrada subpasta do item em " + p
+                return (False, erro)
+
+        #print(inicio_pasta_item)
+        p_comecando_item = p[inicio_pasta_item:]
+        #print(p_comecando_item)
+        pasta = ".." + p_comecando_item
+        #print(pasta)
+
+        #zzz
+        #print_log("pasta para ajustar", p)
+        #print_log("Caminho memorando: ", caminho_memorando)
+        print_log("Multicase: Incluido em ", arquivo_pastas, "a pasta",pasta)
         lista_pastas.append(pasta)
 
 
@@ -962,7 +1046,7 @@ def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
     # Este será o arquivo que o usuário irá clicar para invocar o IPED multicase
     # ------------------------------------------------------------------------------------------------------------------
 
-    conteudo_bat="""
+    conteudo_bat_deprecated="""
 @echo off
 REM ====================================================================================
 REM SAPI - Carregamento do caso no iped, modo multicase
@@ -974,7 +1058,61 @@ CD multicase
 
 REM Executa Ferramenta de Pesquisa, passando os parâmetros para multicase
 "xxx_programa_interface.exe" -multicases iped-itens.txt
+
+REM =========================================================================
+REM Para debug
+REM Se o comando acima falhar, habilitar as linhas a seguir (retirar o REM)
+REM para poder observar a mensagem de erro
+REM =========================================================================
+REM java -jar "indexador/lib/iped-search-app.jar -multicases iped-itens.txt"
+REM pause
 """
+
+
+    conteudo_bat = """
+@echo off
+REM ====================================================================================
+REM SAPI - Carregamento do caso no iped, modo multicase
+REM ====================================================================================
+echo Carregando IPED. Aguarde...
+REM echo %~d0
+IF "%~d0" == "\\\\" (
+  REM Não tem letra de drive.
+  REM Isto significa que está acessando a partir de um share (pasta de rede)
+  REM Neste caso, iremos criar dinamicamente uma letra, e liberar no final
+  REM --------------------------------------------------------------------
+  set sem_drive=1
+  REM Efetua uma mapeamento automatico do share, para uma letra escolhida pelo sistema
+  pushd %~dp0
+  cd multicase
+) ELSE (
+  REM Ajusta diretório corrente para a pasta de armazenamento do multicase
+  REM --------------------------------------------------------------------
+  CD /D %~dp0
+  CD multicase
+)
+
+
+REM Executa Ferramenta de Pesquisa, passando os parâmetros para multicase
+"xxx_programa_interface.exe" -multicases iped-itens.txt
+
+if "%sem_drive%"=="1" (
+  echo ==========================================================================
+  echo Execucao do IPED
+  echo ==========================================================================
+  echo .
+  echo .
+  echo === ATENCAO ====
+  echo Como voce esta executando em um share de rede, mantenha esta janela aberta ate o final de uso do IPED
+  echo NAO feche a janela antes, caso contrario o IPED apresentara falhas.
+  echo .
+  echo Apos concluir IPED, digite ENTER para encerrar
+  pause
+  REM Fecha drive e encerra
+  popd
+)
+"""
+
 
     # Troca o nome do programa do executavel
     conteudo_bat=conteudo_bat.replace("xxx_programa_interface.exe", GnomeProgramaInterface)
@@ -1549,6 +1687,10 @@ def executar_nova_tarefa():
     # ------------------------------------------------------------------
     caminho_origem  = os.path.join(ponto_montagem, tarefa["caminho_origem"])
     caminho_destino = os.path.join(ponto_montagem, tarefa["caminho_destino"])
+    pasta_item = os.path.join(ponto_montagem,
+                                   tarefa["dados_solicitacao_exame"]["pasta_memorando"],
+                                   tarefa["pasta_item"])
+
 
     # ------------------------------------------------------------------------------------------------------------------
     # Execução
@@ -1604,7 +1746,8 @@ def executar_nova_tarefa():
         target=background_executar_iped,
         args=(tarefa, nome_arquivo_log, label_processo_executar, dados_pai_para_filho,
               comando,
-              caminho_origem, caminho_destino, caminho_log_iped, caminho_tela_iped)
+              caminho_origem, caminho_destino,
+              caminho_log_iped, caminho_tela_iped, pasta_item)
     )
     p_executar.start()
 
@@ -1621,7 +1764,8 @@ def executar_nova_tarefa():
 
 def background_executar_iped(tarefa, nome_arquivo_log, label_processo, dados_pai_para_filho,
                              comando,
-                             caminho_origem, caminho_destino, caminho_log_iped, caminho_tela_iped):
+                             caminho_origem, caminho_destino,
+                             caminho_log_iped, caminho_tela_iped, pasta_item):
 
     # Preparativos para executar em background
     # ---------------------------------------------------
@@ -1654,7 +1798,8 @@ def background_executar_iped(tarefa, nome_arquivo_log, label_processo, dados_pai
         caminho_origem,
         caminho_destino,
         caminho_log_iped,
-        caminho_tela_iped
+        caminho_tela_iped,
+        pasta_item
     )
 
     if sucesso:
@@ -1686,7 +1831,8 @@ def executa_sequencia_iped(
         caminho_origem,
         caminho_destino,
         caminho_log_iped,
-        caminho_tela_iped):
+        caminho_tela_iped,
+        pasta_item):
 
     # Inicializa dados para laudo
     global Gdados_laudo
@@ -1698,7 +1844,14 @@ def executa_sequencia_iped(
 
     try:
 
-        # 1) IPED
+        # 1) Retira da pasta alguns que não precisam ser indexados (ex: UFDR)
+        # =========================================================
+        (sucesso, msg_erro, lista_movidos)=mover_arquivos_sem_iped(caminho_origem, pasta_item)
+        if not sucesso:
+            return (False, msg_erro)
+
+
+        # 2) IPED
         # ====================================
         # Executa IPED
         (sucesso, msg_erro)=executa_iped(codigo_tarefa, comando,
@@ -1707,22 +1860,28 @@ def executa_sequencia_iped(
         if not sucesso:
             return (False, msg_erro)
 
-        # 2) Recupera dados do log para utilizar em laudo
+        # 3) Recupera dados do log para utilizar em laudo
         # ===============================================
         (sucesso, msg_erro)=recupera_dados_laudo(codigo_tarefa, caminho_log_iped)
         if not sucesso:
             return (False, msg_erro)
 
-        # 3) Cálculo de HASH
+        # 4) Cálculo de HASH
         # ====================================
         # Calcula hash
         (sucesso, msg_erro)=calcula_hash_iped(codigo_tarefa, caminho_destino)
         if not sucesso:
             return (False, msg_erro)
 
-        # 4) Ajusta ambiente para Multicase
+        # 5) Ajusta ambiente para Multicase
         # =================================
         (sucesso, msg_erro)=ajusta_multicase(tarefa, codigo_tarefa, caminho_destino)
+        if not sucesso:
+            return (False, msg_erro)
+
+        # 6) Retorna para a pasta os arquivos que não precisavam ser processados pelo IPED
+        # ================================================================================
+        (sucesso, msg_erro) = restaura_arquivos_movidos(lista_movidos)
         if not sucesso:
             return (False, msg_erro)
 
@@ -1755,6 +1914,20 @@ def executa_sequencia_iped(
 # ======================================================================
 
 def main():
+
+    # Teste de ajuste de pasta do item
+    # p="\\\\gtpi-sto-01\\storage\\Memorando_1086-16\\item11\\item11_extracao_iped"
+    # print(p)
+    # inicio_pasta_item = p.find("\\item")
+    # print(inicio_pasta_item)
+    # p_comecando_item = p[inicio_pasta_item:]
+    # print(p_comecando_item)
+    # pasta=".."+p_comecando_item
+    # print(pasta)
+    # die('ponto1767')
+
+    #print_log("Caminho memorando: ", caminho_memorando)
+    #print_log("pasta", p, "ajustada para", pasta)
 
     # Processa parâmetros logo na entrada, para garantir que configurações relativas a saída sejam respeitads
     sapi_processar_parametros_usuario()

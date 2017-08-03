@@ -951,7 +951,7 @@ def exibir_dados_laudo(d):
 
 
 def arquivo_existente(pasta, arquivo):
-    caminho_arquivo = pasta + "/" + arquivo
+    caminho_arquivo = os.path.join(pasta, arquivo)
     return os.path.isfile(caminho_arquivo)
 
 
@@ -1664,6 +1664,9 @@ def efetuar_exclusao_background(tarefa, ponto_montagem):
     pasta_item = os.path.join(pasta_memorando, tarefa["pasta_item"])
     pasta_tarefa = os.path.join(ponto_montagem, tarefa["caminho_destino"])
 
+    # Ajusta pasta da tarefa para caminho longo (>260)
+    pasta_tarefa = ajustar_para_path_longo(pasta_tarefa)
+
     # Troca situação da tarefa
     # ------------------------
     texto_status = "Excluindo tarefa"
@@ -1758,7 +1761,15 @@ def background_executar_exclusao(codigo_tarefa, pasta_memorando, pasta_item, pas
         texto_status = "Excluindo pasta da tarefa"
         sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status)
         # Exclui pasta da tarefa
-        shutil.rmtree(pasta_tarefa, ignore_errors=True)
+        print_log("Excluindo pasta", pasta_tarefa)
+        shutil.rmtree(pasta_tarefa)
+        # Verifica se exclui com sucesso
+        if os.path.exists(pasta_tarefa):
+            print_log("Não foi possível excluir pasta da tarefa")
+            raise Exception("Exclusão da pasta da tarefa falhou")
+        else:
+            print("Pasta da tarefa excluída com sucesso")
+
         # Ok, exclusão concluída
         texto_status = "Pasta da tarefa foi excluída"
         sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status)
@@ -1768,8 +1779,13 @@ def background_executar_exclusao(codigo_tarefa, pasta_memorando, pasta_item, pas
         entradas=os.listdir(pasta_item)
         qtd_entradas = len(entradas)
         if (qtd_entradas==0):
-            shutil.rmtree(pasta_item, ignore_errors=True)
-            print_log("Pasta do item",  pasta_item, "também foi excluída, pois não continha mais nenhuma entrada")
+            print_log("Pasta do item",pasta_item,"também será excluída, pois já não contém mais nenhum arquivo")
+            shutil.rmtree(pasta_item)
+            if os.path.exists(pasta_item):
+                print_log("Não foi possível excluir pasta do item")
+                raise Exception("Exclusão da pasta do item falhou")
+            else:
+                print("Pasta do item excluída com sucesso")
         else:
             print_log("Pasta do item não foi excluída pois ainda contém ",qtd_entradas, "entradas: ", entradas)
 
@@ -1778,11 +1794,16 @@ def background_executar_exclusao(codigo_tarefa, pasta_memorando, pasta_item, pas
         entradas=os.listdir(pasta_memorando)
         qtd_entradas = len(entradas)
         if (qtd_entradas==0):
-            shutil.rmtree(pasta_memorando, ignore_errors=True)
-            print_log("Pasta do memorando",  pasta_memorando, "também foi excluída, pois não continha mais nenhuma entrada")
+            print_log("Pasta do memorando",  pasta_memorando, "também será excluída, pois não continha mais nenhuma entrada")
+            shutil.rmtree(pasta_memorando)
+            if os.path.exists(pasta_memorando):
+                print_log("Não foi possível excluir pasta do memorando")
+                raise Exception("Exclusão da pasta do memorando falhou")
+            else:
+                print("Pasta do memorando excluída com sucesso")
 
         # Se chegou aqui, sucesso
-        print_log("Exclusão de pasta da tarefa efetuada com sucesso")
+        print_log("Exclusão efetuada com sucesso")
         sucesso=True
 
     except BaseException as e:
@@ -1850,7 +1871,7 @@ def background_acompanhar_exclusao(codigo_tarefa, pasta_tarefa, nome_arquivo_log
 
     # Inicializa sapilib, compartilhando o arquivo de log do processo principal
     sapisrv_inicializar(Gprograma, Gversao, nome_arquivo_log=nome_arquivo_log, label_processo=label_processo)
-    print_log("Processo de acompanhamento de cópia iniciado")
+    print_log("Processo de acompanhamento de exclusão iniciado")
 
     # Executa, e se houver algum erro, registra em log
     try:
@@ -1882,7 +1903,7 @@ def _background_acompanhar_exclusao(codigo_tarefa, pasta_tarefa):
     tam_pasta_destino = r.get("tamanho_total", None)
     if tam_pasta_destino is None:
         # Se não tem conteúdo, encerrra....Não deveria acontecer nunca
-        raise("[2027] Falha na obtençao do tamanho da pasta de destino")
+        raise Exception("[2027] Falha na obtençao do tamanho da pasta de destino")
 
     # Avisa que vai começar
     print_log("A cada ", GtempoEntreAtualizacoesStatus, "segundos será atualizado o status da exclusão")
@@ -2091,9 +2112,10 @@ def exibir_pasta_tarefa_file_explorer():
     pasta=escolhe_pasta_para_abrir(ponto_montagem, tarefa)
 
     # Abre pasta no File Explorers
-    os.startfile(pasta)
-    print("- Pasta aberta no file explorer: ")
+    print("- Será aberto agora o file explorer, posicionado na pasta: ")
     print(" ", pasta)
+    os.startfile(pasta)
+    print("- Pasta foi aberto no file explorer")
 
 
 # ======================================================================================================================
@@ -2276,7 +2298,7 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
 
 
     # Verifica se o arquivo XML contido na pasta de origem está ok
-    arquivo_xml = caminho_origem + "/Relatório.xml"
+    arquivo_xml = os.path.join(caminho_origem, "Relatório.xml")
     print("- Validando arquivo XML: ")
     print(" ", arquivo_xml)
     print("- Isto pode demorar alguns minutos, dependendo do tamanho do arquivo. Aguarde...")
@@ -2337,7 +2359,9 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
         # Mensagens de erro já foram apresentadas pela função acima
         return
 
-    caminho_destino = ponto_montagem + tarefa["caminho_destino"]
+    caminho_destino = os.path.join(ponto_montagem, tarefa["caminho_destino"])
+    # Ajusta para nomenclatura de caminho longo (para evitar limitação de 260 caracteres no path total)
+    caminho_destino = ajustar_para_path_longo(caminho_destino)
 
     print("- Pasta de destino no storage:")
     print(" ", tarefa["caminho_destino"])
@@ -2396,6 +2420,7 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
     # Troca situação da tarefa
     # ------------------------
     texto_status = "Preparando para copiar " + caminho_origem + " para " + caminho_destino
+    print_log(texto_status)
     if not troca_situacao_tarefa_ok(codigo_tarefa=codigo_tarefa,
                                     codigo_nova_situacao=GEmAndamento,
                                     texto_status=texto_status
@@ -2476,8 +2501,7 @@ def background_executar_copia(codigo_tarefa, caminho_origem, caminho_destino,
     # (por exemplo o comando *cs) entenda que a cópia ainda não acabou
     # Só quando a extensão for restaurada para xml o sistema entenderá
     # que a cópia acabou
-
-    arquivo_xml_origem = caminho_origem + "/Relatório.xml"
+    arquivo_xml_origem = os.path.join(caminho_origem, "Relatório.xml")
     arquivo_xml_origem_renomeado = arquivo_xml_origem + "_em_copia"
     sucesso=False
     try:
@@ -2490,7 +2514,12 @@ def background_executar_copia(codigo_tarefa, caminho_origem, caminho_destino,
             texto_status = "Excluindo pasta de destino"
             sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status)
             # Exclui pasta de destino
-            shutil.rmtree(caminho_destino, ignore_errors=True)
+            print_log("Excluindo pasta", caminho_destino)
+            shutil.rmtree(caminho_destino)
+            # Verifica se excluiu com sucesso
+            if os.path.exists(caminho_destino):
+                raise Exception("Exclusão de pasta de destino falhou")
+
             # Ok, exclusão concluída
             texto_status = "Pasta de destino excluída"
             sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status)
@@ -2504,7 +2533,7 @@ def background_executar_copia(codigo_tarefa, caminho_origem, caminho_destino,
         if tam_pasta_origem is None:
             # Se não tem conteúdo, aborta...
             # Isto não deveria acontecer nunca....
-            raise ("Pasta de origem com tamanho indefinido")
+            raise Exception("Pasta de origem com tamanho indefinido")
 
         # Atualiza status com características da pasta de origem
         texto_status = "Pasta de origem com " + converte_bytes_humano(tam_pasta_origem) + \
@@ -2513,7 +2542,7 @@ def background_executar_copia(codigo_tarefa, caminho_origem, caminho_destino,
 
         # 4) Renomeia o arquivo XML na pasta de origem (nome temporário)
         # ------------------------------------------------------------------
-        print_log("Renomeando arquivo ", arquivo_xml_origem, " para ", arquivo_xml_origem_renomeado)
+        print_log("Renomeando arquivo", arquivo_xml_origem, "para", arquivo_xml_origem_renomeado)
         print_log("No final da cópia o nome original será restaurado")
         os.rename(arquivo_xml_origem, arquivo_xml_origem_renomeado)
         print_log("Renomeado com sucesso")
@@ -2522,14 +2551,19 @@ def background_executar_copia(codigo_tarefa, caminho_origem, caminho_destino,
         # ------------------------------------------------------------------
         texto_status = "Copiando"
         sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status)
-        shutil.copytree(caminho_origem, caminho_destino)
+        # Este ajuste tem como objetivo introduzir um prefixo \\?\ para fazer
+        # com que o sistema operacional aceite caminhos com mais de 260 caracteres
+        caminho_destino_ajustado=ajustar_para_path_longo(caminho_destino)
+        print_log("Copiando de:", caminho_origem)
+        print_log("Copiando para:", caminho_destino_ajustado)
+        shutil.copytree(caminho_origem, caminho_destino_ajustado)
         texto_status = "Cópia finalizada"
         sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status)
 
         # 6) Restaura o nome do arquivo XML na pasta destino
         # ------------------------------------------------------------------
-        arquivo_xml_destino = caminho_destino + "/Relatório.xml_em_copia"
-        arquivo_xml_destino_renomeado = caminho_destino + "/Relatório.xml"
+        arquivo_xml_destino = os.path.join(caminho_destino, "Relatório.xml_em_copia")
+        arquivo_xml_destino_renomeado = os.path.join(caminho_destino, "Relatório.xml")
         print_log("Restaurado nome de arquivo '",
                   arquivo_xml_destino, "' para '", arquivo_xml_destino_renomeado, "'")
         os.rename(arquivo_xml_destino, arquivo_xml_destino_renomeado)
@@ -2537,8 +2571,8 @@ def background_executar_copia(codigo_tarefa, caminho_origem, caminho_destino,
 
         # 7) Restaura o nome do arquivo XML na pasta origem
         # ------------------------------------------------------------------
-        arquivo_xml_origem = caminho_origem + "/Relatório.xml_em_copia"
-        arquivo_xml_origem_renomeado = caminho_origem + "/Relatório.xml"
+        arquivo_xml_origem = os.path.join(caminho_origem,  "Relatório.xml_em_copia")
+        arquivo_xml_origem_renomeado = os.path.join(caminho_origem, "Relatório.xml")
         print_log("Restaurado nome de arquivo '",
                   arquivo_xml_origem, "' para '", arquivo_xml_origem_renomeado, "'")
         os.rename(arquivo_xml_origem, arquivo_xml_origem_renomeado)
@@ -2554,14 +2588,14 @@ def background_executar_copia(codigo_tarefa, caminho_origem, caminho_destino,
             print_log("Tamanho total confere")
         else:
             print("Divergência entre tamanho total de origem (",carac_origem["tamanho_total"],") e destino (",carac_origem["tamanho_total"],")")
-            raise "Divergência de tamanho"
+            raise Exception("Divergência de tamanho")
 
         if carac_origem["quantidade_arquivos"]==carac_destino["quantidade_arquivos"]:
             print_log("Quantidade de arquivos confere")
         else:
             print("Divergência de quantidade de arquivos entre origem (", carac_origem["quantidade_arquivos"], ") e destino (",
                   carac_origem["quantidade_arquivos"], ")")
-            raise "Divergência de quantidade de arquivos"
+            raise Exception("Divergência de quantidade de arquivos")
 
         sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, "Tamanho total e quantidade de arquivos compatíveis")
 
@@ -2569,9 +2603,15 @@ def background_executar_copia(codigo_tarefa, caminho_origem, caminho_destino,
         print_log("Cópia concluída com sucesso")
         sucesso=True
 
+    except OSError as e:
+        # Erro fatal: Mesmo estando em background, exibe na tela
+        print_tela_log("- [2581] ** ERRO na tarefa",codigo_tarefa, "durante cópia:" + str(e))
+        print("- Consulte log para mais informações")
+        sucesso=False
+
     except BaseException as e:
         # Erro fatal: Mesmo estando em background, exibe na tela
-        print_tela_log("- [1723] ** ERRO na tarefa",codigo_tarefa, "durante cópia:" + str(e))
+        print_tela_log("- [2587] ** ERRO na tarefa",codigo_tarefa, "durante cópia:" + str(e))
         print("- Consulte log para mais informações")
         sucesso=False
 
@@ -2668,7 +2708,7 @@ def _background_acompanhar_copia(codigo_tarefa, caminho_origem, caminho_destino,
     tam_pasta_origem = r.get("tamanho_total", None)
     if tam_pasta_origem is None:
         # Se não tem conteúdo, encerrra....Não deveria acontecer nunca
-        raise("[2027] Falha na obtençao do tamanho da pasta de origem")
+        raise Exception("[2027] Falha na obtençao do tamanho da pasta de origem")
 
     # Avisa que vai começar
     print_log("A cada ", GtempoEntreAtualizacoesStatus, "segundos será atualizado o status da cópia")
@@ -2800,7 +2840,7 @@ def determinar_situacao_no_storage(tarefa):
 
     # Valida arquivo xml
     print("- Validando Relatório.XML. Isto pode demorar, dependendo do tamanho do arquivo. Aguarde...")
-    arquivo_xml = caminho_destino + "/Relatório.xml"
+    arquivo_xml = os.path.join(caminho_destino, "Relatório.xml")
     (resultado, dados_relevantes, erros, avisos) = processar_arquivo_xml(
         arquivo=arquivo_xml,
         numero_item=item["item"],
@@ -3488,6 +3528,36 @@ def exibir_situacao_repetir():
 
 def main():
 
+    # The "\\?\" prefix can also be used with paths constructed according to the universal naming convention (UNC).
+    # To specify such a path using UNC, use the "\\?\UNC\" prefix.
+    # For example, "\\?\UNC\server\share",
+    # where "server" is the name of the computer and "share" is the name of the shared folder.
+    # These prefixes are not used as part of the path itself. They indicate that the path should be passed to the system with minimal modification, which means that you cannot use forward slashes to represent path separators, or a period to represent the current directory, or double dots to represent the parent directory. Because you cannot use the "\\?\" prefix with a relative path, relative paths are always limited to a total of MAX_PATH characters.
+
+    #caminho_original="\\\\10.41.87.237\\storage\\Memorando_1880-17_CF_PR-26/item04Arrecadacao06/item04Arrecadacao06_extracao"
+    #caminho_ajustado=ajustar_caminho_destino_para_copy(caminho_original)
+    #caminho_esperado="\\\\?\\"+"UNC\\10.41.87.237\\storage\\Memorando_1880-17_CF_PR-26\\item04Arrecadacao06\\item04Arrecadacao06_extracao"
+    #print("original: ", caminho_original)
+    #print("esperado: ", caminho_esperado)
+    #print("ajustado: ", caminho_ajustado)
+    #die('ponto3510')
+
+
+
+
+
+    #caminho_origem="C:\\item"
+    #print("Copiando de:", caminho_origem)
+    #caminho_destino_ajustado="\\\\?\\"+"UNC\\10.41.87.237\\storage\\teste_cellebrite_1_Memorando_1880-17_CF_PR-26\\item04Arrecadacao06\\item04Arrecadacao06_extracao"
+    #print("Copiando para:", caminho_destino_ajustado)
+    #die('ponto3510')
+    #shutil.copytree(caminho_origem, caminho_destino_ajustado)
+    #die('ponto3503')
+
+    #path="\\\\10.41.87.237\\storage\\Memorando_1880-17_CF_PR-26/item04Arrecadacao06/item04Arrecadacao06_extracao/"
+    #print(ajustar_caminho_destino_para_copy(path))
+    #die('ponto3498')
+
     #print(converte_segundos_humano(30))
     #print(converte_segundos_humano(600))
     #print(converte_segundos_humano(3700))
@@ -3526,6 +3596,7 @@ def main():
     nome_arquivo_log = "log_sapi_cellebrite.txt"
     sapisrv_inicializar_ok(Gprograma, Gversao, auto_atualizar=True, nome_arquivo_log=nome_arquivo_log)
     print_log('Inicializado com sucesso', Gprograma, ' - ', Gversao)
+
 
     # Teste
     #atualizar_status_tarefa_andamento(465, 'bla, bla')

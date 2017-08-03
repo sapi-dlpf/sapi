@@ -1783,11 +1783,11 @@ def ajusta_texto_saida(s):
 
     for caminho_storage in Gdic_storage:
         nome_storage=Gdic_storage[caminho_storage]
-        if nome_storage not in caminho_storage:
-            s=s.replace(caminho_storage, "* "+nome_storage)
-
-    # Para teste, coloca uma marcador...só para saber que está passando por aqui
-    #s=s+" (1)"
+        sant=s[:]
+        s=s.replace(caminho_storage, nome_storage)
+        s=s.replace(caminho_storage.strip("\\"), nome_storage.strip("\\"))
+        if (s!=sant):
+            s=s + " %"
 
     return s
 
@@ -2069,6 +2069,18 @@ def os_walklevel(some_dir, level=1):
         if num_sep + level <= num_sep_this:
             del dirs[:]
 
+# Ajusta caminho de destino para copia, adicionando prefixo para path longo
+def ajustar_para_path_longo(path):
+    # O separador tem que ser \ ao invés /
+    path = path.replace('/', os.sep).replace('\\', os.sep)
+    # Se for UNC, colocar a representação explícita
+    if 'UNC\\' not in path:
+        path=path.replace('\\\\','UNC\\')
+    # Adiciona notação para caminho longo \\?\
+    if '\\\\?\\' not in path:
+        path = '\\\\?\\' + path
+    return path
+
 
 # Efetua uma cópia do diretorio de origem para o diretório de destino,
 # mesclando
@@ -2177,6 +2189,69 @@ def obter_caminho_storage(conf_storage, utilizar_ip=True):
 
     return caminho_storage
 
+def procurar_mapeamento_uso_futuro(caminho_storage):
+    # Envia comando net use para obter lista de conexão,
+    # faz parse e localiza letra mapeada
+    # Exemplo:
+    # net use
+    # Status       Local     Remoto                    Rede
+    # -------------------------------------------------------------------------------
+    # OK           T:        \\gtpi-sto-02\storage     Microsoft Windows Network
+    # OK           W:        \\10.41.84.104\Departamento\setec
+    #                                                 Microsoft Windows Network
+    # Se caminho_storage==\\gtpi-sto-02\storage, devolve letra T:
+    caminho_arquivo_resultado = os.path.join(get_parini('pasta_execucao'), "net_use_consulta.txt")
+    comando = "net use"
+
+    # Redireciona resultado para arquivo, para pode examinar o erro
+    comando = comando + " >" + caminho_arquivo_resultado + " 2>&1 "
+
+    subprocess.call(comando, shell=True)
+
+    # Não terminei isto aqui....
+    # Tem algum erro bobo aqui, mas talvez isto aqui nem seja necessário,
+    # pois o correto é que o IPED e todo o resto funcione sem sem necessário o mapeamento de unidade
+    # Le comando de resultado e procura mapeamento
+    #with open(caminho_arquivo_resultado, 'r', 'utf-8') as f:
+    #    for linha in f:
+    #        print(linha)
+    #        #if caminho_storage in linha:
+
+    # Não achou
+    return None
+
+
+# Desisti desta abordagem, pois não é correta...
+# O IPED (interface) tem que funcionar sem precisar de mapeamento de rede
+# Efetua storage, e associa uma letra
+def acesso_storage_windows_mapeado_uso_futuro(conf_storage, utilizar_ip=True):
+
+    # Verifica se já tem storage mapeado para a letra
+    caminho_storage=obter_caminho_storage(conf_storage, utilizar_ip=utilizar_ip)
+
+    # Procurar por caminho no storage
+    letra=procurar_mapeamento_uso_futuro(caminho_storage)
+    # Se já está mapeado, retorna
+    if letra=='':
+        return (True, letra, "")
+
+    # Efetua conexão com mapeamento
+    (sucesso, ponto_montagem, erro) = acesso_storage_windows(
+        conf_storage,
+        utilizar_ip=utilizar_ip,
+        mapear_letra=True
+    )
+    if not sucesso:
+        print_log("Mapeamento com letra falhou")
+        return (False, None, erro)
+
+    letra = procurar_mapeamento_uso_futuro(caminho_storage)
+    # Mapeou (sem erro), mas não conseguiu localizar a letra???
+    if letra == '':
+        return (False, None, "[2230] Não foi possível localizar a letra mapeada")
+
+    return (True, letra, "")
+
 
 # Verifica se storage já está montado. Se não estiver, monta.
 # Retorna:
@@ -2184,7 +2259,7 @@ def obter_caminho_storage(conf_storage, utilizar_ip=True):
 # - ponto_montagem: Caminho para montagem
 # - mensagem_erro: Caso tenha ocorrido erro na montagem
 # =============================================================
-def acesso_storage_windows(conf_storage, utilizar_ip=True):
+def acesso_storage_windows(conf_storage, utilizar_ip=True, mapear_letra=False):
 
     global dic_storage
 
@@ -2209,6 +2284,11 @@ def acesso_storage_windows(conf_storage, utilizar_ip=True):
     # Montagem do storage
     # --------------------
     if montar:
+        # Decide se monta com letra (drive) ou não
+        letra_automatica = ''
+        if mapear_letra:
+            letra_automatica = ' * '
+
         # Conecta no share do storage, utilizando net use.
         # Exemplo:
         # net use \\10.41.87.239\storage /user:sapi sapi
@@ -2216,12 +2296,12 @@ def acesso_storage_windows(conf_storage, utilizar_ip=True):
         # net use \\10.41.87.239\storage /delete
         caminho_arquivo_resultado=os.path.join(get_parini('pasta_execucao'),"net_use_resultado.txt")
         comando = (
-            "net use " + caminho_storage +
+            "net use " + letra_automatica + caminho_storage +
             " /user:" + conf_storage["usuario"] +
             " " + conf_storage["senha"]
         )
 
-        # Teste de comando, para gerar erro
+        # Teste de comando, para gerar erro2
         #comando="net use \\\\10.41.87.239\\xxx"
         #debug("Comando net use dummy, apenas para gerar erro: ", comando)
 
@@ -2281,9 +2361,10 @@ def  desconectar_todos_storages():
         nome_storage=Gdic_storage[caminho_storage]
 
         # Desconect share
-        # net use \\gtpi-sto-01\storage /del
+        # net use \\gtpi-sto-01\storage /del /Y
+        # /Y => Não pede confirmação se houver algum arquivo aberto...fecha mesmo
         comando = (
-            "net use " + caminho_storage + " /del 1>nul 2>nul"
+            "net use " + caminho_storage + " /del /Y 1>nul 2>nul"
         )
 
         #debug("Desconectando do storage")

@@ -26,6 +26,13 @@ O que tem de novo no pograma sapi_cellebrite:
 - No término da execução, pede um <ENTER> para permitir maior clareza de funcionamento na console como shortcut, caso ocorra algum erro.
 - Tolerância a falta de resposta do servidor (sapilib 0.8)
 
+- Avisar usuários sobre problema de travamento no Window s10 (SELECT)
+  https://stackoverflow.com/questions/4453692/windows-console-application-getting-stuck-needs-key-press
+  - Direcionar para link no wiki, para esclarecer como configurar
+   - Aparece no Titulo SELECT
+   - Mostrar como desabilitar QuickEdit
+  
+-   
 
 sapi_laudo:
 -
