@@ -1121,7 +1121,7 @@ def vhdx_cria(memorando, pasta, criptografado=False):
     # Se for criptografado, usa o arquivo SAPI_BITLOCKER.vhdx, se não for, usa o arquivo SAPI.vhdx
     if criptografado:
         arquivo_vhdx = "/SAPI_BITLOCKER.vhdx"
-    elif:
+    else:
         arquivo_vhdx = "/SAPI.vhdx"
     # concatena o nome da pasta, o memorando e a extensão VHDX
     pasta += "/" + memorando + ".vhdx"
@@ -1142,7 +1142,7 @@ def vhdx_monta(memorando, pasta, criptografado=False):
     # Cria a pasta se ela não existir
     if not os.path.exists(pasta):
         cria_pasta_se_nao_existe(pasta)
-    elif:
+    else:
         # Se a pasta existir, verifica se existem arquivos dentro dela. Para usar ponto de montagem a pasta deve estar vazia
         if os.listdir(pasta) != []:
             erro_fatal("A pasta [" + pasta + "] não está vazia.")
