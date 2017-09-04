@@ -120,7 +120,8 @@ Gconf_ambiente['desenv'] = {
     'ips': ['10.41.84.5', '10.41.84.5'],
     'servidor_porta': 80,
     'servidor_sistema': 'setec3_dev',
-    'url_base_s3': 'http://10.41.84.5/setec3_dev/'
+    'url_base_s3': 'http://10.41.84.5/setec3_dev/',
+    'url_base_siscrim': 'https://desenvolvimento.ditec.pf.gov.br/sistemas/criminalistica/'
 }
 # --- Produção ---
 Gconf_ambiente['prod'] = {
@@ -129,7 +130,8 @@ Gconf_ambiente['prod'] = {
     'ips': ['10.41.84.5', '10.41.84.5'],
     'servidor_porta': 443,
     'servidor_sistema': 'setec3',
-    'url_base_s3': 'https://setecpr.dpf.gov.br/setec3/'
+    'url_base_s3': 'https://setecpr.dpf.gov.br/setec3/',
+    'url_base_siscrim': 'https://ditec.pf.gov.br/sistemas/criminalistica/'
 }
 
 
@@ -153,10 +155,14 @@ Ghttp_timeout_corrente=copy.copy(Ghttp_timeout_padrao)
 # -------------------------------------------------------
 # Storages nos quais foi feita conexão para cópia de dados
 Gdic_storage=dict()
+Gdrive_mapeado=dict()
 
 # Multiprocessamento
 # -------------------------------
 Gpfilhos = dict()  # Processos filhos
+
+# Storage, verificacação
+Garquivo_controle='storage_sapi_nao_excluir.txt'
 
 
 # Configuração de Tela
@@ -234,6 +240,28 @@ def abrir_browser_setec3_exame(codigo_solicitacao_exame_siscrim):
     webbrowser.open(url)
     print("- Aberto no browser default a página de exame sapi da solicitação de exame corrente.")
     debug("Aberto URL",url)
+
+def abrir_browser_siscrim(pagina_parametros, descricao_pagina=None):
+    pagina_parametros="controle_documento.php?action=elaborar&objeto_pai=33316600&categoria=2"
+    url = urllib.parse.urljoin(get_parini('url_base_siscrim'),pagina_parametros)
+    webbrowser.open(url)
+    if descricao_pagina is not None:
+        print("- Foi aberto no browser padrão: ", descricao_pagina)
+    debug("Invocado URL no browser padrão:", url)
+
+def abrir_browser_siscrim_documento(codigo_documento):
+    # Monta url
+    url = urllib.parse.urljoin(get_parini('url_base_siscrim'),"documento.php?acao=exibir&codigo="+str(codigo_documento))
+    webbrowser.open(url)
+    print("- Aberto no browser default página de consulta ao documento indicado")
+    debug("Aberto URL", url)
+
+def abrir_browser_siscrim_modelo_usuario(codigo_documento):
+    # Monta url
+    url = urllib.parse.urljoin(get_parini('url_base_siscrim'),"modelo_usuario.php?acao=selecionar&codigo_documento="+str(codigo_documento))
+    webbrowser.open(url)
+    print("- Aberto no browser default página de geração de modelo do usuário para documento indicado")
+    debug("Aberto URL", url)
 
 
 
@@ -482,9 +510,6 @@ def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambie
     # Atualiza estas globais
     global Ginicializado
 
-    #print("ponto171")
-    #var_dump(parser)
-
     # Se já foi inicializado, despreza, pois só pode haver uma inicialização por execução
     # Desabilitado: Deixa inicializar sempre, pois programas de execução continua
     # como o sapi_iped necessitam verificar se houve alguma mudança de versão para se atualizarem
@@ -567,6 +592,7 @@ def _sapisrv_inicializar_internal(nome_programa, versao, nome_agente=None, ambie
             set_parini('servidor_sistema', amb['servidor_sistema'])
             set_parini('url_base', url_base)
             set_parini('url_base_s3', amb['url_base_s3'])
+            set_parini('url_base_siscrim', amb['url_base_siscrim'])
             # Como token, por equanto será utilizado um valor fixo
             set_parini('servidor_token', 'token_fixo_v0_7')
             # ok
@@ -655,11 +681,23 @@ def sapisrv_inicializar_ok(*args, **kwargs):
         # Encerra
         os._exit(1)
 
+    except SapiExceptionProgramaDesautorizado:
+        if modo_background():
+            print_log("Programa não autorizado. Consulte a configuração")
+        else:
+            # Modo iterativo, mostra mensagem
+            print_tela_log("- Programa não autorizado. Consulte a configuração")
+            pausa()
+        # Encerra
+        os._exit(1)
+
+
     except SapiExceptionFalhaComunicacao as e:
         os._exit(1)
 
     except SapiExceptionAgenteDesautorizado as e:
         os._exit(1)
+
 
     except SystemExit as e:
         # Se programa solicitou encerramento através de system.Exit, simplesmente encerra
@@ -671,7 +709,7 @@ def sapisrv_inicializar_ok(*args, **kwargs):
         trc_string=traceback.format_exc()
         print_log("[314]: Exceção abaixo sem tratamento específico. Avaliar se deve ser tratada ou se é realmente um erro de programação")
         print_log(trc_string)
-        print("Erro inesperado. Para mais detalhes, consulte arquivo de log: ",obter_nome_arquivo_log())
+        print("[700] Erro inesperado. Para mais detalhes, consulte arquivo de log: ",obter_nome_arquivo_log())
         os._exit(1)
 
 
@@ -936,13 +974,19 @@ def sapisrv_obter_excluir_tarefa(
 
 # Atualiza status da tarefa do sapisrv
 # ----------------------------------------------------------------------------------------------------------------------
-def _sapisrv_atualizar_status_tarefa(codigo_tarefa, codigo_situacao_tarefa, status, dados_relevantes=None,
+def _sapisrv_atualizar_status_tarefa(codigo_tarefa,
+                                     codigo_situacao_tarefa,
+                                     status,
+                                     dados_relevantes=None,
+                                     tamanho_destino_bytes=None,
                                      registrar_log=True):
     # Parâmetros
     param = {'codigo_tarefa': codigo_tarefa,
              'codigo_situacao_tarefa': codigo_situacao_tarefa,
              'status': ajusta_texto_saida(status) #Efetua ajustes ip=>netbios
              }
+    if tamanho_destino_bytes is not None:
+        param['tamanho_destino_bytes']=tamanho_destino_bytes
 
     metodo_invocar = 'get'
     if dados_relevantes is not None:
@@ -1030,7 +1074,12 @@ def sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status):
 # Troca situação da tarefa
 # Este é uma operação crítica, que tem que ser realizada no momento correto
 # Se ocorrer um erro, repassa para o chamador decidir
-def sapisrv_troca_situacao_tarefa_obrigatorio(codigo_tarefa, codigo_situacao_tarefa, texto_status, dados_relevantes=None):
+def sapisrv_troca_situacao_tarefa_obrigatorio(
+        codigo_tarefa,
+        codigo_situacao_tarefa,
+        texto_status,
+        dados_relevantes=None,
+        tamanho_destino_bytes = None):
 
     # Se ocorrer alguma exceção aqui, simplesmente será repassada para o chamador,
     # que deverá tratar adequadamente
@@ -1038,7 +1087,8 @@ def sapisrv_troca_situacao_tarefa_obrigatorio(codigo_tarefa, codigo_situacao_tar
         codigo_tarefa=codigo_tarefa,
         codigo_situacao_tarefa=codigo_situacao_tarefa,
         status=texto_status,
-        dados_relevantes=dados_relevantes
+        dados_relevantes=dados_relevantes,
+        tamanho_destino_bytes=tamanho_destino_bytes
     )
 
     # Se ocorrer algum erro, gera um exceção
@@ -1053,17 +1103,24 @@ def sapisrv_troca_situacao_tarefa_obrigatorio(codigo_tarefa, codigo_situacao_tar
 # Se ocorrer um erro, fica em loop ETERNO até conseguir efetuar a operação
 # Se for problema transiente, mais cedo ou mais tarde será resolvido
 # Caso contrário, algum humano irá intervir e cancelar o programa
-def sapisrv_troca_situacao_tarefa_loop(codigo_tarefa, codigo_situacao_tarefa, texto_status, dados_relevantes=None):
+def sapisrv_troca_situacao_tarefa_loop(
+        codigo_tarefa,
+        codigo_situacao_tarefa,
+        texto_status,
+        dados_relevantes=None,
+        tamanho_destino_bytes = None):
     while True:
 
         try:
             print_log("Trocando situação da tarefa",codigo_tarefa,"para",codigo_situacao_tarefa)
             # Registra situação
-            sapisrv_troca_situacao_tarefa_obrigatorio(codigo_tarefa=codigo_tarefa,
-                                                      codigo_situacao_tarefa=codigo_situacao_tarefa,
-                                                      texto_status=texto_status,
-                                                      dados_relevantes=dados_relevantes
-                                                      )
+            sapisrv_troca_situacao_tarefa_obrigatorio(
+                codigo_tarefa=codigo_tarefa,
+                codigo_situacao_tarefa=codigo_situacao_tarefa,
+                texto_status=texto_status,
+                dados_relevantes=dados_relevantes,
+                tamanho_destino_bytes=tamanho_destino_bytes
+            )
 
             # Se chegou aqui, é porque conseguiu atualizar a situação
             # Finaliza loop e função com sucesso
@@ -1723,6 +1780,10 @@ def renomear_arquivo_log_default(nome_novo):
         # recupera nome atual
         nome_atual=get_parini('log')
 
+        if (nome_atual==nome_novo):
+            debug("renomear_arquivo_log_default: Nome de arquivo de log igual ao atual, logo nada a fazer. ")
+            return
+
         # Troca nome de log para nome_novo
         set_parini('log', nome_novo)
 
@@ -1775,21 +1836,24 @@ def definir_label_log(label_log):
 # Efetua ajustes no texto, para ficar adequado a log e registro de status
 def ajusta_texto_saida(s):
 
-    # Se começar ou terminar por "-" ou " " ou qualquer combinação destes, remove, pois no log o texto é direto
-    # Isto serve para que mensagens que são para tela, que tem formato "- xxxx", fiquem no log apenas como "xxxx"
-    s=s.strip(" ")
-    s=s.strip("-")
-    s=s.strip(" ")
-
+    # IP para nome netbios
     for caminho_storage in Gdic_storage:
         nome_storage=Gdic_storage[caminho_storage]
         sant=s[:]
         s=s.replace(caminho_storage, nome_storage)
         s=s.replace(caminho_storage.strip("\\"), nome_storage.strip("\\"))
-        if (s!=sant):
-            s=s + " %"
+        if (s!=sant and modo_debug()):
+            # Insere marcador que houve alteração
+            s=s + " *A*"
 
     return s
+
+def print_tela(*arg):
+
+    linha = concatena_args(*arg)
+    linha=ajusta_texto_saida(linha)
+
+    print(linha)
 
 
 # Grava apenas em arquivo de log
@@ -1808,8 +1872,18 @@ def _print_log_apenas(*arg):
     if label_log is not None:
         rotulo_log="["+label_log+ "] "
 
-    linha = "[" + str(pid) + "] : " + hora + " : " + rotulo_log + concatena_args(*arg)
+    linha = concatena_args(*arg)
 
+    # Se começar ou terminar por "-" ou " " ou qualquer combinação destes, remove, pois no log o texto é direto
+    # Isto serve para que mensagens que são para tela, que tem formato "- xxxx", fiquem no log apenas como "xxxx"
+    linha=linha.strip(" ")
+    linha=linha.strip("-")
+    linha=linha.strip(" ")
+
+    # Adiciona sufixo
+    linha = "[" + str(pid) + "] : " + hora + " : " + rotulo_log + linha
+
+    # Efetua ajustes na linha, para simplificar a leitura (ex: IP para netbios)
     linha=ajusta_texto_saida(linha)
 
     arquivo_log=obter_nome_arquivo_log()
@@ -1908,6 +1982,45 @@ def filtra_apenas_ascii(texto):
     return asc
 
 
+# ===================================================================================================
+# "Desenhos" para direcionar a atençã
+# ===================================================================================================
+def print_atencao():
+    # Na tela sai legal...aqui está distorcido, provavelmente em função da largura dos caracteres
+    # teria que ter uma fonte com largura fixa
+    print("┌─────────────────┐")
+    print("│  A T E N Ç Ã O  │")
+    print("└─────────────────┘")
+
+def print_erro():
+    # Na tela sai legal...aqui está distorcido, provavelmente em função da largura dos caracteres
+    # teria que ter uma fonte com largura fixa
+    print("┌─────────┐")
+    print("│  E R R O  │")
+    print("└─────────┘")
+
+
+
+# unicode box drawing characteres
+'''
+┌ ┐
+└ ┘
+─
+│
+┴
+├ ┤
+┬
+╷
+'┼'
+'''
+
+# ===================================================================================================
+
+
+# ===================================================================================================
+# Testes de sistema operacional
+# ===================================================================================================
+
 # Retorna verdadeiro se está rodando em Linux
 # ----------------------------------------------------------------------
 def esta_rodando_linux():
@@ -1955,16 +2068,18 @@ def espera_enter(texto=None):
 # - default: (s ou n) resposta se usuário simplesmente digitar <Enter>. 
 # O retorno é True para "sim" e False para não
 def pergunta_sim_nao(pergunta, default="s"):
-    validos = {"sim": True, "s": True,
-               "não": False, "n": False}
+    validos = {"sim": True,
+               "s": True,
+               "não": False,
+               "nao": False,
+               "n": False}
     if default is None:
         prompt = " [s/n] "
-    elif default == "s":
-        prompt = " [S/n] "
-    elif default == "n":
-        prompt = " [s/N] "
     else:
-        raise ValueError("Valor invalido para default: '%s'" % default)
+        default = default.lower()
+        prompt = " [S/n] "
+        if default == "n":
+            prompt = " [s/N] "
 
     while True:
         sys.stdout.write(pergunta + prompt)
@@ -1976,8 +2091,10 @@ def pergunta_sim_nao(pergunta, default="s"):
         else:
             sys.stdout.write("Responda com 's' ou 'n'\n")
 
-def pausa():
-    programPause = input("Pressione <ENTER> para prosseguir...")
+def pausa(mensagem=None):
+    if mensagem is None:
+        mensagem="Pressione <ENTER> para prosseguir..."
+    programPause = input(mensagem)
 
 # Funções agregadas na versão 0.5.3 (antes estavam em código separados)
 
@@ -2024,6 +2141,25 @@ def tamanho_pasta(start_path):
             total_size += os.path.getsize(fp)
     return total_size
 
+# Características de pasta
+def obter_caracteristicas_pasta(start_path):
+    total_size = 0
+    qtd=0
+    for dirpath, dirnames, filenames in os.walk(start_path):
+        for f in filenames:
+            fp = montar_caminho_longo(dirpath, f)
+            total_size += os.path.getsize(fp)
+            qtd=qtd+1
+
+    # Dicionários de retorno
+    ret=dict()
+    ret["quantidade_arquivos"]=qtd
+    ret["tamanho_total"]=total_size
+
+    return ret
+
+
+
 
 # Converte Bytes para formato Humano
 def converte_bytes_humano(size, precision=1):
@@ -2069,17 +2205,51 @@ def os_walklevel(some_dir, level=1):
         if num_sep + level <= num_sep_this:
             del dirs[:]
 
+
+# Fonte: https://msdn.microsoft.com/en-us/library/windows/desktop/aa365247(v=vs.85).aspx
+# The "\\?\" prefix can also be used with paths constructed according to
+# the universal naming convention (UNC).
+# To specify such a path using UNC, use the "\\?\UNC\" prefix.
+# For example, "\\?\UNC\server\share",
+# where "server" is the name of the computer and "share" is the name of the shared folder.
+# These prefixes are not used as part of the path itself.
+# They indicate that the path should be passed to the system with minimal modification,
+# which means that you cannot use forward slashes to represent path separators,
+# or a period to represent the current directory,
+# or double dots to represent the parent directory.
+# Because you cannot use the "\\?\" prefix with a relative path,
+# relative paths are always limited to a total of MAX_PATH characters.
+
 # Ajusta caminho de destino para copia, adicionando prefixo para path longo
 def ajustar_para_path_longo(path):
-    # O separador tem que ser \ ao invés /
+
+    # Se no caminho contem o drive (ex: Z:Memorando_1880_17...), não faz sentido ajustar para caminho longo
+    if ":" in path:
+        return path
+
+    # O separador não pode ser /, tem que ser \
+    # Como \ é escape, tem que dobrar \\.
     path = path.replace('/', os.sep).replace('\\', os.sep)
     # Se for UNC, colocar a representação explícita
-    if 'UNC\\' not in path:
+    if ('\\\\' in path) and ('UNC\\' not in path):
         path=path.replace('\\\\','UNC\\')
     # Adiciona notação para caminho longo \\?\
     if '\\\\?\\' not in path:
         path = '\\\\?\\' + path
     return path
+
+def montar_caminho(*arg):
+    caminho=os.path.join(*arg)
+
+    return caminho
+
+def montar_caminho_longo(*arg):
+    caminho=montar_caminho(*arg)
+
+    # Efetua ajuste para path longo
+    caminho=ajustar_para_path_longo(caminho)
+
+    return caminho
 
 
 # Efetua uma cópia do diretorio de origem para o diretório de destino,
@@ -2110,7 +2280,7 @@ def storage_montado(ponto_montagem):
     # se o arquivo storage_sapi_nao_excluir.txt
     # existe na pasta
     # Todo storage do sapi deve conter este arquivo na raiz
-    arquivo_controle = ponto_montagem + 'storage_sapi_nao_excluir.txt'
+    arquivo_controle = os.path.join(ponto_montagem, Garquivo_controle)
     if not os.path.isfile(arquivo_controle):
         # Não existe arquivo de controle
         return False
@@ -2125,7 +2295,7 @@ def storage_montado(ponto_montagem):
 # =============================================================
 def acesso_storage_linux(ponto_montagem, conf_storage):
     # Um storage do sapi sempre deve conter na raiz o arquivo abaixo
-    arquivo_controle = ponto_montagem + 'storage_sapi_nao_excluir.txt'
+    arquivo_controle = os.path.join(ponto_montagem, Garquivo_controle)
 
     # Se pasta para ponto de montagem não existe, então cria
     if not os.path.exists(ponto_montagem):
@@ -2189,7 +2359,10 @@ def obter_caminho_storage(conf_storage, utilizar_ip=True):
 
     return caminho_storage
 
-def procurar_mapeamento_uso_futuro(caminho_storage):
+def procurar_mapeamento_letra(caminho_storage):
+
+    global Gdrive_mapeado
+
     # Envia comando net use para obter lista de conexão,
     # faz parse e localiza letra mapeada
     # Exemplo:
@@ -2208,60 +2381,176 @@ def procurar_mapeamento_uso_futuro(caminho_storage):
 
     subprocess.call(comando, shell=True)
 
-    # Não terminei isto aqui....
-    # Tem algum erro bobo aqui, mas talvez isto aqui nem seja necessário,
-    # pois o correto é que o IPED e todo o resto funcione sem sem necessário o mapeamento de unidade
-    # Le comando de resultado e procura mapeamento
-    #with open(caminho_arquivo_resultado, 'r', 'utf-8') as f:
-    #    for linha in f:
-    #        print(linha)
-    #        #if caminho_storage in linha:
+    # Verifica se arquivo de resultado foi criado
+    if not os.path.exists(caminho_arquivo_resultado):
+        print_log("[2305] Comando net use falhou: Arquivo de resultado", caminho_arquivo_resultado, "não encontrado")
+        return None
+
+    # Procura por uma letra mapeada
+    letra_com_caminho=None
+    with open(caminho_arquivo_resultado, mode='r') as file:
+        for linha in file:
+            # Remove elementos sem utilidade
+            linha=linha.replace("Microsoft Windows Network","")
+            # Procura por uma linha que indique que o mapamento está ok
+            # OK           R:        \\gtpi-sto-01\storage           Microsoft Windows Network
+            termos=linha.split()
+            if len(termos)==0:
+                continue
+            if (termos[0]!='OK'):
+                # Se não está conectado, despreza a linha de informação de mapeamento
+                continue
+            if len(termos)<3:
+                # Provavelmente é uma linha que não tem unidade, como por exemplo:
+                # OK                     \\10.41.87.113\deployment_desenv
+                continue
+            #print(console_sanitiza_utf8_ok(linha))
+            #var_dump(termos)
+
+            letra=termos[1]
+            caminho=termos[2]
+            if caminho_storage in caminho:
+                arquivo_controle = os.path.join(letra, Garquivo_controle)
+                if os.path.isfile(arquivo_controle):
+                    # Armazena na lista de mapeamentos com drive
+                    Gdrive_mapeado[caminho_storage]=letra
+                    # Ok, encontrou uma letra mapeada corretamente
+                    return letra
+                else:
+                    print_log("Letra",letra, "está mapeada para", caminho_storage," mas não contém arquivo de controle", Garquivo_controle )
 
     # Não achou
+    print_log("Nenhuma drive (letra) mapeada para", caminho_storage)
     return None
 
 
 # Desisti desta abordagem, pois não é correta...
 # O IPED (interface) tem que funcionar sem precisar de mapeamento de rede
 # Efetua storage, e associa uma letra
-def acesso_storage_windows_mapeado_uso_futuro(conf_storage, utilizar_ip=True):
+def acesso_storage_windows_com_letra_drive(conf_storage, utilizar_ip=True, tipo_conexao='consulta'):
+
 
     # Verifica se já tem storage mapeado para a letra
     caminho_storage=obter_caminho_storage(conf_storage, utilizar_ip=utilizar_ip)
 
     # Procurar por caminho no storage
-    letra=procurar_mapeamento_uso_futuro(caminho_storage)
+    letra=procurar_mapeamento_letra(caminho_storage)
+    #print("Letra=", letra)
     # Se já está mapeado, retorna
-    if letra=='':
+    if letra is not None:
         return (True, letra, "")
 
-    # Efetua conexão com mapeamento
-    (sucesso, ponto_montagem, erro) = acesso_storage_windows(
-        conf_storage,
-        utilizar_ip=utilizar_ip,
-        mapear_letra=True
-    )
-    if not sucesso:
-        print_log("Mapeamento com letra falhou")
-        return (False, None, erro)
 
-    letra = procurar_mapeamento_uso_futuro(caminho_storage)
+    # Obter usuario/senha para conexao
+    (usuario, senha)=obter_usuario_senha_conexao_storage(conf_storage, tipo_conexao)
+
+    # Montagem do storage
+    # --------------------
+    resultado_montagem=montar_storage_windows(
+        caminho_storage,
+        usuario=usuario,
+        senha=senha,
+        com_letra_drive=True
+    )
+
+
+    # Confere se mapamento foi efetuado com sucesso
+    letra = procurar_mapeamento_letra(caminho_storage)
     # Mapeou (sem erro), mas não conseguiu localizar a letra???
-    if letra == '':
-        return (False, None, "[2230] Não foi possível localizar a letra mapeada")
+    if letra is None:
+        return (False, None, "Não foi possível mapear letra para storage: " + resultado_montagem)
 
     return (True, letra, "")
 
+
+# Efetua montagem de pasta compartilhada
+# caminho : \\10.41.87.239\storage
+# usuario: usuário para o qual a pasta foi compartilhada
+# senha: Senha para acesso
+# Letra para drive, podendo ser:
+# '' => Se não é para utilizar letra no mapeamento  (com_letra_drive=False)
+# *  => Windows utilizará alguma letra disponível (com_letra_drive=True e letra_drive=None)
+# X: => Letra informada no parâmetro (com_letra_drive=True e  letra_drive contém letra selecionada)
+def montar_storage_windows(caminho_storage, usuario, senha, com_letra_drive=False, letra_drive=None):
+
+    #print(com_letra_drive)
+    #print(letra_drive)
+    #print('ponto2389')
+
+    # Definição da letra de drive
+    definicao_letra=''
+    if com_letra_drive:
+        if letra_drive is not None:
+            definicao_letra=' ' + letra_drive + ' '
+        else:
+            definicao_letra = ' * '
+
+    # Conecta no share do storage, utilizando net use.
+    # Exemplo:
+    # net use \\10.41.87.239\storage /user:sapi sapi
+    # Para desmontar (para teste), utilizar:
+    # net use \\10.41.87.239\storage /delete
+    caminho_arquivo_resultado = os.path.join(get_parini('pasta_execucao'), "net_use_resultado.txt")
+    comando = (
+        "net use " + definicao_letra + " " + caminho_storage +
+        " /user:" + usuario +
+        " " + senha
+    )
+    print_log('ponto2422: ', comando)
+
+    # Teste de comando, para gerar erro2
+    # comando="net use \\\\10.41.87.239\\xxx"
+    # debug("Comando net use dummy, apenas para gerar erro: ", comando)
+
+    # Redireciona resultado para arquivo, para pode examinar o erro
+    comando = comando + " >" + caminho_arquivo_resultado + " 2>&1 "
+
+    # debug("Conectando com storage")
+    # debug(comando)
+
+    if not modo_background():
+        print("- Efetuando conexão com storage de destino. Aguarde...")
+
+    subprocess.call(comando, shell=True)
+
+    # Processa arquivo de resultado
+    with open(caminho_arquivo_resultado, 'r') as f:
+        resultado_montagem = f.read()
+
+    # Simplifica o resultado
+    resultado_montagem = resultado_montagem.replace('\r', '')
+    resultado_montagem = resultado_montagem.replace('\n', '')
+    resultado_montagem = resultado_montagem.replace('  ', '')
+    resultado_montagem = resultado_montagem.strip()
+
+    return resultado_montagem
+
+
+# Recupera usuário e senha para conexão no storage
+def obter_usuario_senha_conexao_storage(conf_storage, tipo_conexao='consulta'):
+
+    if tipo_conexao=='atualizacao':
+        # Conta e usuário para conexão de atualização
+        usuario = conf_storage["usuario"]
+        senha = conf_storage["senha"]
+    elif tipo_conexao=='consulta':
+        usuario = conf_storage["usuario_consulta"]
+        senha = conf_storage["senha_consulta"]
+    else:
+        erro_fatal('[2451] obter_usuario_senha_conexao: tipo_conexao inválido: ', tipo_conexao)
+
+    return usuario, senha
 
 # Verifica se storage já está montado. Se não estiver, monta.
 # Retorna:
 # - Sucesso: Se montagem foi possível ou não
 # - ponto_montagem: Caminho para montagem
 # - mensagem_erro: Caso tenha ocorrido erro na montagem
-# =============================================================
-def acesso_storage_windows(conf_storage, utilizar_ip=True, mapear_letra=False):
+# ========================================================================================================
+def acesso_storage_windows(conf_storage, utilizar_ip=True, com_letra_drive=False, tipo_conexao='consulta'):
 
     global dic_storage
+    #print('ponto2471')
 
     caminho_storage=obter_caminho_storage(conf_storage, utilizar_ip=utilizar_ip)
     caminho_storage_netbios=obter_caminho_storage(conf_storage, utilizar_ip=False)
@@ -2269,9 +2558,10 @@ def acesso_storage_windows(conf_storage, utilizar_ip=True, mapear_letra=False):
     # Ponto de montagem implícito
     # Não será mapeado para nenhuma letra, pois pode dar conflito
     ponto_montagem = caminho_storage + "\\"
+    #print(caminho_storage)
 
     debug("Verificando acesso ao storage: ",caminho_storage_netbios)
-    arquivo_controle = ponto_montagem + 'storage_sapi_nao_excluir.txt'
+    arquivo_controle = os.path.join(ponto_montagem, Garquivo_controle)
 
     # Verifica se storage já está montado
     # -----------------------------------
@@ -2280,44 +2570,19 @@ def acesso_storage_windows(conf_storage, utilizar_ip=True, mapear_letra=False):
         debug("Storage já estava montado em", caminho_storage_netbios)
         montar=False
 
+    # Obter usuario/senha para conexao
+    (usuario, senha)=obter_usuario_senha_conexao_storage(conf_storage, tipo_conexao)
 
     # Montagem do storage
     # --------------------
+    #print('ponto2497 : ', montar)
     if montar:
-        # Decide se monta com letra (drive) ou não
-        letra_automatica = ''
-        if mapear_letra:
-            letra_automatica = ' * '
-
-        # Conecta no share do storage, utilizando net use.
-        # Exemplo:
-        # net use \\10.41.87.239\storage /user:sapi sapi
-        # Para desmontar (para teste), utilizar:
-        # net use \\10.41.87.239\storage /delete
-        caminho_arquivo_resultado=os.path.join(get_parini('pasta_execucao'),"net_use_resultado.txt")
-        comando = (
-            "net use " + letra_automatica + caminho_storage +
-            " /user:" + conf_storage["usuario"] +
-            " " + conf_storage["senha"]
+        resultado_montagem=montar_storage_windows(
+            caminho_storage,
+            usuario=usuario,
+            senha=senha,
+            com_letra_drive=False
         )
-
-        # Teste de comando, para gerar erro2
-        #comando="net use \\\\10.41.87.239\\xxx"
-        #debug("Comando net use dummy, apenas para gerar erro: ", comando)
-
-        # Redireciona resultado para arquivo, para pode examinar o erro
-        comando = comando + " >" + caminho_arquivo_resultado + " 2>&1 "
-
-        #debug("Conectando com storage")
-        #debug(comando)
-
-        if not modo_background():
-            print("- Efetuando conexão com storage de destino. Aguarde...")
-
-        subprocess.call(comando, shell=True)
-
-        # Guarda o ponto de montagem, o qual será utilizado posteriormente para desmontar
-        debug("Ponto de montagem em ", caminho_storage_netbios)
 
     # Verifica se montou corretamente
     # -------------------------------
@@ -2325,13 +2590,7 @@ def acesso_storage_windows(conf_storage, utilizar_ip=True, mapear_letra=False):
         # Falha
         print_log("Não conseguiu montar storage: ",caminho_storage_netbios)
         # Le comando de resultado e joga no log, para registrar o problema
-        with open(caminho_arquivo_resultado, 'r') as f:
-            erro= f.read()
-        erro=erro.replace('\r','')
-        erro=erro.replace('\n','')
-        erro=erro.replace('  ','')
-        erro=erro.strip()
-        msg_log="Erro na conexão com storage: "+erro
+        msg_log="Erro na conexão com storage: "+resultado_montagem
         print_log(msg_log)
         return False, ponto_montagem, msg_log
 
@@ -2380,6 +2639,79 @@ def  desconectar_todos_storages():
             # pois já está saindo do programa
             debug("Não foi possível desconectar do storage ", nome_storage)
 
+
+# ===================================================================================================================
+# Conexão interativa com storage
+#
+# Estas funções abaixo devem ser utilizadas apenas por programas interativos (sapi_cellebrite, sapi_laudo, etc)
+# O correto seria jogar estas funções para uma outra biblioteca, junto com menu e outras funções interativas
+#
+# ===================================================================================================================
+
+# Efetua conexão no ponto de montagem, dando tratamento em caso de problemas
+def conectar_ponto_montagem_storage_ok(dados_storage,
+                                       utilizar_ip=True,
+                                       com_letra_drive=False,
+                                       tipo_conexao='consulta'):
+
+    nome_storage = dados_storage['maquina_netbios']
+    print("- Verificando conexão com storage",nome_storage,": Aguarde...")
+
+    if com_letra_drive:
+        (sucesso, ponto_montagem, erro) = acesso_storage_windows_com_letra_drive(
+                dados_storage,
+                utilizar_ip=utilizar_ip,
+                tipo_conexao=tipo_conexao
+        )
+    else:
+        (sucesso, ponto_montagem, erro) = acesso_storage_windows(
+            dados_storage,
+            utilizar_ip=utilizar_ip,
+            tipo_conexao=tipo_conexao
+        )
+
+    if not sucesso:
+        print("- Acesso ao storage " + nome_storage + " falhou")
+        print(erro)
+        print("- Verifique se servidor de storage está ativo e acessível (rede)")
+        print("- Sugestão: Conecte no servidor via VNC com a conta consulta")
+        return None
+
+    # Ok, tudo certo
+    print_tela("- Acesso ao storage confirmado em", ponto_montagem)
+    return ponto_montagem
+
+# Efetua conexão no storage mapeando para um letra (drive)
+# A inexistência de uma letra limita o funcionamento de alguns programas (exemplo: bat)
+# Logo, sempre que fazemos conexão para consulta mapeamos para um letra (drive)
+def conectar_storage_consulta_ok(dados_storage):
+
+    #print('ponto2007')
+    ponto_montagem = conectar_ponto_montagem_storage_ok(
+        dados_storage=dados_storage,
+        utilizar_ip=False,
+        com_letra_drive=True,
+        tipo_conexao='consulta'
+    )
+
+    return ponto_montagem
+
+
+def conectar_storage_atualizacao_ok(dados_storage):
+
+    ponto_montagem = conectar_ponto_montagem_storage_ok(
+        dados_storage=dados_storage,
+        utilizar_ip=True,
+        tipo_conexao='atualizacao'
+    )
+
+    return ponto_montagem
+
+
+
+# =======================================================================================================
+# Controle de execução concorrente
+# =======================================================================================================
 
 # Controle de concorrência
 # para garantir que existe apenas uma instância de um progrma rodando (por exemplo: sapi_iped)
@@ -2561,6 +2893,9 @@ def _receber_comando(menu_comando):
     return (comando_recebido, argumento_recebido)
 
 
+# ====================================================================================================================
+# Sanitização para UTF8
+# ====================================================================================================================
 
 # Sanitiza strings em UTF8, substituindo caracteres não suportados pela codepage da console do Windows por '?'
 # Normalmente a codepage é a cp850 (Western Latin)
@@ -2604,6 +2939,15 @@ def console_sanitiza_utf8(dado):
     saida = dado
     return (saida, 0)
 
+# Sanitiza strings em UTF8, substituindo caracteres não suportados pela codepage da console do Windows por '?'
+# Normalmente a codepage é a cp850 (Western Latin)
+# Retorna o que dá, ignorando os erroa
+def console_sanitiza_utf8_ok(dado):
+    (texto, qtd_alteracoes) = console_sanitiza_utf8(dado)
+    # Ignora se teve ou não alterações
+    return texto
+
+
 
 # Faz dump formatado de um objeto qualquer na console
 # --------------------------------------------------------------------------------
@@ -2646,8 +2990,12 @@ class JanelaTk(tkinter.Frame):
         #                                                                 ('CSV files', '*.csv')]))
         return self.file_name
 
-    def selecionar_pasta(self):
-        self.directory = tkinter.filedialog.askdirectory()
+    def selecionar_pasta(self, titulo=None):
+        if titulo is None:
+            titulo="Selecionar pasta"
+        dir_opt = {}
+        dir_opt['title'] = titulo
+        self.directory = tkinter.filedialog.askdirectory(**dir_opt)
         return self.directory
 
 

@@ -39,6 +39,9 @@ import xml.etree.ElementTree
 import tempfile
 import shutil
 import zipfile
+import multiprocessing
+import signal
+
 
 
 # Verifica se está rodando versão correta de Python
@@ -59,8 +62,17 @@ Garquivo_estado = Gprograma + "v" + Gversao.replace('.', '_') + ".sapi"
 
 # Base de dados (globais)
 GdadosGerais = dict()  # Dicionário com dados gerais
-Gitens = list()  # Lista de itens
+Glaudo = None
+Gitens = list()  # Lista de itens do laudo
+Gtarefas = None
+Gsolicitacao_exame = None
+Gmateriais_solicitacao = None
+Gstorages_laudo = list()  # Lista de storages associados a tarefas do laudo
 Gmodelo_configuracao = list() # Dados coletados do modelo
+
+# Relativo a mídia de destino
+Gitem_midia=dict()
+Gresumo_midia=dict()
 
 # Diversos sem persistência
 Gicor = 1
@@ -72,22 +84,34 @@ Gmenu_comandos['comandos'] = {
     # Comandos de navegacao
     '+': 'Navega para a tarefa seguinte da lista',
     '-': 'Navega para a tarefa anterior da lista',
-    '*ir': 'Pula para a tarefa com sequencial indicado (ex: *ir 4, pula para a quarta tarefa da lista)',
 
     # Comandos relacionados com um item
     '*si': 'Exibe dados de laudo para o item corrente',
     '*du': 'Dump: Mostra todas as propriedades de uma tarefa (utilizado para Debug)',
 
+    # Comandos exibição
+    '*sg': 'Exibir situação atualizada das tarefas (com refresh do servidor). ',
+
+    # Comandos para diagnóstico de problemas
+    '*db': 'Ligar/desligar modo debug. No modo debug serão geradas mensagens adicionais no log.',
+    '*lg': 'Exibir log geral.',
+
     # Comandos gerais
-    '*sg': 'Situação geral (faz consulta no servidor, recuperando dados atualizados)',
+    '*ml': 'Geração de modelo de laudo SAPI (Siscrim)',
     '*gl': 'Gera laudo',
+    '*s3': 'Abrir solicitação de exame no SETEC3',
+    '*s3g': 'Abrir lista de Pendências SAPI no SETEC3',
+    '*sto': 'Exibir pasta da solicitaçaõ de exame no storage através do File Explorer',
+    '*cl': 'Exibir laudo no SISCRIM',
     '*tt': 'Troca laudo',
     '*qq': 'Finaliza'
 }
 
-Gmenu_comandos['cmd_navegacao'] = ["+", "-", "*ir"]
+Gmenu_comandos['cmd_exibicao'] = ["*sg"]
+Gmenu_comandos['cmd_navegacao'] = ["+", "-"]
 Gmenu_comandos['cmd_item'] = ["*si"]
-Gmenu_comandos['cmd_geral'] = ["*sg", "*gl", "*tt", "*qq"]
+Gmenu_comandos['cmd_geral'] = ['*ml', '*gl', '*s3', '*s3g', '*sto', '*cl',  '*tt', '*qq']
+Gmenu_comandos['cmd_diagnostico'] = ['*lg', '*db']
 
 # Constantes para localização de seções do laudo, que serão substituídos por blocos de parágrafos
 GsapiQuesitos   = 'sapiQuesitos'
@@ -103,7 +127,7 @@ Gverbose = False  # Aumenta a exibição de detalhes (para debug)
 
 # Para código produtivo, o comando abaixo deve ser substituído pelo
 # código integral de sapi_xxx.py, para evitar dependência
-from sapilib_0_7_2 import *
+from sapilib_0_8 import *
 
 # **********************************************************************
 # PRODUCAO
@@ -132,6 +156,17 @@ def exibir_dados_laudo(dados_laudo, tarefa):
 
     return
 
+def exibir_dados_item(dados_item):
+
+    # ------------------------------------------------------------------
+    # Exibe dados do item para usuário
+    # ------------------------------------------------------------------
+    print()
+    print_centralizado("")
+    print("Item: ", dados_item["item_apreensao"])
+    print("Material: ", dados_item["material"])
+    print("Descrição: ", dados_item["descricao"])
+    print_centralizado("")
 
 # Exibe dados de laudo para um item
 def exibir_situacao_item(item):
@@ -155,12 +190,7 @@ def exibir_situacao_item(item):
     # Exibe dados do item para usuário
     # ------------------------------------------------------------------
     dados_item = Gitens[obter_item_corrente()]
-    print()
-    print_centralizado("")
-    print("Item: ", dados_item["item_apreensao"])
-    print("Material: ", dados_item["material"])
-    print("Descrição: ", dados_item["descricao"])
-    print_centralizado("")
+    exibir_dados_item(dados_item)
 
     # Exibe dados para laudo armazenados nas tarefas
     # ------------------------------------------------------------------
@@ -1528,16 +1558,21 @@ def usuario_escolhe_quesitacao(quesitos_respostas):
         print()
 
     # Solicita o número de sequencia da quesitação
+    print()
+    print("- Dica: Na lista acima, as quesitações estão ordenadas por número de quesitos.")
+    print("  No nome da quesitação identifica-se também a unidade de origem (ex: cac, lda)")
+    print(
+        "- O texto exibido é só uma referência, e PODE APRESENTAR ALGUMAS DISTORÇOES em relação ao texto realmente contido no modelo.")
+    print(
+        "  Não se preocupe se alguns caracteres estiverem diferentes, ou mesmo se houver omissão de palavras nas frase.")
+    print("  Isto ocorre em função de algumas complexidades no parse do ODT. No laudo gerado, a quesitação estará ok.")
+    print()
+    print("- Escolha a quesitação que mais se aproxima da quesitação da solicitação.")
     while True:
-        pergunta = "< Escolha a quesitação, entrando com o número de sequencia da lista acima (1 a " + str(
+        print()
+        pergunta = "< Selecione a quesitação entrando com o número de sequencia da lista acima (1 a " + str(
             qtd_opcoes) + "): "
-        print()
-        print("Dica: Na lista acima, as quesitações estão ordenadas por número de quesitos")
-        print("O texto exibido é só uma referência, e PODE APRESENTAR ALGUMAS DISTORÇOES em relação ao texto realmente contido no modelo.")
-        print("Não se preocupe se alguns caracteres estiverem diferentes, ou mesmo se houver omissão de palavras nas frase.")
-        print("Isto ocorre em função de algumas complexidades no parse do ODT. No laudo gerado, a quesitação estará ok.")
-        print("Escolha a que mais se aproxima da quesitação da solicitação.")
-        print()
+
         seq = input(pergunta)
         seq = seq.strip()
 
@@ -1843,19 +1878,8 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     print("Passo 4: Substituição de textos gerais do laudo")
     print("-----------------------------------------------")
 
-    print("- Consultando dados da solicitação de exame no servidor.")
-
-    # Recupera dados gerais da solicitação de exame
-    # ------------------------------------------------------------------
-    solicitacao = sapisrv_chamar_programa_sucesso_ok(
-        programa="sapisrv_consultar_solicitacao_exame.php",
-        parametros={'codigo_solicitacao_exame_siscrim': GdadosGerais["codigo_solicitacao_exame_siscrim"]},
-        registrar_log=Gverbose
-    )
-
-
     # Processa auto
-    auto_apreensao = solicitacao["auto_apreensao"]
+    auto_apreensao = Gsolicitacao_exame["auto_apreensao"]
     partes_auto = auto_apreensao.split(' ')
     tipo_auto = partes_auto[0]
     numero_auto = partes_auto[1]
@@ -1886,7 +1910,7 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
 
     # Monta dicionário de substituição
     dsub = dict()
-    dsub['sapiAlvo'] = solicitacao["local_busca"]
+    dsub['sapiAlvo'] = Gsolicitacao_exame["local_busca"]
     dsub['sapiAuto'] = descricao_auto
     dsub['sapiSoftwareVersao'] = texto_sofware
 
@@ -1914,7 +1938,7 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
         #die('ponto1636')
 
         # Ajusta metodo_entrega
-        metodo_entrega = solicitacao['dados_exame']['metodo_entrega']
+        metodo_entrega = Gsolicitacao_exame['dados_exame']['metodo_entrega']
         # O método do banco vem no seguinte formato:
         # entrega_DVD
         # entrega_BLURAY
@@ -2071,28 +2095,9 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     tabela_matdevol.remove(tr_modelo_linha_matdevol)
 
     # Verifica se método de entrega está coerente com materiais de destino do laudo
-    if metodo_entrega=='midiadestino':
-        if qtd_destino==0:
-            print_centralizado(" ERRO ")
-            print("- Você selecionou como método de entrega 'Material de destino'")
-            print("- Contudo, não foi localizado nenhum material de destino na lista de materiais vinculados ao laudo")
-            print("- O material de destino deve atender as seguintes condições (no SisCrim):")
-            print("- 1) No cadastro do material de destino(Siscrim):")
-            print("     - O campo Finalidade deve ser 'EXAME' (não pode ser mídia para espelhamento, ou qualquer outra)")
-            print("     - O campo Item do auto de apreensão (da seção Busca e apreensão) deve ser preenchido com 'destino'")
-            print("- 2) O material de destino deve estar vinculado ao laudo: ")
-            print("     - Na consulta do laudo, este material deve aparecer na seção 'Material examinado'")
-            print("     - Se não aparecer, utilize opção 'Corrigir documento' e marque o material de destino'")
-            return
-
-    if metodo_entrega != 'midiadestino':
-        if qtd_destino > 0:
-            print_centralizado(" ERRO ")
-            print("- Neste laudo existe material de destino")
-            print("- Contudo, o método de entrega selecionado não é através de 'Material de destino'")
-            print("- Revise o método de entrega e/ou material de destino vinculado ao laudo")
-            return
-
+    if not conferir_metodo_entregua(metodo_entrega, qtd_destino):
+        print("- Comando cancelado")
+        return
 
     # ------------------------------------------------------------------------------------------------------------------
     # ------------------------------------------------------------------------------------------------------------------
@@ -2365,6 +2370,10 @@ def gera_novo_odt(odt_raiz, caminho_arquivo_saida_odt):
 
     print()
     print("- Laudo SAPI ajustado gravado em: ", caminho_arquivo_saida_odt)
+    if pergunta_sim_nao("< Deseja abrir o arquivo de laudo para edição?"):
+        webbrowser.open(caminho_arquivo_saida_odt)
+    print("- Arquivo de destino foi aberto em programa compatível (normalmente libreoffice)")
+
     return
 
 
@@ -2432,6 +2441,32 @@ def gera_novo_odt(odt_raiz, caminho_arquivo_saida_odt):
 # #die('ponto376')
 
 
+
+
+# Verifica se todos as tarefas dos materiais associados ao laudo estão concluídos
+# Retorna: True/False
+def laudo_pronto():
+
+    refresh_itens()
+
+    # Conta quantidade de itens que não estão prontos para laudo
+    qtd_nao_pronto = 0
+    for i in Gitens:
+        if not i["pronto_para_laudo"] == 't':
+            qtd_nao_pronto += 1
+
+    if qtd_nao_pronto > 0:
+        print("- Existem ", qtd_nao_pronto, "itens que NÃO ESTÃO PRONTOS para laudo.")
+        return False
+
+    # Tudo certo
+    return True
+
+
+# ==================================================================================================================
+# @*gl - Geração de laudo
+# ==================================================================================================================
+
 # Gera laudo
 # ----------------------------------------------------------------------------------------------------------------------
 def gerar_laudo():
@@ -2451,17 +2486,10 @@ def _gerar_laudo():
     # ------------------------------------------------------------------------------------------------------------------
     # Verifica se laudo pode ser gerado
     # ------------------------------------------------------------------------------------------------------------------
-    refresh_itens()
-
-    # Conta quantidade de itens que não estão prontos para laudo
-    qtd_nao_pronto = 0
-    for i in Gitens:
-        if not i["pronto_para_laudo"] == 't':
-            qtd_nao_pronto += 1
-
-    if qtd_nao_pronto > 0:
-        print("Existem ", qtd_nao_pronto, "itens que NÃO ESTÃO PRONTOS para laudo.")
-        print("Conclua as tarefas destes itens antes de executar a geração do laudo.")
+    if not laudo_pronto():
+        # Mensagens já foram exibidas na rotina chamada
+        print("- Geração de laudo não pode ser realizada nesta situação")
+        print("- Comando cancelado")
         return
 
     # ------------------------------------------------------------------------------------------------------------------
@@ -2469,17 +2497,8 @@ def _gerar_laudo():
     # ------------------------------------------------------------------------------------------------------------------
     print("- Verificando dados gerais do exame.")
 
-    # Recupera dados gerais da solicitação de exame
-    # ------------------------------------------------------------------
-    solicitacao = sapisrv_chamar_programa_sucesso_ok(
-        programa="sapisrv_consultar_solicitacao_exame.php",
-        parametros={'codigo_solicitacao_exame_siscrim': GdadosGerais["codigo_solicitacao_exame_siscrim"]},
-        registrar_log=Gverbose
-    )
-
     # Método de entrega
-    metodo_entrega = solicitacao['dados_exame']['metodo_entrega']
-
+    metodo_entrega = Gsolicitacao_exame['dados_exame']['metodo_entrega']
     if metodo_entrega=='indefinido':
         print_centralizado(" ERRO ")
         print("- Antes de gerar o laudo você deve definir o método de entrega (mídia óptica, cópia storage, etc).")
@@ -2493,7 +2512,7 @@ def _gerar_laudo():
     print()
     print("Passo 1: Selecione arquivo de laudo (modelo)")
     print("-------------------------------------------")
-    print("- Caso ainda não tenha feito, entre no SisCrim e gere um laudo (modelo) padrão SAPI.")
+    print("- Informe o arquivo de modelo para o laudo no padrão SAPI, gerado no SisCrim.")
     print("- Na janela gráfica que foi aberta, selecione o arquivo .ODT correspodente")
 
     # Cria janela para seleção de laudo
@@ -2503,19 +2522,60 @@ def _gerar_laudo():
     root.destroy()
 
     # Exibe arquivo selecionado
-    print("- Arquivo de entrada selecionado:", caminho_laudo)
     if (caminho_laudo == ""):
+        print()
         print("- Nenhum arquivo de laudo foi selecionado.")
+        print("- DICA: Se você ainda não gerou o arquivo de modelo, utilize o comando *ML")
         return
+
+    print("- Arquivo de entrada selecionado:", caminho_laudo)
 
     # Tudo certo
     ajustar_laudo_odt(caminho_laudo)
 
 
-# Exibe lista de tarefas
+# Confere método de entrega
+# Retorna: True => Sucesso, False: Método não está ok
 # ----------------------------------------------------------------------------------------------------------------------
-def exibir_situacao():
-    # Cabeçalho da lista de elementos
+def conferir_metodo_entregua(metodo_entrega, qtd_destino):
+
+    # Remove o prefixo fixo
+    metodo_entrega = metodo_entrega.replace("entrega_", "")
+
+    if metodo_entrega=='midiadestino':
+        if qtd_destino==0:
+            print()
+            print_atencao()
+            print("- Você selecionou como método de entrega 'Material de destino'")
+            print("- Contudo, não foi localizado nenhum material de destino na lista de materiais vinculados ao laudo")
+            print("- O material de destino deve atender as seguintes condições (no SisCrim):")
+            print("- 1) No cadastro do material de destino(Siscrim):")
+            print("     - O campo Finalidade deve ser 'EXAME' (não pode ser mídia para espelhamento, ou qualquer outra coisa)")
+            print("     - O campo Item do auto de apreensão (da seção Busca e apreensão) deve ser preenchido com 'destino'")
+            print("- 2) O material de destino deve estar vinculado ao laudo: ")
+            print("     - Na consulta do laudo, este material deve aparecer na seção 'Material examinado'")
+            print("     - Se não aparecer, utilize opção 'Corrigir documento' e marque o material de destino'")
+            print("- Dica: Utilize comando *S3 para navegar para a solicitação de exame (Setec3) e *CL para ir para o laudo (SisCrim)")
+            return False
+
+    if metodo_entrega != 'midiadestino':
+        if qtd_destino > 0:
+            print()
+            print_atencao()
+            print("- Situação inconsistente impede geração de laudo.")
+            print("- Neste laudo existe material de destino.")
+            print("- Contudo, o método de entrega selecionado no exame SAPI não é através de 'Material de destino'")
+            print("- Para resolver esta inconsistência, altere o método de entrega para 'Material de Destino' (Setec3)")
+            print("  ou retire o material de destino da lista de materiais vinculados ao laudo (SisCrim)")
+            print("- Dica: Utilize comando *S3 para navegar para a solicitação de exame (Setec3) e *CL para ir para o laudo (SisCrim)")
+            return False
+
+    # Tudo certo
+    return True
+
+
+def print_linha_cabecalho():
+    # Cabeçalho geral
     # --------------------------------------------------------------------------------
     cls()
     # ambiente de execução
@@ -2531,6 +2591,51 @@ def exibir_situacao():
           ambiente)
     print_centralizado()
 
+# Monta resumo por mídia de destino
+def resumir_midia():
+
+    global Gresumo_midia
+
+    Gresumo_midia=dict()
+    for i in Gitens:
+
+        # Dados do item
+        item=i['item']
+        subpasta=i["subpasta"]
+        t=i.get("tamanho_destino_bytes",0)
+        if t is None:
+            t=0
+        tamanho_destino_bytes=int(t)
+
+        # Mídia de destino
+        midia = Gitem_midia.get(i["item"], 1)
+        # Se não existe, coloca como default '1'
+        Gitem_midia[i["item"]] = midia
+
+        # Se não existe resumo para a mídia, gera
+        if Gresumo_midia.get(midia, None) is None:
+            Gresumo_midia[midia]=dict()
+            Gresumo_midia[midia]["lista_itens"] = list()
+            Gresumo_midia[midia]["lista_subpastas"] = list()
+            Gresumo_midia[midia]["tamanho_destino_bytes"] = 0
+
+        # Subtotal de tamanho por mídia
+        resumo=Gresumo_midia[midia]
+        resumo["lista_itens"].append(item)
+        resumo["lista_subpastas"].append(subpasta)
+        resumo["tamanho_destino_bytes"]+=tamanho_destino_bytes
+
+
+# Exibe lista de tarefas
+# ----------------------------------------------------------------------------------------------------------------------
+def exibir_situacao():
+
+    # Monta resumo por mídia
+    resumir_midia()
+
+    # cabecalho geral
+    print_linha_cabecalho()
+
     # Calcula largura da última coluna, que é variável (item : Descrição)
     # A constante na subtração é a soma de todos os campos e espaços antes da última coluna
     lid = Glargura_tela - 28
@@ -2538,10 +2643,10 @@ def exibir_situacao():
 
     string_formatacao = '%2s %2s %-13s %-6s ' + lid_formatado
 
-
     # Lista de itens
     q = 0
     qtd_nao_pronto = 0
+    qtd_destino = 0
     for i in Gitens:
         q += 1
 
@@ -2565,14 +2670,29 @@ def exibir_situacao():
             pronto_para_laudo = "NÃO"
             qtd_nao_pronto += 1
 
-        # var_dump(i)
-        # die('ponto2142')
-        print(string_formatacao % (corrente, q, i["material"], pronto_para_laudo, item_descricao))
+        if i['item']=='destino':
+            qtd_destino += 1
 
+        # Elementos para exibição
+        subpasta=i["subpasta"]
+        t=i.get("tamanho_destino_bytes", None)
+        if t is None:
+            tamanho_destino_bytes=0
+            tamanho_destino_str="Indef"
+        else:
+            tamanho_destino_bytes=int(i["tamanho_destino_bytes"])
+            tamanho_destino_str=converte_bytes_humano(tamanho_destino_bytes)
+
+        # Mídia de destino
+        midia=Gitem_midia.get(i["item"],'?')
+
+        print(string_formatacao % (corrente, q, i["material"], pronto_para_laudo,
+                                   item_descricao))
         if (q == Gicor):
             print_centralizado("")
 
-    print()
+    # Observações gerais
+    print_centralizado()
     if (q == 0):
         print("- Não existe nenhum material vinculado ao laudo. Corrija Laudo no SisCrim.")
     else:
@@ -2580,19 +2700,29 @@ def exibir_situacao():
 
     if (qtd_nao_pronto > 0):
         print("- ATENÇÃO: Existem ", qtd_nao_pronto,
-              "materiais que não estão prontos para laudo (coluna 'Pronto'), pois ainda possuem tarefas pendentes")
-        print("  Enquanto esta condição persistir, não será possível efetuar a geração de laudo (*gl)")
-        print("- Em caso de dúvida, consulte o setec3")
-    else:
-        print("- Para gerar laudo, gere o modelo de laudo padrão SAPI no SISCRIM e em seguida utilize comando *GL")
+              "materiais que não estão prontos para laudo (ver coluna 'Pronto'), pois ainda possuem tarefas pendentes.")
+        print("  Enquanto esta condição persistir, não será possível efetuar a geração de laudo (*GL)")
+        print("- Em caso de dúvida, consulte o setec3 (comando *S3)")
 
+    # Confere o método de entrega
+    metodo_entrega = Gsolicitacao_exame['dados_exame']['metodo_entrega']
+    if not conferir_metodo_entregua(metodo_entrega, qtd_destino):
+        # método de entrega não está ok
+        return
 
+    # Tudo certo
+    print("- Dicas:")
+    print("  - Utilize o comando *ML para gerar o modelo de laudo padrão SAPI no Siscrim")
+    print("  - Em seguida seguida utilize comando *GL para gerar o laudo (substituir os campos variáveis)")
     return
 
 
 # Salva situação atual para arquivo
 # ----------------------------------------------------------------------
 def salvar_estado():
+
+    # Desativado
+    return
     # Monta dicionario de estado
     estado = dict()
     estado["Gitens"] = Gitens
@@ -2610,6 +2740,9 @@ def salvar_estado():
 # Carrega situação de arquivo
 # ----------------------------------------------------------------------
 def carregar_estado():
+
+    return
+
     # Irá atualizar as duas variáveis relacionadas com estado
     global Gitens
     global GdadosGerais
@@ -2643,26 +2776,27 @@ def carregar_estado():
 # Inicia procedimento de obtenção de laudo, cancelando com CTR-C
 # Retorna: Verdadeiro se foi selecionado um laudo
 # ----------------------------------------------------------------------------------------------------------------------
-def obter_itens_ok():
+def obter_laudo_ok():
     try:
-        return obter_itens()
+        matricula = obter_laudo_parte1()
+        return obter_laudo_parte2(matricula)
     except KeyboardInterrupt:
+        print()
+        print("- Operação interrompida pelo usuário <CTR><C>s")
         return False
 
 
-# Seleciona laudo
-# Retorna: Verdadeiro se foi selecionado um laudo
+# Seleciona matricula
 # ----------------------------------------------------------------------------------------------------------------------
-def obter_itens():
-    # Irá atualizar a variável global de itens
-    global Gitens
+def obter_laudo_parte1():
 
     print()
     print_centralizado(" Seleção de Laudo ")
-    print("Dica: CTR-C para cancelar seleção")
+    print("- Dica: CTR-C para cancelar seleção")
     print()
 
     # Solicita que o usuário se identifique através da matricula
+    # Todo: Trocar identificação para login/senha (GUI)
     # ----------------------------------------------------------
     lista_laudos = list()
     while True:
@@ -2670,11 +2804,11 @@ def obter_itens():
         matricula = matricula.lower().strip()
 
         if (matricula == ''):
-            print("Nenhuma matrícula informada. Programa finalizado.")
+            print("- Nenhuma matrícula informada. Programa finalizado.")
             sys.exit()
 
         if (not matricula.isdigit()):
-            print("Matrícula deve ser campo numérico (ex: 15123).")
+            print("- Matrícula deve ser campo numérico (ex: 15123).")
             continue
 
         (sucesso, msg_erro, lista_laudos) = sapisrv_chamar_programa(
@@ -2687,18 +2821,192 @@ def obter_itens():
             print("Erro: ", msg_erro)
             continue
 
-        # Matricula ok, vamos ver se tem solicitacoes de exame
-        if (len(lista_laudos) == 0):
+        # Tudo certo
+        return matricula
+
+
+# Verifica se o laudo atende parcialmente a solicitação de exame.
+# Se for parcial, solicita confirmação do usuários
+def confirma_laudo_parcial():
+
+    # Monta lista de materiais do laudo
+    m_laudo=list()
+    for m in Gitens:
+        material=m["material"]
+        m_laudo.append(material)
+
+    # Monta lista de materiais da solicitação de exame
+    m_solicitacao=dict()
+    for i in Gmateriais_solicitacao:
+        m=Gmateriais_solicitacao[i]
+        # Se for material de destino, ignora
+        if m["item"]=='destino':
+            continue
+        m_solicitacao[m["material"]]=m["item"]
+
+    # Verifica se existe algum material a mais na solicitação de exame
+    # que não está no laudo
+    laudo_parcial=False
+    for m in m_solicitacao.keys():
+        if m not in m_laudo:
+            print("- Item",m_solicitacao[m],"(",m,") não está vinculado a este laudo")
+            laudo_parcial=True
+
+    # Se for laudo parcial, solicita informação
+    if laudo_parcial:
+        print()
+        print("- Este laudo NÃO COBRE todos os itens/materiais da solicitação de exame.")
+        print("- Se isto não está de acordo com as suas expectativas, ")
+        print("  revise o laudo no Siscrim, pois você provavelmente esqueceu de vincular os materiais examinados faltantes.")
+        print("- Um laudo parcial terá em seu corpo e na mídia gerada apenas os ites/materiais vínculados ao laudo.")
+        print()
+        if not pergunta_sim_nao("< Continuar com laudo parcial?", default="n"):
+            return False
+
+    # Tudo certo
+    return True
+
+
+# Seleciona laudo
+# Retorna: Verdadeiro se foi selecionado um laudo
+# ----------------------------------------------------------------------------------------------------------------------
+def obter_laudo_parte2(matricula):
+
+    # Irá atualizar a variável global de itens
+    global Glaudo
+    global Gitens
+    global Gstorages_laudo
+    global GdadosGerais
+
+    while True:
+
+        (sucesso, msg_erro, lista_laudos) = sapisrv_chamar_programa(
+            "sapisrv_obter_laudos_pcf.php",
+            {'matricula': matricula})
+
+        # Falhou...???
+        if (not sucesso):
+            print("- Erro: ", msg_erro)
+            return False
+
+        laudo=escolher_laudo(lista_laudos, matricula)
+        if laudo is None:
+            continue
+
+        # Salva dados do laudo escolhido
+        Glaudo = laudo
+        GdadosGerais["codigo_laudo"] = laudo['codigo_documento_interno']
+        GdadosGerais["identificacaoLaudo"] = (
+            "Laudo: " +
+            laudo["numero_documento"] + "/" + laudo["ano_documento"] +
+            " (" +
+            laudo["identificacao"] +
+            " Prot: " +
+            laudo["numero_protocolo"] + "/" + laudo["ano_protocolo"] +
+            ")")
+
+        GdadosGerais["codigo_solicitacao_exame_siscrim"] = laudo['codigo_documento_externo']
+        GdadosGerais["identificacaoObjeto"] = GdadosGerais["identificacaoLaudo"]
+
+        print("- Laudo selecionado:", GdadosGerais["identificacaoLaudo"])
+        print()
+        print("- Buscando itens associados ao laudo. Aguarde...")
+
+        # Carrega os itens/materiais do exame
+        # --------------------------------------------------------------
+        codigo_solicitacao_exame_siscrim = GdadosGerais["codigo_solicitacao_exame_siscrim"]
+        codigo_laudo = GdadosGerais["codigo_laudo"]
+        dados = sapisrv_chamar_programa_sucesso_ok(
+            programa="sapisrv_obter_itens_laudo.php",
+            parametros={'codigo_solicitacao_exame_siscrim': codigo_solicitacao_exame_siscrim,
+                        'codigo_laudo': codigo_laudo}
+            #,registrar_log = True
+        )
+
+        # Itens e storages associados ao laudo
+        Gitens = dados["itens"]
+        Gstorages_laudo = dados["storages"]
+
+        # Tem que ter ao menos um item vinculado
+        if (len(Gitens) == 0):
             print()
-            print("Não existe nenhum laudo de exame SAPI para esta matrícula. Utilize o seguinte procedimento:")
-            print("1) Gere o laudo no SisCrim, associando ao mesmo os materiais examinados")
-            print("2) Gere um modelo de usuário padrão SAPI, conforme instrução do gestor do GTPI")
-            print("3) Retorne a este programa, o qual fará a substituição dos dados das tarefas no laudo gerado")
+            print("ERRO: Este laudo NÃO possui nenhum material vinculado que tenha sido processado no SAPI. Verifique no SAPI (itens processados) e no Laudo no SisCrim (materiais vinculados ao laudo).")
             print()
             continue
 
-        # Tudo certo, encerra loop
+        # Verifica se o laudo é parcial, ou seja, se existem itens na solicitação de exame
+        # que não fazem parte do laudo
+        carregar_solicitacao_exame()
+
+        # Se laudo for parcial, solicita confirmação do usuário
+        print()
+        if not confirma_laudo_parcial():
+            continue
+
+        # Tudo certo, interrompe o loop
         break
+
+
+    # Retorna itens para o memorando selecionado
+    GdadosGerais["data_hora_ultima_atualizacao_status"] = datetime.datetime.now().strftime('%H:%M:%S')
+
+    # Muda log para o arquivo com nome
+    nome_arquivo_log = "log_sapi_laudo_" + laudo["numero_documento"] + "_" + laudo["ano_documento"] + ".txt"
+
+    # Sanitiza, removendo e trocando caracteres especiais
+    nome_arquivo_log = nome_arquivo_log.replace('/', '-')
+    nome_arquivo_log = nome_arquivo_log.replace(' ', '')
+
+    renomear_arquivo_log_default(nome_arquivo_log)
+
+    # Laudo selecionado
+    return True
+
+
+# Carrega dados da solicitação de exame
+def carregar_solicitacao_exame():
+
+    global Gsolicitacao_exame
+    global Gmateriais_solicitacao
+
+    print("- Carregando solicitação de exame: Aguarde...")
+
+    codigo_solicitacao_exame_siscrim = GdadosGerais["codigo_solicitacao_exame_siscrim"]
+
+
+    # Recupera dados gerais da solicitação de exame
+    # ------------------------------------------------------------------
+    dados = sapisrv_chamar_programa_sucesso_ok(
+        programa="sapisrv_consultar_solicitacao_exame.php",
+        parametros={'codigo_solicitacao_exame_siscrim': GdadosGerais["codigo_solicitacao_exame_siscrim"]},
+        registrar_log=Gverbose
+    )
+
+    # Guarda na global de tarefas
+    Gsolicitacao_exame = dados["solicitacao"]
+    Gmateriais_solicitacao = dados["materiais"]
+
+
+    #print('===============================')
+    #var_dump(Gsolicitacao_exame)
+    #print('===============================')
+    #var_dump(Gmateriais_solicitacao)
+    #die('ponto3063')
+
+    return True
+
+
+
+def escolher_laudo(lista_laudos, matricula):
+
+    # Matricula ok, vamos ver se tem solicitacoes de exame
+    if (len(lista_laudos) == 0):
+        print()
+        print("- Não existe nenhum laudo de exame SAPI para sua matrícula.")
+        if pergunta_sim_nao("< Deseja criar um novo laudo"):
+            criar_novo_laudo(matricula)
+        else:
+            return None
 
     # Exibe lista de laudos do usuário
     # -----------------------------------------------
@@ -2714,23 +3022,31 @@ def obter_itens():
         laudo_ano = d["numero_documento"] + "/" + d["ano_documento"]
         print('%2d  %10s %10s  %s' % (q, laudo_ano, protocolo_ano, d["identificacao"]))
 
-    # Usuário escolhe a solicitação de exame de interesse
+    print()
+    print("- Estes são os seus laudos SAPI em andamento.")
+    print()
+
+    # Usuário escolhe o laudo de interesse
     # --------------------------------------------------------
     itens = list()
     while True:
         #
-        print()
-        num_solicitacao = input("Selecione o laudo (pelo número de sequencia Sq): ")
+        num_solicitacao = input("< Selecione o laudo (pelo número de sequencia Sq ou *NL para criar um novo): ")
         num_solicitacao = num_solicitacao.strip()
+
+        if num_solicitacao.upper()=='*NL':
+            criar_novo_laudo(matricula)
+            return None
+
         if not num_solicitacao.isdigit():
-            print("Entre com o numero do laudo")
+            print("- Entre com o numero do laudo ou digite *NL para criar um novo laudo")
             continue
 
         # Verifica se existe na lista
         num_solicitacao = int(num_solicitacao)
         if not (1 <= num_solicitacao <= len(lista_laudos)):
             # Número não é válido
-            print("Entre com o numero do laudo, entre 1 e ", str(len(lista_laudos)))
+            print("- Entre com o numero do laudo, entre 1 e ", str(len(lista_laudos)))
             continue
 
         ix_solicitacao = int(num_solicitacao) - 1
@@ -2739,95 +3055,118 @@ def obter_itens():
         print()
         laudo = lista_laudos[ix_solicitacao]
 
-        GdadosGerais["codigo_laudo"] = laudo['codigo_documento_interno']
+        return laudo
 
-        GdadosGerais["identificacaoLaudo"] = (
-            "Laudo: " +
-            laudo["numero_documento"] + "/" + laudo["ano_documento"] +
-            " (" +
-            laudo["identificacao"] +
-            " Prot: " +
-            laudo["numero_protocolo"] + "/" + laudo["ano_protocolo"] +
-            ")")
 
-        GdadosGerais["codigo_solicitacao_exame_siscrim"] = laudo['codigo_documento_externo']
-        GdadosGerais["identificacaoObjeto"] = GdadosGerais["identificacaoLaudo"]
+# Conduz o usuário na criação de um novo laudo para um solicitação de exame
+# Retorna: True  => Usuário foi conduzido para criar laudo no SisCrim
+#          False => Usuário desistiu da criação do laudo
+# --------------------------------------------------------------------------
+def criar_novo_laudo(matricula):
 
-        print("Laudo selecionado:", GdadosGerais["identificacaoLaudo"])
-        print()
-        print("Buscando itens associados ao laudo. Aguarde...")
+    # Solicita que o usuário se identifique através da matricula
+    # ----------------------------------------------------------
+    lista_solicitacoes = None
 
-        # Carrega os materiais do exame
-        # --------------------------------------------------------------
-        codigo_solicitacao_exame_siscrim = GdadosGerais["codigo_solicitacao_exame_siscrim"]
-        codigo_laudo = GdadosGerais["codigo_laudo"]
-        itens = sapisrv_chamar_programa_sucesso_ok(
-            programa="sapisrv_obter_itens_laudo.php",
-            parametros={'codigo_solicitacao_exame_siscrim': codigo_solicitacao_exame_siscrim,
-                        'codigo_laudo': codigo_laudo}
-            #,registrar_log = True
+    print()
+    print("- Consultando solicitações de exame SAPI no SETEC3 para matrícula",matricula,": Aguarde...")
+    try:
+        print_log("Recuperando solicitações de exame para matrícula: ", matricula)
+        (sucesso, msg_erro, lista_solicitacoes) = sapisrv_chamar_programa(
+            "sapisrv_obter_pendencias_pcf.php",
+            {'matricula': matricula}
         )
 
-        # Tem que ter ao menos um item vinculado
-        if (len(itens) == 0):
-            print()
-            print("ERRO: Este laudo NÃO possui nenhum material vinculado que tenha sido processado no SAPI. Verifique no SAPI (itens processados) e no Laudo no SisCrim (materiais vinculados ao laudo).")
-            print()
+        # Insucesso. Servidor retorna mensagem de erro (exemplo: matricula incorreta)
+        if (not sucesso):
+            # Exibe mensagem de erro reportada pelo servidor e continua no loop
+            print("-",msg_erro)
+            return False
+
+    except BaseException as e:
+        # Provavel falha de comunicação
+        print("- Falhou comunicação com servidor: ", str(e))
+        return False
+
+    # Tem solicitações?
+    if (len(lista_solicitacoes) == 0):
+        print_tela_log(
+            "- Não existe nenhuma solicitacao de exame com tarefas SAPI para esta matrícula. Verifique no setec3")
+        return False
+
+    # Exibe lista de solicitações de exame do usuário
+    # -----------------------------------------------
+    print()
+    q = 0
+    for d in lista_solicitacoes:
+        q += 1
+        if (q == 1):
+            # Cabecalho
+            print('%2s  %10s  %s' % ("Sq", "Protocolo", "Documento"))
+            print_centralizado("-")
+        protocolo_ano = d["numero_protocolo"] + "/" + d["ano_protocolo"]
+        print('%2d  %10s  %s' % (q, protocolo_ano, d["identificacao"]))
+
+    print()
+    print("- Estas são as solicitações de exames SAPI.")
+
+    # Usuário escolhe a solicitação de exame de interesse
+    # --------------------------------------------------------
+    tarefas = None
+    while True:
+        #
+        print()
+        num_solicitacao = input(
+            "< Indique o número de sequência (Sq) da solicitação na lista acima para a qual você deseja criar laudo: ")
+        num_solicitacao = num_solicitacao.strip()
+
+        if num_solicitacao=='*s3g':
+            abrir_browser_setec3_sapi()
             continue
 
-        # Tudo certo, interrompe o loop
-        break
+        if not num_solicitacao.isdigit():
+            print("- Entre com o número sequencial da solicitacao (coluna Sq)")
+            print("- Digite *s3g para abrir a página de seus exames SAPI no SETEC3")
+            print("- Digite <CTR><C> para cancelar")
+            continue
 
-        # Desnecessário...irá mostrar estado do material na lista de itens
-        # # Confirma se itens que estão disponíveis atende expectativa
-        # # -----------------------------------------------
-        # print()
-        # print()
-        # q = 0
-        # for item in itens:
-        #     # var_dump(item)
-        #     # die('ponto2028')
-        #     q += 1
-        #     if (q == 1):
-        #         # Cabecalho
-        #         print('%10s %s' % ("item", "Descrição"))
-        #         print('-' * 129)
-        #     print('%10s %s' % (item["item"], item["descricao"]))
-        #
-        # print()
-        # print("Total de itens disponíveis para laudo: ", q)
-        # print()
-        # print()
-        #
-        # # Confirma se lista está ok
-        # print()
-        # prosseguir = pergunta_sim_nao("Prosseguir? ", default="n")
-        # if not prosseguir:
-        #     continue
-        #
-        # # Tudo certo, encerra loop
-        # sys.stdout.write("OK")
-        # break
+        # Verifica se existe na lista
+        num_solicitacao = int(num_solicitacao)
+        if not (1 <= num_solicitacao <= len(lista_solicitacoes)):
+            # Número não é válido
+            print("Entre com o numero da solicitacao, entre 1 e ", str(len(lista_solicitacoes)))
+            continue
 
-    # Retorna itens para o memorando selecionado
-    Gitens = itens
-    GdadosGerais["data_hora_ultima_atualizacao_status"] = datetime.datetime.now().strftime('%H:%M:%S')
+        ix_solicitacao = int(num_solicitacao) - 1
 
-    # Laudo selecionado
-    return True
+        # Ok, selecionado
+        solicitacao = lista_solicitacoes[ix_solicitacao]
+
+        pagina_parametros = "controle_documento.php?action=elaborar&"\
+                            +"objeto_pai="+solicitacao["codigo_documento_externo"]\
+                            +"&categoria=2"
+        abrir_browser_siscrim(pagina_parametros)
+        print()
+        print("- Foi aberta no browser padrão a página de criação de laudo no SisCrim")
+        print("- Crie o laudo no SisCrim lembrando de associar todos os materiais citados no mesmo")
+        pausa("< Após concluir cadastramento do laudo, pressione <ENTER> para prosseguir")
+
+        # Tudo certo, retorna indicativo de que laudo está em criação
+        return True
 
 
 def refresh_itens():
     # Irá atualizar a variável global de itens
     global Gitens
+    global Gstorages_laudo
 
-    print("Buscando situação atualizada do servidor. Aguarde...")
+    print("- Buscando situação atualizada do servidor. Aguarde...")
 
     # Carrega os materiais do exame
     # --------------------------------------------------------------
     codigo_solicitacao_exame_siscrim = GdadosGerais["codigo_solicitacao_exame_siscrim"]
     codigo_laudo = GdadosGerais["codigo_laudo"]
-    itens = sapisrv_chamar_programa_sucesso_ok(
+    dados = sapisrv_chamar_programa_sucesso_ok(
         programa="sapisrv_obter_itens_laudo.php",
         parametros={'codigo_solicitacao_exame_siscrim': codigo_solicitacao_exame_siscrim,
                     'codigo_laudo': codigo_laudo},
@@ -2835,7 +3174,13 @@ def refresh_itens():
     )
 
     # Guarda na global
-    Gitens = itens
+    Gitens = dados["itens"]
+    Gstorages_laudo = dados["storages"]
+
+    #var_dump(Gitens)
+    #var_dump(Gstorages_laudo)
+    #die('ponto3029')
+
     GdadosGerais["data_hora_ultima_atualizacao_status"] = datetime.datetime.now().strftime('%H:%M:%S')
 
     return True
@@ -2880,9 +3225,206 @@ def obter_item_corrente():
     return (Gicor - 1)
 
 
+
+
+# ======================================================================================================================
+# @*sto - Exibe storage (pasta do memorando) invocando o File Explorer
+# ======================================================================================================================
+
+# Recupera o ÚNICO storage do exame
+# Mais tarde, se o conceito de multiprocessamento for expandido para permitir que uma solicitação de exame
+# seja processada em múltiplos storages, esta função não será mais necessária
+def recuperar_storage_unico():
+    if (len(Gstorages_laudo)==0):
+        # Não deveria acontecer jamais.
+        # Se laudo tem ao menos uma tarefa, tem que ter um storage
+        print_tela_log("[3095] Erro inesparado: Não foi possível determinar o storage de armazenamento das tarefas do laudo")
+        return None
+
+    if (len(Gstorages_laudo)>1):
+        # Não deveria acontecer jamais.
+        # Se laudo tem ao menos uma tarefa, tem que ter um storage
+        print_tela_log("[3103] Laudo possui tarefas armazenadas em mais de um storage. Não é possível abrir automaticamente o storage")
+        return None
+
+    # Só tem um storage
+    storage= Gstorages_laudo[0]
+
+    return storage
+
+
+def exibir_storage_file_explorer():
+
+    print()
+    print("- Exibir pasta do memorando no storage")
+    print()
+
+    storage=recuperar_storage_unico()
+    if storage is None:
+        # Mensagens de erro já foram fornecidas
+        return
+
+    print("- Storage do memorando: ", storage["maquina_netbios"])
+
+    # Montagem de storage
+    # -------------------
+    ponto_montagem = conectar_storage_consulta_ok(storage)
+    if ponto_montagem is None:
+        # Mensagens de erro já foram apresentadas pela função acima
+        return
+
+    # Determina a pasta do memorando
+    pasta = montar_caminho(
+        ponto_montagem,
+        Gsolicitacao_exame["pasta_memorando"])
+    print("- Pasta do exame:")
+    print("  ", pasta)
+    if not os.path.exists(pasta):
+        print("- Não foi encontrando pasta para memorando no storage")
+        print("- Comando cancelado")
+        return
+
+    # Abre pasta no File Explorers
+    print("- Abrindo file explorer na pasta selecionada")
+    os.startfile(pasta)
+    print("- Pasta foi aberta no file explorer")
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Exibe conteúdo do arquivo de log
+# ----------------------------------------------------------------------------------------------------------------------
+def exibir_log(comando, filtro_base="", filtro_usuario="", limpar_tela=True):
+
+    # Filtros
+    filtro_base     =filtro_base.strip()
+    filtro_usuario  =filtro_usuario.strip()
+
+    # Limpa tela e imprime cabeçalho do programa
+    # --------------------------------------------------------------------------------
+    if limpar_tela:
+        cls()
+        print_linha_cabecalho()
+        print("Arquivo de log: ", obter_nome_arquivo_log())
+
+    print_centralizado()
+
+    if filtro_usuario!= "":
+       print("Contendo termo: ", filtro_usuario)
+       print_centralizado()
+
+    arquivo_log = obter_nome_arquivo_log()
+
+    # Não tem arquivo de log
+    if (not os.path.isfile(arquivo_log)):
+        print("*** Arquivo de log vazio ***")
+        return
+
+    with codecs.open(arquivo_log, 'r', "utf-8") as sapi_log:
+        qtd=0
+        for linha in sapi_log:
+            exibir=True
+            if filtro_base!="" and filtro_base.lower() not in linha.lower():
+                exibir=False
+            if filtro_usuario!="" and filtro_usuario.lower() not in linha.lower():
+                exibir=False
+
+            if exibir:
+                qtd=qtd+1
+                print(format(qtd, '03d'),":", linha.strip())
+
+    sapi_log.close()
+
+    if qtd==0:
+        print("*** Nenhuma mensagem de log disponível ***")
+        return
+
+
+    if filtro_usuario=="":
+        print()
+        print("- Dica: Para filtrar o log, forneça um string após comando.")
+        print("  Exemplo: ",comando," erro => Lista apenas linhas que contém o termo 'erro'")
+
+    return
+
+
+# Retorna True se realmente pode e deve ser finalizado
+def finalizar_programa():
+
+    print()
+    # Varre lista de processos filhos, e indica o que está rodando
+    qtd_ativos = 0
+    for ix in sorted(Gpfilhos):
+        if Gpfilhos[ix].is_alive():
+            dummy, codigo_tarefa = ix.split(':')
+            print("- Processo", ix,"ainda está executando (",ix,Gpfilhos[ix].pid,")")
+            qtd_ativos += 1
+
+    # Se não tem nenhum programa em background
+    # pode finalizar imediatamente
+    if qtd_ativos == 0:
+        return True
+
+    # Pede confirmação, se realmente deve finalizar processos em background
+    # ------------------------------------------------------------------------------------------------------------------
+    print()
+    print("- Se você finalizar o programa agora, o que está sendo executado será perdido e terá de ser reiniciado.")
+    print()
+    prosseguir_finalizar = pergunta_sim_nao("< Deseja realmente finalizar programa? ", default="n")
+    if not prosseguir_finalizar:
+        # Não finaliza
+        return False
+
+
+    # Eliminando processos filhos que ainda estão ativos
+    # --------------------------------------------------------------------------------------------------------------
+    print_log("Usuário foi avisado que existem processos rodando, e respondeu que desejava encerrar mesmo assim")
+    print("- Finalizando processos. Aguarde...")
+    for ix in sorted(Gpfilhos):
+        if Gpfilhos[ix].is_alive():
+            # Finaliza processo
+            print_log("Finalizando processo ", ix, " [", Gpfilhos[ix].pid, "]")
+            Gpfilhos[ix].terminate()
+
+
+    # Para garantir, aguarda caso ainda tenha algum processo não finalizado...NÃO DEVERIA ACONTECER NUNCA
+    # --------------------------------------------------------------------------------------------------------------
+    repeticoes=0
+    while True:
+        # Uma pequena pausa para dar tempo dos processos finalizarem
+        lista = multiprocessing.active_children()
+        qtd = len(lista)
+        if qtd == 0:
+            # Tudo certo
+            print_log("Todos os processos filhos foram eliminados")
+            break
+        repeticoes=repeticoes+1
+        if repeticoes>5:
+            print_tela_log("Aguardando encerramento de", len(lista),
+                       " processo. Situação incomum. Se demorar excessivamente, comunique desenvolvedor.")
+        # Aguarda e repete, até finalizar tudo...isto não deveria acontecer....
+        time.sleep(2)
+
+    # Tudo certo, finalizar
+    return True
+
+
+
+
 # ======================================================================
 # Código para teste
 # ======================================================================
+
+'''
+lista=dict()
+lista["2"]=5
+lista["1"]=12
+lista["3"]=25
+lista["17"]=28
+lista["0"]=15
+for k in sorted(lista):
+    print(k, lista[k])
+#var_dump(lista)
+die('ponto3769')
+'''
 
 '''
 d={}
@@ -2944,7 +3486,7 @@ def main():
     print("  configure o buffer de tela e tamanho de janela com largura mínima de 130 caracteres.")
     print("- Recomenda-se também trabalhar com a janela na altura máxima disponível do monitor.")
     print()
-    print("Aguarde conexão com servidor...")
+    print("- Aguarde conexão com servidor...")
     print()
 
     # Inicialização de sapilib
@@ -2956,23 +3498,23 @@ def main():
     # -----------------------------------------------------------------------------------------------------------------
     carregar_estado()
     if len(Gitens) > 0:
-        print("Retomando último laudo. Para trocar de laudo, utilize opção *tt")
+        print("- Retomando último laudo. Para trocar de laudo, utilize opção *tt")
         refresh_itens()
     else:
         # Obtem lista de itens, solicitando o memorando
-        if not obter_itens_ok():
+        if not obter_laudo_ok():
             # Se usuário interromper seleção de itens
-            print("Execução finalizada.")
-            sys.exit()
+            print("- Execução finalizada.")
+            return
     # Salva estado atual
     salvar_estado()
 
     carregar_estado()
     if (len(Gitens) == 0):
         # Se não carregou nada, solicita laudo
-        if not obter_itens_ok():
+        if not obter_laudo_ok():
             print()
-            print("Encerrado por solicitação do usuário")
+            print("- Encerrado por solicitação do usuário")
             sys.exit(0)
     # Salva estado atual
     salvar_estado()
@@ -2994,9 +3536,17 @@ def main():
             continue
 
         if (comando == '*qq'):
-            print("Finalizado por comando do usuario")
-            salvar_estado()
-            break
+            # Finaliza programa, mas antes verifica se tem algo rodando em background
+            if finalizar_programa():
+                # Finaliza
+                print()
+                print("- Finalizando por solicitação do usuário. Aguarde...")
+                print_log("Finalizado por comando de usuário (*qq)")
+                break
+            else:
+                # Continua recebendo comandos
+                continue
+
 
         # Executa os comandos
         # -----------------------
@@ -3028,10 +3578,37 @@ def main():
             refresh_itens()
             exibir_situacao()
             continue
+        elif (comando == '*lg'):
+            exibir_log(comando='*lg', filtro_base='', filtro_usuario=argumento)
+            continue
         elif (comando == '*tt'):
-            obter_itens_ok()
-            salvar_estado()
+            obter_laudo_ok()
+            #salvar_estado()
             exibir_situacao()
+            continue
+        elif (comando == '*db'):
+            if modo_debug():
+                desligar_modo_debug()
+                print("- Modo debug foi desligado")
+            else:
+                ligar_modo_debug()
+                print("- Modo debug foi ligado")
+            continue
+        elif (comando == '*s3'):
+            abrir_browser_setec3_exame(GdadosGerais["codigo_solicitacao_exame_siscrim"])
+            continue
+        elif (comando == '*s3g'):
+            abrir_browser_setec3_sapi()
+            continue
+        elif (comando == '*sto'):
+            exibir_storage_file_explorer()
+            continue
+        elif (comando == '*cl'):
+            abrir_browser_siscrim_documento(GdadosGerais["codigo_laudo"])
+            continue
+        elif (comando == '*ml'):
+            abrir_browser_siscrim_modelo_usuario(GdadosGerais["codigo_laudo"])
+            print("- Gere um modelo padrão sapi, por exemplo: GTPI/SAPI - Celular v2.0 (Geral)")
             continue
         elif (comando == '*gl'):
             gerar_laudo()
@@ -3039,12 +3616,19 @@ def main():
 
             # Loop de comando
 
+    # Finaliza programa
+    # Encerrando conexão com storage
+    print()
+    desconectar_todos_storages()
+
     # Finaliza
     print()
-    print("FIM ", Gprograma, " (Versão ", Gversao, ")")
-
+    print("FIM SAPI Laudo - Versão: ", Gversao)
 
 if __name__ == '__main__':
 
     main()
+
+    print()
+    espera_enter("Programa finalizado. Pressione <ENTER> para fechar janela.")
 

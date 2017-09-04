@@ -57,7 +57,7 @@ if sys.version_info <= (3, 0):
 # GLOBAIS
 # =======================================================================
 Gprograma = "sapi_iped"
-Gversao = "1.8"
+Gversao = "1.8.1d"
 
 # Controle de tempos/pausas
 GtempoEntreAtualizacoesStatus = 180
@@ -82,8 +82,9 @@ Glabel_processo_executando = None
 Gcodigo_tarefa_excluindo = None
 Glabel_processo_excluindo = None
 
-# Dados para laudo
+# Dados resultantes, para atualização da tarefa
 Gdados_laudo = None
+Gtamanho_destino_bytes = None
 
 
 # **********************************************************************
@@ -147,21 +148,21 @@ def inicializar():
     except SapiExceptionVersaoDesatualizada:
         # Se versão do sapi_iped está desatualizada, irá tentar se auto atualizar
         print_log("sapi_iped desatualizado. Encerrando para efetuar atualização")
-        # Ao retornar None, o chamador entenderá que tem que atualizar o sapi_iped, e encerrará a execução
-        return None
+        # Ao retornar False, o chamador entenderá que tem que atualizar o sapi_iped, e encerrará a execução
+        return False
 
     except SapiExceptionProgramaDesautorizado:
         # Servidor sapi pode não estar respondendo (banco de dados inativo)
         # Logo, encerra e aguarda uma nova oportunidade
         print_log("AVISO: Não foi possível obter acesso (ver mensagens anteriores). Encerrando programa")
-        # Ao retornar None, o chamador encerrará a execução
-        return None
+        # Ao retornar False, o chamador entenderá que tem que atualizar o sapi_iped, e encerrará a execução
+        return False
 
     except SapiExceptionFalhaComunicacao:
         # Se versão do sapi_iped está desatualizada, irá tentar se auto atualizar
         print_log("Comunição com servidor falhou. Vamos encerrar e aguardar atualização, pois pode ser algum defeito no cliente")
-        # Ao retornar None, o chamador entenderá que tem que atualizar o sapi_iped, e encerrará a execução
-        return None
+        # Ao retornar False, o chamador entenderá que tem que atualizar o sapi_iped, e encerrará a execução
+        return False
 
     except BaseException as e:
         # Para outras exceçõs, irá ficar tentanto eternamente
@@ -174,7 +175,8 @@ def inicializar():
         trc_string=traceback.format_exc()
         print_log("[168]: Exceção abaixo sem tratamento específico. Avaliar se deve ser tratada")
         print_log(trc_string)
-        return None
+        # Ao retornar False, o chamador entenderá que tem que atualizar o sapi_iped, e encerrará a execução
+        return False
 
     # Verifica se máquina corresponde à configuração recebida, ou seja, se todos os programas de IPED
     # que deveriam estar instalados realmente estão instalados
@@ -195,9 +197,13 @@ def inicializar():
         tentar_atualizar_sapi_iped=True
         erro = "Nenhum IPED (na versão correta) encontrado nesta máquina"
         reportar_erro(erro)
-        return None
+        # Ao retornar False, o chamador entenderá que tem que atualizar o sapi_iped, e encerrará a execução
+        return False
 
     Glista_ipeds_suportados=lista_ipeds_ok
+
+    # Tudo certo
+    return True
 
 
 # Tenta obter uma tarefa com tipo contido em lista_tipo, para o storage (se for indicado)
@@ -367,50 +373,47 @@ def recupera_tarefa_do_setec3(codigo_tarefa):
 # ----------------------------------------------------------------------------------------------------------------------
 def mover_arquivos_sem_iped(caminho_origem, pasta_item):
 
-    die('ponto370') #Ainda não testado..
-
-    lista_mover = list()
-
     # ------------------------------------------------------------------------------------------------------------------
     # Verifica se pasta de origem contém algum arquivo que não deve ser indexado pelo IPED
     # ------------------------------------------------------------------------------------------------------------------
+    lista_mover = list()
+    lista_desconsiderar=['.ufdr', 'UFEDReader.exe']
     print_log("Verifica se na pasta de origem existem arquivos que não devem ser indexados pelo IPED")
     dirs = os.listdir(caminho_origem)
     for file in dirs:
-        print(file)
-        if ".UFDR" in file:
-            lista_mover.append(file)
+        for desconsiderar in lista_desconsiderar:
+            if desconsiderar in file:
+                lista_mover.append(file)
 
     if len(lista_mover)==0:
         print_log("Não existe nenhum arquivo a ser movido antes de rodar o IPED")
         return (True, "", [])
-
 
     # ------------------------------------------------------------------------------------------------------------------
     # Move arquivos que não devem ser indexados para a pasta do item
     # ------------------------------------------------------------------------------------------------------------------
     lista_movidos=list()
     try:
-
         for arquivo in lista_mover:
-            nome_atual = os.path.join(caminho_origem, arquivo)
-            nome_novo = os.path.join(pasta_item, arquivo)
-            print_log("Renomeando arquivo", nome_atual, "para", nome_novo)
-            os.rename(nome_atual, nome_novo)
+            nome_antigo = montar_caminho(caminho_origem, arquivo)
+            nome_novo = montar_caminho(pasta_item, arquivo)
+            print_log("Arquivo", nome_antigo, "não será indexado pelo IPED")
+            print_log("Renomeando arquivo", nome_antigo, "para", nome_novo)
+            os.rename(nome_antigo, nome_novo)
 
         # Confere se renomeou
-        if os.path.isfile(nome_atual):
-            raise Exception("Falhou: Arquivo", nome_atual, "ainda existe")
+        if os.path.isfile(nome_antigo):
+            raise Exception("Falhou: Arquivo", nome_antigo, "ainda existe")
         if not os.path.isfile(nome_novo):
             raise Exception("Falhou: Arquivo", nome_novo, "não existe")
 
         # Tudo certo, moveu
         # Inclui tupla na lista (nome_atual, nome_novo)
-        lista_movidos.append((nome_atual, nome_novo))
+        lista_movidos.append((nome_antigo, nome_novo))
 
     except OSError as e:
         # Falhou o rename
-        return (False, "exceção: "+str(e), [])
+        return (False, "[410] exceção durante rename: "+str(e), [])
 
     # Ok, tudo certo
     return (True, "", lista_movidos)
@@ -419,11 +422,27 @@ def mover_arquivos_sem_iped(caminho_origem, pasta_item):
 # ----------------------------------------------------------------------------------------------------------------------
 # Restaura arquivo movidos (para não serem processados pelo iped)
 # Retorna:
-#   Sucesso: True => Executado com sucesso,  False => Execução falhou
+#   Sucesso: True => Executado com sucesso,
+#            False => Execução falhou
 #   msg_erro: Se a execução falhou
 # ----------------------------------------------------------------------------------------------------------------------
-def restaura_arquivos_movidos(lista_arquivos):
-    die('ponto426')
+def restaura_arquivos_movidos(lista_movidos):
+
+    try:
+        for (nome_antigo, nome_novo) in lista_movidos:
+            print_log("Renomeando arquivo", nome_novo, "para", nome_antigo)
+            os.rename(nome_novo, nome_antigo)
+
+        # Confere se renomeou
+        if os.path.isfile(nome_novo):
+            raise Exception("Falhou: Arquivo", nome_novo, "ainda existe")
+        if not os.path.isfile(nome_antigo):
+            raise Exception("Falhou: Arquivo", nome_antigo, "não existe")
+
+    except OSError as e:
+        # Falhou o rename
+        return (False, "[433] exceção durante rename: "+str(e), [])
+
 
 # ----------------------------------------------------------------------------------------------------------------------
 # Executa IPED
@@ -432,7 +451,6 @@ def restaura_arquivos_movidos(lista_arquivos):
 #   msg_erro: Se a execução falhou
 # ----------------------------------------------------------------------------------------------------------------------
 def executa_iped(codigo_tarefa, comando, caminho_origem, caminho_destino, caminho_log_iped, caminho_tela_iped):
-
 
     # ------------------------------------------------------------------------------------------------------------------
     # Caminho de origem
@@ -478,11 +496,14 @@ def executa_iped(codigo_tarefa, comando, caminho_origem, caminho_destino, caminh
 
             print_log("Excluindo pasta: "+caminho_destino)
             # Limpa pasta de destino
-            # shutil.rmtree(caminho_destino, ignore_errors=True)
+            sapisrv_atualizar_status_tarefa_informativo(
+                codigo_tarefa=codigo_tarefa,
+                texto_status="Excluindo pasta de destino: "+ caminho_destino
+            )
             shutil.rmtree(caminho_destino)
             sapisrv_atualizar_status_tarefa_informativo(
                 codigo_tarefa=codigo_tarefa,
-                texto_status="Pasta de destino excluída: "+ caminho_destino
+                texto_status="Pasta de destino excluída"
             )
         except Exception as e:
             erro = "Não foi possível limpar pasta de destino da tarefa: " + str(e)
@@ -696,8 +717,8 @@ def calcula_hash_iped(codigo_tarefa, caminho_destino):
     )
 
     # Monta linha de comando
-    nome_arquivo = "Lista de Arquivos.csv"
-    caminho_arquivo_calcular_hash = caminho_destino + "/" + nome_arquivo
+    nome_arquivo_calculo_hash = "Lista de Arquivos.csv"
+    caminho_arquivo_calcular_hash = montar_caminho(caminho_destino, nome_arquivo_calculo_hash)
 
     try:
         algoritmo_hash = 'sha256'
@@ -708,7 +729,7 @@ def calcula_hash_iped(codigo_tarefa, caminho_destino):
         )
         valor_hash =calcula_sha256_arquivo(caminho_arquivo_calcular_hash)
     except Exception as e:
-        erro = "Não foi possível calcular hash para " + nome_arquivo + " => " + str(e)
+        erro = "Não foi possível calcular hash para " + nome_arquivo_calculo_hash + " => " + str(e)
         # Não deveria ocorrer este erro??? Abortar e analisar
         return (False, erro)
 
@@ -718,10 +739,9 @@ def calcula_hash_iped(codigo_tarefa, caminho_destino):
     if subpasta_destino=="":
         subpasta_destino = partes[len(partes) - 2]
 
-
     # Armazena dados de hash
     h = dict()
-    h["sapiHashDescricao"] = "Hash do arquivo " + subpasta_destino + "/listaArquivos.csv"
+    h["sapiHashDescricao"] = "Hash do arquivo " + subpasta_destino + "/" + nome_arquivo_calculo_hash
     h["sapiHashValor"] = valor_hash
     h["sapiHashAlgoritmo"] = algoritmo_hash
     lista_hash = [h]
@@ -792,9 +812,9 @@ def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
 
     # Caminho para bat
     nome_bat = "ferramenta_pesquisa.bat"
-    caminho_bat = os.path.join(caminho_memorando, nome_bat)
+    caminho_bat = montar_caminho(caminho_memorando, nome_bat)
 
-    caminho_iped_multicase      = os.path.join(caminho_memorando,"multicase")
+    caminho_iped_multicase      = montar_caminho(caminho_memorando,"multicase")
 
     # Recupera a lista de pasta das tarefas IPED que foram concluídas com sucesso
     # ---------------------------------------------------------------------------
@@ -839,15 +859,15 @@ def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
     # Confere se todas as pastas das tarefas finalizadas estão ok
     # -------------------------------------------------------------
     for caminho_destino in caminhos_tarefas_iped_finalizado:
-        pasta_iped=os.path.join(ponto_montagem, caminho_destino)
+        pasta_iped=montar_caminho(ponto_montagem, caminho_destino)
         if not os.path.exists(pasta_iped):
             erro="[756] Não foi encontrada pasta de IPED de tarefa concluída"+pasta_iped
             return (False, erro)
 
         # Verifica integridade da pasta
-        if os.path.exists(os.path.join(pasta_iped, "indexador", "lib")) \
-                and os.path.exists(os.path.join(pasta_iped, "indexador", "conf")) \
-                and os.path.isfile(os.path.join(pasta_iped, GnomeProgramaInterface)):
+        if os.path.exists(montar_caminho(pasta_iped, "indexador", "lib")) \
+                and os.path.exists(montar_caminho(pasta_iped, "indexador", "conf")) \
+                and os.path.isfile(montar_caminho(pasta_iped, GnomeProgramaInterface)):
             print_log("Pasta", pasta_iped," está íntegra")
         else:
             erro="[765] Pasta de IPED danificada: "+pasta_iped
@@ -855,7 +875,7 @@ def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
 
     # A primeira pasta de IPED será utilizada como modelo, para copiar lib e outros componentes
     # para o multicase
-    caminho_iped_origem=os.path.join(ponto_montagem, caminhos_tarefas_iped_finalizado[0])
+    caminho_iped_origem=montar_caminho(ponto_montagem, caminhos_tarefas_iped_finalizado[0])
 
     # Código antigo, para verificar pastas _iped
     # Confere se todas as pastas de tarefas iped concluídas existem
@@ -875,9 +895,9 @@ def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
     #         # Verifica se abaixo deste pasta existe uma pasta indexador/lib
     #         # Se existir, guarda para uso futuro
     #         if caminho_iped_origem is None:
-    #             if      os.path.exists(os.path.join(root,"indexador", "lib"))\
-    #                 and os.path.exists(os.path.join(root,"indexador", "conf"))\
-    #                 and os.path.isfile(os.path.join(root,GnomeProgramaInterface)):
+    #             if      os.path.exists(montar_caminho(root,"indexador", "lib"))\
+    #                 and os.path.exists(montar_caminho(root,"indexador", "conf"))\
+    #                 and os.path.isfile(montar_caminho(root,GnomeProgramaInterface)):
     #                 caminho_iped_origem=root
 
 
@@ -885,7 +905,7 @@ def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
     # -----------------------------------------------------------------------------------------------------
 
     # Pasta para o indexador do multicase
-    caminho_indexador_multicase = os.path.join(caminho_iped_multicase, "indexador")
+    caminho_indexador_multicase = montar_caminho(caminho_iped_multicase, "indexador")
 
     # Cria pastas para multicase, se ainda não existirem
     try:
@@ -916,8 +936,8 @@ def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
     # Pasta LIB => Esta pasta contém os programas java e bibliotecas utilizados na pesquisa
     # Efetua a cópia da pasta lib de um item para a pasta do multicase caso isto não tenha sido feito anteriormente
     # ------------------------------------------------------------------------------------------------------------------
-    caminho_lib_origem      =os.path.join(caminho_iped_origem   , "indexador", "lib")
-    caminho_lib_multicase   =os.path.join(caminho_iped_multicase, "indexador", "lib")
+    caminho_lib_origem      =montar_caminho(caminho_iped_origem   , "indexador", "lib")
+    caminho_lib_multicase   =montar_caminho(caminho_iped_multicase, "indexador", "lib")
 
     # Se pasta lib não existe, cria pasta, copiando da pasta de processamento de IPED do item
     if not os.path.exists(caminho_lib_multicase):
@@ -942,8 +962,8 @@ def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
     # A rigor, cada item pode ter uma configuração independente, logo existe um problema conceitual aqui.
     # Mas como todos são rodados pelo sistema, isto não deve dar diferença
     # ------------------------------------------------------------------------------------------------------------------
-    caminho_conf_origem     =os.path.join(caminho_iped_origem,      "indexador", "conf")
-    caminho_conf_multicase  =os.path.join(caminho_iped_multicase,   "indexador", "conf")
+    caminho_conf_origem     =montar_caminho(caminho_iped_origem,      "indexador", "conf")
+    caminho_conf_multicase  =montar_caminho(caminho_iped_multicase,   "indexador", "conf")
 
     # Se pasta conf não existe, cria pasta, copiando da pasta de processamento de IPED do item
     if not os.path.exists(caminho_conf_multicase):
@@ -965,8 +985,8 @@ def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
     # ------------------------------------------------------------------------------------------------------------------
     # Copia IPED-SearchApp.exe para pasta do multicase
     # ------------------------------------------------------------------------------------------------------------------
-    caminho_de   = os.path.join(caminho_iped_origem,  GnomeProgramaInterface)
-    caminho_para = os.path.join(caminho_iped_multicase, GnomeProgramaInterface)
+    caminho_de   = montar_caminho(caminho_iped_origem,  GnomeProgramaInterface)
+    caminho_para = montar_caminho(caminho_iped_multicase, GnomeProgramaInterface)
     try:
         print_log("Copiando arquivo" + caminho_de + "para" + caminho_para)
         shutil.copy(caminho_de, caminho_para)
@@ -986,7 +1006,7 @@ def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
     # Este passo sempre é executado e o arquivo é refeito, refletindo o conteúdo completo da pasta
     # ------------------------------------------------------------------------------------------------------------------
     arquivo_pastas="iped-itens.txt"
-    caminho_arquivo_pastas = os.path.join(caminho_iped_multicase, arquivo_pastas)
+    caminho_arquivo_pastas = montar_caminho(caminho_iped_multicase, arquivo_pastas)
 
     # # Recupera lista de pastas com processamento por IPED
     # qtd_pastas_iped=0
@@ -1040,24 +1060,43 @@ def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
         # Neste caso, aborta tarefa, pois este erro deve ser analisado
         return (False, erro)
 
-
     # ------------------------------------------------------------------------------------------------------------------
     # Cria arquivo bat "ferramenta_pesquisa.bat"
     # Este será o arquivo que o usuário irá clicar para invocar o IPED multicase
     # ------------------------------------------------------------------------------------------------------------------
-
-    conteudo_bat_deprecated="""
+    conteudo_bat="""
 @echo off
-REM ====================================================================================
 REM SAPI - Carregamento do caso no iped, modo multicase
 REM ====================================================================================
+REM echo %~d0
+REM Se nao tem drive, exibe mensagem explicativa
+IF "%~d0" == "\\\\" (
+  echo .
+  echo *** ERRO: Nao existe drive, IPED nao pode ser invocado ***
+  echo .
+  echo Problema:
+  echo - Voce estah tentando invocar a ferramenta de pesquisa direto de uma pasta compartilhada da rede, que nao estah mapeada.
+  echo .
+  echo Solucao:
+  echo - Efetue um mapeamento da pasta de rede para um letra, por exemplo z:
+  echo - Navegue para pasta mapeada e clique novamente sobre ferramenta_pesquisa.bat
+  echo .
+  pause
+  exit
+)
 
 REM Ajusta diretório corrente para a pasta de armazenamento do multicase
+REM --------------------------------------------------------------------
 CD /D %~dp0
 CD multicase
 
 REM Executa Ferramenta de Pesquisa, passando os parâmetros para multicase
+REM --------------------------------------------------------------------
 "xxx_programa_interface.exe" -multicases iped-itens.txt
+
+echo Carregando IPED (Indexador e Processador de Evidencias Digitais). Aguarde alguns segundos...
+REM Isto aqui embaixo é só um truque para dar um sleep para dar tempo do IPED carregar
+ping -n 120 127.0.0.1 > nul
 
 REM =========================================================================
 REM Para debug
@@ -1067,52 +1106,6 @@ REM =========================================================================
 REM java -jar "indexador/lib/iped-search-app.jar -multicases iped-itens.txt"
 REM pause
 """
-
-
-    conteudo_bat = """
-@echo off
-REM ====================================================================================
-REM SAPI - Carregamento do caso no iped, modo multicase
-REM ====================================================================================
-echo Carregando IPED. Aguarde...
-REM echo %~d0
-IF "%~d0" == "\\\\" (
-  REM Não tem letra de drive.
-  REM Isto significa que está acessando a partir de um share (pasta de rede)
-  REM Neste caso, iremos criar dinamicamente uma letra, e liberar no final
-  REM --------------------------------------------------------------------
-  set sem_drive=1
-  REM Efetua uma mapeamento automatico do share, para uma letra escolhida pelo sistema
-  pushd %~dp0
-  cd multicase
-) ELSE (
-  REM Ajusta diretório corrente para a pasta de armazenamento do multicase
-  REM --------------------------------------------------------------------
-  CD /D %~dp0
-  CD multicase
-)
-
-
-REM Executa Ferramenta de Pesquisa, passando os parâmetros para multicase
-"xxx_programa_interface.exe" -multicases iped-itens.txt
-
-if "%sem_drive%"=="1" (
-  echo ==========================================================================
-  echo Execucao do IPED
-  echo ==========================================================================
-  echo .
-  echo .
-  echo === ATENCAO ====
-  echo Como voce esta executando em um share de rede, mantenha esta janela aberta ate o final de uso do IPED
-  echo NAO feche a janela antes, caso contrario o IPED apresentara falhas.
-  echo .
-  echo Apos concluir IPED, digite ENTER para encerrar
-  pause
-  REM Fecha drive e encerra
-  popd
-)
-"""
-
 
     # Troca o nome do programa do executavel
     conteudo_bat=conteudo_bat.replace("xxx_programa_interface.exe", GnomeProgramaInterface)
@@ -1170,6 +1163,27 @@ def excluir_multicase(caminho_iped_multicase, caminho_bat):
         # Neste caso, aborta tarefa, pois este erro deve ser analisado
         return (False, erro)
 
+# Calculo de tamanho da pasta de destino
+def calcula_tamanho_total_pasta(caminho_destino):
+
+    global Gtamanho_destino_bytes
+
+    msg_erro=None
+    try:
+        carac_destino = obter_caracteristicas_pasta(caminho_destino)
+        Gtamanho_destino_bytes = carac_destino["tamanho_total"]
+
+        print_log("Tamanho total da pasta resultante do processamento do IPED: ", Gtamanho_destino_bytes)
+        sucesso=True
+
+    except OSError as e:
+        msg_erro= "[1180] Falhou determinação de tamanho: " + str(e)
+        sucesso=False
+    except BaseException as e:
+        msg_erro= "[1183] Falhou determinação de tamanho: " + str(e)
+        sucesso=False
+
+    return (sucesso, msg_erro)
 
 
 # Recupera dados relevantes do log do IPED
@@ -1246,7 +1260,7 @@ def conectar_ponto_montagem_storage_ok(dados_storage):
     nome_storage = dados_storage['maquina_netbios']
     print_log("Verificando conexão com storage", nome_storage)
 
-    (sucesso, ponto_montagem, erro) = acesso_storage_windows(dados_storage, utilizar_ip=True)
+    (sucesso, ponto_montagem, erro) = acesso_storage_windows(dados_storage, utilizar_ip=True, tipo_conexao='atualizacao')
     if not sucesso:
         erro = "Acesso ao storage " + nome_storage + " falhou. Verifique se servidor está acessível (rede) e disponível."
         # Talvez seja um problema de rede (trasiente)
@@ -1288,7 +1302,11 @@ def tarefa_excluindo():
         print_log("Não foi possível recuperar situação de tarefa do SETEC3. Presumindo que foi excluída com sucesso")
     else:
         codigo_situacao_tarefa = int(tarefa['codigo_situacao_tarefa'])
-        if codigo_situacao_tarefa==GEmExclusao:
+        if tarefa['excluida']=='t':
+            print_log("Segundo SETEC3, exclusão da tarefa foi finalizada (tarefa foi excluída)")
+            excluindo=False
+            excluindo_setec3=False
+        elif codigo_situacao_tarefa==GEmExclusao:
             print_log("Tarefa ainda está sendo excluída de acordo com SETEC3")
             excluindo=True
             excluindo_setec3=True
@@ -1351,7 +1369,7 @@ def excluir_tarefa():
 
     # Se não tem nenhuma tarefa para exdisponível, não tem o que fazer
     if tarefa is None:
-        print_log("Nenhuma tarefa de para exclusão na fila. Nada a ser excluído por enquanto.")
+        print_log("Nenhuma tarefa para exclusão na fila. Nada a ser excluído por enquanto.")
         return False
 
     # Ok, temos tarefa para ser excluída
@@ -1369,7 +1387,7 @@ def excluir_tarefa():
     # ------------------------------------------------------------------
     # Pastas de destino da tarefa
     # ------------------------------------------------------------------
-    caminho_destino = os.path.join(ponto_montagem, tarefa["caminho_destino"])
+    caminho_destino = montar_caminho(ponto_montagem, tarefa["caminho_destino"])
 
     # Inicia procedimentos em background para excluir tarefa
     # --------------------------------------------
@@ -1449,7 +1467,7 @@ def background_excluir_tarefa_iped(tarefa, nome_arquivo_log, label_processo, dad
         reportar_erro(erro)
 
         # Registra situação de devolução
-        texto_status="Exclusão falhou: " + msg_erro
+        texto_status="Exclusão falhou: " + msg_erro + " Importante: Assegure-se que você não está acessando a pasta a ser excluída"
         sapisrv_troca_situacao_tarefa_loop(
             codigo_tarefa=codigo_tarefa,
             codigo_situacao_tarefa=GFilaExclusao,
@@ -1472,7 +1490,7 @@ def executa_sequencia_exclusao_tarefa(
 
     try:
 
-        # 1) Ajusta status para indicar que exclusão foi iniciada
+        # 1) Ajustar status para indicar que exclusão foi iniciada
         # =======================================================
         sapisrv_atualizar_status_tarefa_informativo(
             codigo_tarefa=codigo_tarefa,
@@ -1532,17 +1550,21 @@ def exclui_pasta_tarefa(codigo_tarefa, caminho_destino):
 
     # Exclui pasta da tarefa
     try:
-        print_log("Excluindo pasta: ",caminho_destino)
+        sapisrv_atualizar_status_tarefa_informativo(
+            codigo_tarefa=codigo_tarefa,
+            texto_status="Excluindo pasta: "+caminho_destino
+        )
         shutil.rmtree(caminho_destino)
         sapisrv_atualizar_status_tarefa_informativo(
             codigo_tarefa=codigo_tarefa,
-            texto_status="Pasta de destino excluída: "+ caminho_destino
+            texto_status="Pasta de destino excluída"
         )
     except Exception as e:
         erro = "Não foi possível excluir pasta de destino da tarefa: " + str(e)
         return (False, erro)
 
     # Não pode existir. Se existir, exclusão acima falhou
+    dormir(5, "Tempo para deixar sistema operacional perceber exclusão")
     if os.path.exists(caminho_destino):
         erro = "Tentativa de excluir pasta de destino falhou: Verifique se existe algo aberto na pasta, que esteja criando um lock em algum dos seus recursos"
         return (False, erro)
@@ -1593,9 +1615,9 @@ def tarefa_executando():
             # o qual pode permitir que a condição de falha seja superada
             codigo_situacao_tarefa = int(tarefa['codigo_situacao_tarefa'])
             if codigo_situacao_tarefa != GFinalizadoComSucesso:
-                print_log("Tarefa não foi concluída com sucesso")
-                print_log("Encerrando programa, para permitir updates que pode vir a sanar o problema")
-                os._exit(1)
+                print_log("Tarefa não foi concluída com sucesso (ex: abortada, excluída pelo usuário, reiniciada)")
+                print_log("Encerrando programa (e todos os filhos), para reiniciar procedimento (inclusive update) para sanar estas diversas situações")
+                finalizar_programa()
 
     # Verifica se o subprocesso de execução da tarefa ainda está rodando
     nome_processo="executar:"+str(Gcodigo_tarefa_executando)
@@ -1612,7 +1634,7 @@ def tarefa_executando():
             # Aborta tarefa
             abortar(Gcodigo_tarefa_executando, "Processo de execução abortou. Verifique log do servidor")
             print_log("Tarefa foi abortada e sapi_iped finalizado")
-            os._exit(1)
+            finalizar_programa()
 
     # Retorna se alguma condição acima indica que tarefa está executando
     if executando:
@@ -1685,12 +1707,12 @@ def executar_nova_tarefa():
     # ------------------------------------------------------------------
     # Pastas de origem e destino
     # ------------------------------------------------------------------
-    caminho_origem  = os.path.join(ponto_montagem, tarefa["caminho_origem"])
-    caminho_destino = os.path.join(ponto_montagem, tarefa["caminho_destino"])
-    pasta_item = os.path.join(ponto_montagem,
+    caminho_origem  = montar_caminho(ponto_montagem, tarefa["caminho_origem"])
+    caminho_destino = montar_caminho(ponto_montagem, tarefa["caminho_destino"])
+
+    pasta_item = montar_caminho(ponto_montagem,
                                    tarefa["dados_solicitacao_exame"]["pasta_memorando"],
                                    tarefa["pasta_item"])
-
 
     # ------------------------------------------------------------------------------------------------------------------
     # Execução
@@ -1705,7 +1727,7 @@ def executar_nova_tarefa():
     comando = comando + " -d " + caminho_origem + " -o " + caminho_destino
 
     # Define arquivo para log
-    caminho_log_iped = os.path.join(caminho_destino, "iped.log")
+    caminho_log_iped = montar_caminho(caminho_destino, "iped.log")
     comando = comando + " -log " + caminho_log_iped
 
     # Sem interface gráfica
@@ -1716,7 +1738,7 @@ def executar_nova_tarefa():
     comando = comando + " --portable "
 
     # Redireciona saída de tela (normal e erro) para arquivo
-    caminho_tela_iped = os.path.join(caminho_destino, "iped_tela.txt")
+    caminho_tela_iped = montar_caminho(caminho_destino, "iped_tela.txt")
     comando = comando + " >" + caminho_tela_iped + " 2>&1 "
 
     # Para teste
@@ -1810,7 +1832,8 @@ def background_executar_iped(tarefa, nome_arquivo_log, label_processo, dados_pai
             codigo_tarefa=codigo_tarefa,
             codigo_situacao_tarefa=GFinalizadoComSucesso,
             texto_status="Tarefa de IPED completamente concluída",
-            dados_relevantes=dados_relevantes
+            dados_relevantes=dados_relevantes,
+            tamanho_destino_bytes=Gtamanho_destino_bytes
         )
         print_log("Tarefa finalizada com sucesso")
     else:
@@ -1844,11 +1867,16 @@ def executa_sequencia_iped(
 
     try:
 
-        # 1) Retira da pasta alguns que não precisam ser indexados (ex: UFDR)
-        # =========================================================
-        (sucesso, msg_erro, lista_movidos)=mover_arquivos_sem_iped(caminho_origem, pasta_item)
-        if not sucesso:
-            return (False, msg_erro)
+        # 1) Retira da pasta alguns arquivos que não precisam ser indexados (ex: UFDR)
+        # ===========================================================================
+        # TODO: Isto aqui não está legal...tem que refazer com conceito de pasta
+        # temporária (xxx_ignorados)
+        #(sucesso, msg_erro, lista_movidos)=mover_arquivos_sem_iped(
+        #    caminho_origem,
+        #    pasta_item
+        #)
+        #if not sucesso:
+        #    return (False, msg_erro)
 
 
         # 2) IPED
@@ -1881,9 +1909,16 @@ def executa_sequencia_iped(
 
         # 6) Retorna para a pasta os arquivos que não precisavam ser processados pelo IPED
         # ================================================================================
-        (sucesso, msg_erro) = restaura_arquivos_movidos(lista_movidos)
+        # Todo: Quando refizer o passo 1, refazer a restauração
+        #(sucesso, msg_erro) = restaura_arquivos_movidos(lista_movidos)
+        #if not sucesso:
+        #    return (False, msg_erro)
+
+        # 7) Calcula o tamanho final da pasta do IPED
+        (sucesso, msg_erro) = calcula_tamanho_total_pasta(caminho_destino)
         if not sucesso:
             return (False, msg_erro)
+
 
     except BaseException as e:
         # Pega qualquer exceção não tratada aqui, para jogar no log
@@ -1907,6 +1942,40 @@ def executa_sequencia_iped(
     # ========================================================
     return (True, "")
 
+
+# Abortar execução do programa
+# Esta rotina é invocada quando alguma situação exige que para a restauração da ordem
+# o ambiente seja reiniciado
+def finalizar_programa():
+    print_log("Iniciando procedimento de encerramento do programa")
+    print_log("Verificando se existem processos filhos a serem encerrados")
+    for ix in sorted(Gpfilhos):
+        if Gpfilhos[ix].is_alive():
+            # Finaliza processo
+            print_log("Finalizando processo ", ix, " [", Gpfilhos[ix].pid, "]")
+            Gpfilhos[ix].terminate()
+
+    # Para garantir, aguarda caso ainda tenha algum processo não finalizado...NÃO DEVERIA ACONTECER NUNCA
+    # --------------------------------------------------------------------------------------------------------------
+    repeticoes = 0
+    while True:
+        # Uma pequena pausa para dar tempo dos processos finalizarem
+        lista = multiprocessing.active_children()
+        qtd = len(lista)
+        if qtd == 0:
+            # Tudo certo
+            print_log("Não resta nenhum processo filho")
+            break
+        repeticoes = repeticoes + 1
+        if repeticoes > 5:
+            print_tela_log("Aguardando encerramento de", len(lista),"processo(s). Situação incomum!")
+        # Aguarda e repete, até finalizar tudo...isto não deveria acontecer....
+        time.sleep(2)
+
+    # Ok, tudo encerrado
+    # -----------------------------------------------------------------------------------------------------------------
+    print_log(" ===== FINAL ", Gprograma, " - (Versao", Gversao, ")")
+    os._exit(1)
 
 
 # ======================================================================
@@ -1951,7 +2020,9 @@ def main():
     print_log(" ===== INÍCIO ", Gprograma, " - (Versao", Gversao, ")")
 
     # Inicializa e obtem a lista de ipeds que estão aptos a serem executados nesta máquina
-    inicializar()
+    if not inicializar():
+        # Falhou na inicialização, talvez falha de comunicação, talvez mudança de versão...
+        finalizar_programa()
 
     while True:
         if Glista_ipeds_suportados is None or len(Glista_ipeds_suportados)==0:
@@ -1960,10 +2031,10 @@ def main():
             # Mensagens adequadas já foram dadas na função inicializar()
             # Desta forma, a rotina de atualização baixará uma nova versão do sapi_iped e iped
             # que podem vir a regularizar a situação
-            break
+            finalizar_programa()
 
+        # Execução
         algo_executado = ciclo_executar()
-
         algo_excluido = ciclo_excluir()
 
         if algo_executado or algo_excluido:
@@ -1976,12 +2047,11 @@ def main():
             dormir(GdormirSemServico)
             # Depois que volta da soneca da ociosidade e reinicializa
             # pois algo pode ter mudado (versão do IPED por exemplo)
-            # o que forcaria uma finalização do programa para fazer um update
-            inicializar()
+            # Se isto acontecer, finaliza sapi_iped para que seja atualizado
+            if not inicializar():
+                # Falhou na inicialização, talvez falha de comunicação, talvez mudança de versão...
+                finalizar_programa()
 
-    # Finalização do programa
-    # -----------------------------------------------------------------------------------------------------------------
-    print_log(" ===== FINAL ", Gprograma, " - (Versao", Gversao, ")")
 
 
 if __name__ == '__main__':

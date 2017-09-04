@@ -100,12 +100,12 @@ Gmenu_comandos['comandos'] = {
 
     # Comandos gerais
     '*s3': 'Abre SETEC3 na página da solicitação de exame corrente',
-    '*s3s': 'Abre SETEC3 na página geral de pendências SAPI',
+    '*s3g': 'Abre SETEC3 na página geral de pendências SAPI',
     '*tt': 'Trocar memorando',
     '*qq': 'Finalizar',
 
     # Comandos para diagnóstico de problemas
-    '*lg': 'Exibir log geral desta instância do sapi_cellebrite. Utiliza argumento como filtro (exe: *EL status => Exibe apenas registros de log contendo o string "status".',
+    '*lg': 'Exibir log geral desta instância do sapi_cellebrite. Utiliza argumento como filtro (exe: *LG status => Exibe apenas registros de log contendo o string "status".',
     '*db': 'Ligar/desligar modo debug. No modo debug serão geradas mensagens adicionais no log.'
 
 }
@@ -113,7 +113,7 @@ Gmenu_comandos['comandos'] = {
 Gmenu_comandos['cmd_exibicao'] = ["*sg", "*sgr"]
 Gmenu_comandos['cmd_navegacao'] = ["+", "-"]
 Gmenu_comandos['cmd_item'] = ["*cr", "*sto" , "*cs", "*ab", "*ri","*ex", "*lo"]
-Gmenu_comandos['cmd_geral'] = ["*s3", "*s3s", "*tt", "*qq"]
+Gmenu_comandos['cmd_geral'] = ["*s3", "*s3g", "*tt", "*qq"]
 Gmenu_comandos['cmd_diagnostico'] = ["*db", "*lg"]
 
 # **********************************************************************
@@ -144,25 +144,25 @@ from sapilib_0_8 import *
 # Como foi feito para o sapi
 # ======================================================================
 
-# Interface gráfica (tk)
-# from tkinter import Tk
-import tkinter
-from tkinter import filedialog
-
-class Janela(tkinter.Frame):
-    def __init__(self, master=None):
-        super().__init__(master)
-        self.pack()
-
-    def selecionar_arquivo(self):
-        self.file_name = tkinter.filedialog.askopenfilename(filetypes=([('All files', '*.*'),
-                                                                        ('ODT files', '*.odt'),
-                                                                        ('CSV files', '*.csv')]))
-        return self.file_name
-
-    def selecionar_pasta(self):
-        directory = tkinter.filedialog.askdirectory()
-        return directory
+# # Interface gráfica (tk)
+# # from tkinter import Tk
+# import tkinter
+# from tkinter import filedialog
+#
+# class Janela(tkinter.Frame):
+#     def __init__(self, master=None):
+#         super().__init__(master)
+#         self.pack()
+#
+#     def selecionar_arquivo(self):
+#         self.file_name = tkinter.filedialog.askopenfilename(filetypes=([('All files', '*.*'),
+#                                                                         ('ODT files', '*.odt'),
+#                                                                         ('CSV files', '*.csv')]))
+#         return self.file_name
+#
+#     def selecionar_pasta(self):
+#         directory = tkinter.filedialog.askdirectory()
+#         return directory
 
 
 # Recupera os componentes da tarefa correntes e retorna em tupla
@@ -174,62 +174,6 @@ def obter_tarefa_item_corrente():
 
     x = Gtarefas[Gicor - 1]
     return (x.get("tarefa"), x.get("item"))
-
-
-# Se pasta não existe, cria	
-# =============================================================
-def cria_pasta_se_nao_existe(pasta):
-    # Se já existe, nada a fazer
-    if os.path.exists(pasta):
-        return
-
-    # Cria pasta
-    os.makedirs(pasta)
-
-    # Confere se deu certo
-    if os.path.exists(pasta):
-        return
-
-    # Algo inesperado aconteceu
-    erro_fatal("Criação de pasta [", pasta, "] falhou")
-
-
-# Determina tamanho da pasta
-def tamanho_pasta(start_path):
-    total_size = 0
-    for dirpath, dirnames, filenames in os.walk(start_path):
-        for f in filenames:
-            fp = os.path.join(dirpath, f)
-            total_size += os.path.getsize(fp)
-    return total_size
-
-# Características de pasta
-def obter_caracteristicas_pasta(start_path):
-    total_size = 0
-    qtd=0
-    for dirpath, dirnames, filenames in os.walk(start_path):
-        for f in filenames:
-            fp = os.path.join(dirpath, f)
-            total_size += os.path.getsize(fp)
-            qtd=qtd+1
-
-    # Dicionários de retorno
-    ret=dict()
-    ret["quantidade_arquivos"]=qtd
-    ret["tamanho_total"]=total_size
-
-    return ret
-
-
-
-# Converte Bytes para formato Humano
-def converte_bytes_humano(size, precision=1):
-    suffixes = ['B', 'KB', 'MB', 'GB', 'TB', "PB", "EB", "ZB", "YB"]
-    suffix_index = 0
-    while size > 1024 and suffix_index < 8:
-        suffix_index += 1  # increment the index of the suffix
-        size /= 1024.0  # apply the division
-    return "%.*f%s" % (precision, size, suffixes[suffix_index])
 
 
 # Retorna True se existe storage montado no ponto_montagem
@@ -847,13 +791,22 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
     # Aqui não agrupa várias extrações.
     # Se por algum motivo houver necessidade de agrupar várias,
     # terá que embutuir alguma lógica para mesclar dados por IMSI
+    qtd = 0
     for i in dext:
         if not dext[i].get("sapiSIM", False):
             continue
+
+        qtd = qtd + 1
         dcomp = dict()
         dcomp["sapiTipoComponente"] = "sim"
-        # Nome da extração definida pelo perito
-        dcomp["sapiNomeComponente"] = dext[i]["extractionInfo_name"]
+        # Ignora nome definido pelo PCF, pois normalmente é deixado apenas como "Lógica..."
+        # nome = dext[i]["extractionInfo_name"]
+        nome = "Cartão SIM"
+        if qtd_extracao_sim>1:
+            # Se tiver mais de um SIM, numera sequencialmente
+            nome = "Cartão SIM " + str(qtd)
+
+        dcomp["sapiNomeComponente"] = nome
 
         # Propriedades relevantes do SIM
         for j in dext[i]:
@@ -951,7 +904,7 @@ def exibir_dados_laudo(d):
 
 
 def arquivo_existente(pasta, arquivo):
-    caminho_arquivo = os.path.join(pasta, arquivo)
+    caminho_arquivo = montar_caminho_longo(pasta, arquivo)
     return os.path.isfile(caminho_arquivo)
 
 
@@ -1095,30 +1048,8 @@ def recupera_tarefa_do_setec3(codigo_tarefa):
 
 
 
-def print_atencao():
-    # Na tela sai legal...aqui está distorcido, provavelmente em função da largura dos caracteres
-    # teria que ter uma fonte com largura fixa
-    print("┌─────────────────┐")
-    print("│  A T E N Ç Ã O  │")
-    print("└─────────────────┘")
-
-
-# unicode box drawing characteres
-'''
-┌ ┐
-└ ┘
-─
-│
-┴
-├ ┤
-┬
-╷
-'┼'
-'''
-
-
 def print_falha_comunicacao():
-    print("- Consulte o log para entender melhor o problema(*EL)")
+    print("- Consulte o log para entender melhor o problema(*LG)")
     print("- Se você suspeita de falha de comunicação (rede), ")
     print("  tente acessar o SETEC3 utilizando um browser computador para conferira se a conexão está ok")
 
@@ -1206,7 +1137,7 @@ def pode_abortar(tarefa):
     print("    Se for este o caso, um simples <ENTER> fará com o que o processo continue.")
     print("    Depois disso, consulte o Wiki para ver como configurar o prompt para evitar a repetição do problema")
     print("  - Se a tarefa estava sendo processada neste mesma instância do sapi_cellebrite:")
-    print("    - Consulte o log com a opção *EL (talvez esta máquina tenha perdido conexão com o SETEC3)")
+    print("    - Consulte o log com a opção *LG (talvez esta máquina tenha perdido conexão com o SETEC3)")
     print("    - Dê o comando *qq, para verificar quais processos estão rodando em background.")
     print("  - Em caso de dúvida, AGUARDE para ver se ocorre alguma evolução.")
     # Ok, vamos abortar
@@ -1579,12 +1510,15 @@ def _excluir_tarefa():
     # -------------------
     # Confirma que tem acesso ao storage escolhido
     # print("- Verificando conexão com storage de destino. Aguarde...")
-    ponto_montagem = conectar_ponto_montagem_storage_ok(tarefa["dados_storage"])
+    ponto_montagem = conectar_ponto_montagem_storage_ok(
+        tarefa["dados_storage"],
+        utilizar_ip=True,
+        tipo_conexao='atualizacao')
     if ponto_montagem is None:
         # Mensagens de erro já foram apresentadas pela função acima
         return
 
-    caminho_destino = os.path.join(ponto_montagem, tarefa["caminho_destino"])
+    caminho_destino = montar_caminho_longo(ponto_montagem, tarefa["caminho_destino"])
 
     print("- Pasta de destino no storage:")
     print(" ", tarefa["caminho_destino"])
@@ -1611,7 +1545,8 @@ def _excluir_tarefa():
         limpar_pasta_destino = True
     else:
         print("- Não existe pasta de destino (Não foi criado nada no storage para esta tarefa)")
-        print()
+        print("- Comando cancelado")
+        return
 
     # ------------------------------------------------------------------------------------------------------------------
     # Efetuar exclusão da tarefa
@@ -1660,12 +1595,10 @@ def efetuar_exclusao_background(tarefa, ponto_montagem):
     codigo_tarefa = tarefa["codigo_tarefa"]
 
     # Caminhos para cada um dos componente
-    pasta_memorando = os.path.join(ponto_montagem, tarefa["dados_solicitacao_exame"]["pasta_memorando"])
-    pasta_item = os.path.join(pasta_memorando, tarefa["pasta_item"])
-    pasta_tarefa = os.path.join(ponto_montagem, tarefa["caminho_destino"])
-
-    # Ajusta pasta da tarefa para caminho longo (>260)
-    pasta_tarefa = ajustar_para_path_longo(pasta_tarefa)
+    pasta_memorando = montar_caminho_longo(ponto_montagem, tarefa["dados_solicitacao_exame"]["pasta_memorando"])
+    pasta_item = montar_caminho_longo(pasta_memorando, tarefa["pasta_item"])
+    pasta_tarefa = montar_caminho_longo(ponto_montagem, tarefa["caminho_destino"])
+    pasta_lixo_tarefa=montar_caminho_longo(ponto_montagem, "lixo", tarefa["caminho_destino"])
 
     # Troca situação da tarefa
     # ------------------------
@@ -1690,7 +1623,7 @@ def efetuar_exclusao_background(tarefa, ponto_montagem):
     dados_pai_para_filho=obter_dados_para_processo_filho()
     p_executar = multiprocessing.Process(
         target=background_executar_exclusao,
-        args=(codigo_tarefa, pasta_memorando, pasta_item, pasta_tarefa,
+        args=(codigo_tarefa, pasta_memorando, pasta_item, pasta_tarefa, pasta_lixo_tarefa,
               nome_arquivo_log_para_processos_filhos, label_processo, dados_pai_para_filho)
     )
     p_executar.start()
@@ -1713,19 +1646,19 @@ def efetuar_exclusao_background(tarefa, ponto_montagem):
     print("- Você pode continuar trabalhando, inclusive efetuar outras tarefas simultaneamente.")
     print("- Para acompanhar a situação da exclusão, utilize o comando *SG ou então *SGR (repetitivo).")
     print("- Também é possível acompanhar a situação através do SETEC3, de qualquer máquina.")
-    print("- Em caso de problema/dúvida, utilize *EL para visualizar o log.")
+    print("- Em caso de problema/dúvida, utilize *LG para visualizar o log.")
     print("- IMPORTANTE: Não encerre este programa enquanto houver tarefas em andamento, ")
     print("  pois as mesmas serão interrompidas e terão que ser reprocessadas")
     print("- Quando a exclusão for finalizada, a tarefa desaparecerá da lista de tarefas")
 
-    exibir_situacao_apos_comando()
+    exibir_situacao_apos_comando(repetir=True)
 
     return
 
 
 
 # Efetua a exclusão da tarefa, incluindo sua pasta de destino
-def background_executar_exclusao(codigo_tarefa, pasta_memorando, pasta_item, pasta_tarefa,
+def background_executar_exclusao(codigo_tarefa, pasta_memorando, pasta_item, pasta_tarefa, pasta_lixo_tarefa,
                                  nome_arquivo_log, label_processo, dados_pai_para_filho):
 
     # Impede interrupção por sigint
@@ -1756,19 +1689,23 @@ def background_executar_exclusao(codigo_tarefa, pasta_memorando, pasta_item, pas
         # Uma pequena pausa aqui, para dar tempo ao processo de acompanhamento coletar o tamanho da pasta
         time.sleep(15)
 
-        # 3) Exclui pasta da tarefa
-        # ---------------------------
+        # Substitui a exclusão direta, em exclusão lógica, para pasta de lixeira
+        # a qual será posteriormente eliminada pelo garbage colector
+        #
+        # 3) Exclui física da pasta da tarefa
+        # -----------------------------------
         texto_status = "Excluindo pasta da tarefa"
         sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status)
         # Exclui pasta da tarefa
         print_log("Excluindo pasta", pasta_tarefa)
         shutil.rmtree(pasta_tarefa)
+
         # Verifica se exclui com sucesso
         if os.path.exists(pasta_tarefa):
             print_log("Não foi possível excluir pasta da tarefa")
             raise Exception("Exclusão da pasta da tarefa falhou")
         else:
-            print("Pasta da tarefa excluída com sucesso")
+            print_log("Pasta da tarefa excluída com sucesso")
 
         # Ok, exclusão concluída
         texto_status = "Pasta da tarefa foi excluída"
@@ -1785,7 +1722,7 @@ def background_executar_exclusao(codigo_tarefa, pasta_memorando, pasta_item, pas
                 print_log("Não foi possível excluir pasta do item")
                 raise Exception("Exclusão da pasta do item falhou")
             else:
-                print("Pasta do item excluída com sucesso")
+                print_log("Pasta do item excluída com sucesso")
         else:
             print_log("Pasta do item não foi excluída pois ainda contém ",qtd_entradas, "entradas: ", entradas)
 
@@ -1800,7 +1737,7 @@ def background_executar_exclusao(codigo_tarefa, pasta_memorando, pasta_item, pas
                 print_log("Não foi possível excluir pasta do memorando")
                 raise Exception("Exclusão da pasta do memorando falhou")
             else:
-                print("Pasta do memorando excluída com sucesso")
+                print_log("Pasta do memorando excluída com sucesso")
 
         # Se chegou aqui, sucesso
         print_log("Exclusão efetuada com sucesso")
@@ -1961,7 +1898,6 @@ def _background_acompanhar_exclusao(codigo_tarefa, pasta_tarefa):
 # @*ex - FIM ----------------------------------------------------------------------------------------------------------
 
 
-
 # ---------------------------------------------------------------------------------------------------------------------
 # Diversas funções de apoio
 # ---------------------------------------------------------------------------------------------------------------------
@@ -1989,7 +1925,7 @@ def carrega_exibe_tarefa_corrente(exibir=True):
         print_tela_log("- Não foi possível recuperar dados do servidor para tarefa",codigo_tarefa)
         print("- Talvez esta tarefa tenha sido excluída.")
         print("- Utilize *SG para atualizar a lista de tarefas.")
-        print("- Consulte o log (*EL) em caso de dúvida.")
+        print("- Consulte o log (*LG) em caso de dúvida.")
         return None
 
     # Ok, tarefa recuperada, exibe dados
@@ -2000,23 +1936,6 @@ def carrega_exibe_tarefa_corrente(exibir=True):
     # Retorna dados da tarefa
     return tarefa
 
-# Efetua conexão no ponto de montagem, dando tratamento em caso de problemas
-def conectar_ponto_montagem_storage_ok(dados_storage, utilizar_ip=True):
-
-    nome_storage = dados_storage['maquina_netbios']
-    print("- Verificando conexão com storage",nome_storage,": Aguarde...")
-
-    (sucesso, ponto_montagem, erro) = acesso_storage_windows(dados_storage, utilizar_ip=utilizar_ip)
-    if not sucesso:
-        print("- Acesso ao storage " + nome_storage + " falhou")
-        print(erro)
-        print("- Verifique se servidor de storage está ativo e acessível (rede)")
-        print("- Sugestão: Conecte no servidor via VNC com a conta consulta")
-        return None
-
-    # Ok, tudo certo
-    print("- Acesso ao storage confirmado")
-    return ponto_montagem
 
 
 def troca_situacao_tarefa_ok(codigo_tarefa, codigo_nova_situacao, texto_status='', dados_relevantes=None):
@@ -2039,49 +1958,12 @@ def troca_situacao_tarefa_ok(codigo_tarefa, codigo_nova_situacao, texto_status='
 
 
 
+
+
+
 # ======================================================================================================================
 # @*sto - Exibe pasta da tarefa no storage invocando o File Explorer
 # ======================================================================================================================
-
-# Escolhe pasta para exibição, seguindo ordem: Tarefa, item, memorando, raiz do storage
-def escolhe_pasta_para_abrir(ponto_montagem, tarefa):
-
-    # 1) Pasta da tarefa
-    pasta_tarefa = ponto_montagem + tarefa["caminho_destino"]
-    print("- Pasta da tarefa:")
-    print("  ", pasta_tarefa)
-    if os.path.exists(pasta_tarefa):
-        print("- Exibindo pasta da tarefa")
-        return pasta_tarefa
-    else:
-        print("- Ainda não existe pasta para a tarefa")
-
-    # 2) Pasta do item
-    pasta_item = os.path.join(ponto_montagem,
-                                   tarefa["dados_solicitacao_exame"]["pasta_memorando"],
-                                   tarefa["pasta_item"])
-    print("- Pasta do item:")
-    print("  ", pasta_item)
-    if os.path.exists(pasta_item):
-        print("- Exibindo pasta raiz do item")
-        return pasta_item
-    else:
-        print("- Ainda não existe pasta para o item")
-
-
-    # 3) Pasta do memorando
-    pasta_memorando = os.path.join(ponto_montagem,tarefa["dados_solicitacao_exame"]["pasta_memorando"])
-    print("- Pasta do exame:")
-    print("  ", pasta_memorando)
-    if os.path.exists(pasta_memorando):
-        print("- Exibindo pasta da solicitação do exame")
-        return pasta_memorando
-    else:
-        print("- Ainda não existe pasta para o exame")
-
-    # Se chegou aqui, não tem jeito, tem que abrir na raiz do storage mesmo
-    print("- Exibindo pasta raiz do storage")
-    return ponto_montagem
 
 
 def exibir_pasta_tarefa_file_explorer():
@@ -2100,22 +1982,76 @@ def exibir_pasta_tarefa_file_explorer():
     # -------------------
     # Confirma que tem acesso ao storage escolhido
     # print("- Verificando conexão com storage de destino. Aguarde...")
-    ponto_montagem = conectar_ponto_montagem_storage_ok(
-        dados_storage=tarefa["dados_storage"],
-        utilizar_ip=False
-    )
+
+    #var_dump(tarefa["dados_storage"])
+    #die('ponto2063')
+
+    ponto_montagem = conectar_storage_consulta_ok(tarefa["dados_storage"])
+    #print('ponto2060')
+
+    #ponto_montagem = conectar_ponto_montagem_storage_ok(
+    #    dados_storage=tarefa["dados_storage"],
+    #    utilizar_ip=False,
+    #    com_letra_drive=True
+    #)
+
     if ponto_montagem is None:
         # Mensagens de erro já foram apresentadas pela função acima
         return
+
 
     # Determina a pasta
     pasta=escolhe_pasta_para_abrir(ponto_montagem, tarefa)
 
     # Abre pasta no File Explorers
-    print("- Será aberto agora o file explorer, posicionado na pasta: ")
-    print(" ", pasta)
+    print("- Abrindo file explorer na pasta selecionada")
     os.startfile(pasta)
-    print("- Pasta foi aberto no file explorer")
+    print("- Pasta foi aberta no file explorer")
+
+
+
+# Escolhe pasta para exibição, seguindo ordem: Tarefa, item, memorando, raiz do storage
+def escolhe_pasta_para_abrir(ponto_montagem, tarefa):
+
+    # 1) Pasta da tarefa
+    pasta_tarefa = montar_caminho(ponto_montagem, tarefa["caminho_destino"])
+    print("- Pasta da tarefa:")
+    print("  ", pasta_tarefa)
+    if os.path.exists(pasta_tarefa):
+        print("- Exibindo pasta da tarefa")
+        return pasta_tarefa
+    else:
+        print("- Ainda não existe pasta para a tarefa")
+
+    # 2) Pasta do item
+    # Acho que aqui não faz sentido abrir como caminho longo
+    pasta_item = montar_caminho(ponto_montagem,
+                               tarefa["dados_solicitacao_exame"]["pasta_memorando"],
+                               tarefa["pasta_item"])
+    print("- Pasta do item:")
+    print("  ", pasta_item)
+    if os.path.exists(pasta_item):
+        print("- Exibindo pasta raiz do item")
+        return pasta_item
+    else:
+        print("- Ainda não existe pasta para o item")
+
+
+    # 3) Pasta do memorando
+    pasta_memorando = montar_caminho(
+        ponto_montagem,
+        tarefa["dados_solicitacao_exame"]["pasta_memorando"])
+    print("- Pasta do exame:")
+    print("  ", pasta_memorando)
+    if os.path.exists(pasta_memorando):
+        print("- Exibindo pasta da solicitação do exame")
+        return pasta_memorando
+    else:
+        print("- Ainda não existe pasta para o exame")
+
+    # Se chegou aqui, não tem jeito, tem que abrir na raiz do storage mesmo
+    print("- Exibindo pasta raiz do storage")
+    return ponto_montagem
 
 
 # ======================================================================================================================
@@ -2228,9 +2164,8 @@ def _copia_cellebrite_parte1():
     print("- Os arquivos de relatórios devem estar posicionados imediatamente abaixo da pastas informada.")
 
     # Solicita a pasta de origem
-    # Cria janela para seleção de laudo
     root = tkinter.Tk()
-    j = Janela(master=root)
+    j = JanelaTk(master=root)
     caminho_origem = j.selecionar_pasta()
     root.quit()
     root.destroy()
@@ -2267,8 +2202,8 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
             return
         print()
         # Renomeia e prossegue
-        de = os.path.join(caminho_origem, "Relatório.xml_em_copia")
-        para = os.path.join(caminho_origem, "Relatório.xml")
+        de = montar_caminho_longo(caminho_origem, "Relatório.xml_em_copia")
+        para = montar_caminho_longo(caminho_origem, "Relatório.xml")
         print_log("Usuário indicou que arquivo xml_em_copia deve ser renomeado e cópia deve prosseguir")
         os.rename(de, para)
         print_log("Renomeado ", de, " para ", para)
@@ -2298,7 +2233,7 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
 
 
     # Verifica se o arquivo XML contido na pasta de origem está ok
-    arquivo_xml = os.path.join(caminho_origem, "Relatório.xml")
+    arquivo_xml = montar_caminho_longo(caminho_origem, "Relatório.xml")
     print("- Validando arquivo XML: ")
     print(" ", arquivo_xml)
     print("- Isto pode demorar alguns minutos, dependendo do tamanho do arquivo. Aguarde...")
@@ -2354,14 +2289,12 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
     # -------------------
     # Confirma que tem acesso ao storage escolhido
     # print("- Verificando conexão com storage de destino. Aguarde...")
-    ponto_montagem = conectar_ponto_montagem_storage_ok(tarefa["dados_storage"])
+    ponto_montagem = conectar_storage_atualizacao_ok(dados_storage=tarefa["dados_storage"])
     if ponto_montagem is None:
         # Mensagens de erro já foram apresentadas pela função acima
         return
 
-    caminho_destino = os.path.join(ponto_montagem, tarefa["caminho_destino"])
-    # Ajusta para nomenclatura de caminho longo (para evitar limitação de 260 caracteres no path total)
-    caminho_destino = ajustar_para_path_longo(caminho_destino)
+    caminho_destino = montar_caminho_longo(ponto_montagem, tarefa["caminho_destino"])
 
     print("- Pasta de destino no storage:")
     print(" ", tarefa["caminho_destino"])
@@ -2393,9 +2326,10 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
         # Guarda indicativo que será necessário limpeza da pasta de destino
         limpar_pasta_destino_antes_copiar = True
     else:
-        print()
-        print("- Confira se a pasta de destino (exibida acima) está bem formada, ou seja, se o memorando e o item estão ok,")
-        print("  pois será assim que ficará na mídia de destino.")
+        print_atencao()
+        print("- Confira se a pasta de destino no storage (exibida acima) está bem formada,")
+        print("  ou seja, se o memorando e o item estão ok,")
+        print("  pois será assim que ficará gravado na mídia de destino.")
         print("- IMPORTANTE: Se a estrutura não estiver ok (por exemplo, o item está errado), cancele comando,")
         print("  ajuste no SETEC3 (*s3) e depois retome esta tarefa.")
         print()
@@ -2466,11 +2400,11 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
     print("- Você pode continuar trabalhando, inclusive efetuar outras cópias simultaneamente.")
     print("- Para acompanhar a situação da cópia, utilize o comando *SG, ou então *SGR (repetitivo)")
     print("- Também é possível acompanhar a situação através do SETEC3 (*s3)")
-    print("- Em caso de problema/dúvida, utilize *EL para visualizar o log")
+    print("- Em caso de problema/dúvida, utilize *LG para visualizar o log")
     print("- IMPORTANTE: Não encerre este programa enquanto houver cópias em andamento, ")
     print("  pois as mesmas serão interrompidas e terão que ser reiniciadas")
 
-    exibir_situacao_apos_comando()
+    exibir_situacao_apos_comando(repetir=True)
 
     return
 
@@ -2501,7 +2435,7 @@ def background_executar_copia(codigo_tarefa, caminho_origem, caminho_destino,
     # (por exemplo o comando *cs) entenda que a cópia ainda não acabou
     # Só quando a extensão for restaurada para xml o sistema entenderá
     # que a cópia acabou
-    arquivo_xml_origem = os.path.join(caminho_origem, "Relatório.xml")
+    arquivo_xml_origem = montar_caminho_longo(caminho_origem, "Relatório.xml")
     arquivo_xml_origem_renomeado = arquivo_xml_origem + "_em_copia"
     sucesso=False
     try:
@@ -2551,19 +2485,16 @@ def background_executar_copia(codigo_tarefa, caminho_origem, caminho_destino,
         # ------------------------------------------------------------------
         texto_status = "Copiando"
         sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status)
-        # Este ajuste tem como objetivo introduzir um prefixo \\?\ para fazer
-        # com que o sistema operacional aceite caminhos com mais de 260 caracteres
-        caminho_destino_ajustado=ajustar_para_path_longo(caminho_destino)
         print_log("Copiando de:", caminho_origem)
-        print_log("Copiando para:", caminho_destino_ajustado)
-        shutil.copytree(caminho_origem, caminho_destino_ajustado)
+        print_log("Copiando para:", caminho_destino)
+        shutil.copytree(caminho_origem, caminho_destino)
         texto_status = "Cópia finalizada"
         sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status)
 
         # 6) Restaura o nome do arquivo XML na pasta destino
         # ------------------------------------------------------------------
-        arquivo_xml_destino = os.path.join(caminho_destino, "Relatório.xml_em_copia")
-        arquivo_xml_destino_renomeado = os.path.join(caminho_destino, "Relatório.xml")
+        arquivo_xml_destino = montar_caminho_longo(caminho_destino, "Relatório.xml_em_copia")
+        arquivo_xml_destino_renomeado = montar_caminho_longo(caminho_destino, "Relatório.xml")
         print_log("Restaurado nome de arquivo '",
                   arquivo_xml_destino, "' para '", arquivo_xml_destino_renomeado, "'")
         os.rename(arquivo_xml_destino, arquivo_xml_destino_renomeado)
@@ -2571,8 +2502,8 @@ def background_executar_copia(codigo_tarefa, caminho_origem, caminho_destino,
 
         # 7) Restaura o nome do arquivo XML na pasta origem
         # ------------------------------------------------------------------
-        arquivo_xml_origem = os.path.join(caminho_origem,  "Relatório.xml_em_copia")
-        arquivo_xml_origem_renomeado = os.path.join(caminho_origem, "Relatório.xml")
+        arquivo_xml_origem = montar_caminho_longo(caminho_origem,  "Relatório.xml_em_copia")
+        arquivo_xml_origem_renomeado = montar_caminho_longo(caminho_origem, "Relatório.xml")
         print_log("Restaurado nome de arquivo '",
                   arquivo_xml_origem, "' para '", arquivo_xml_origem_renomeado, "'")
         os.rename(arquivo_xml_origem, arquivo_xml_origem_renomeado)
@@ -2648,7 +2579,8 @@ def background_executar_copia(codigo_tarefa, caminho_origem, caminho_destino,
             codigo_tarefa=codigo_tarefa,
             codigo_situacao_tarefa=GFinalizadoComSucesso,
             texto_status="Dados copiados com sucesso para pasta de destino",
-            dados_relevantes=dados_relevantes)
+            dados_relevantes=dados_relevantes,
+            tamanho_destino_bytes=carac_destino["tamanho_total"])
         print_log("Situação da tarefa atualizada com sucesso")
     except BaseException as e:
         print_tela_log("- Cópia da tarefa", codigo_tarefa,"foi concluída")
@@ -2809,15 +2741,18 @@ def determinar_situacao_no_storage(tarefa):
     # Montagem de storage
     # -------------------
     # Confirma que tem acesso ao storage escolhido
-    ponto_montagem=conectar_ponto_montagem_storage_ok(tarefa["dados_storage"])
+    ponto_montagem=conectar_storage_consulta_ok(dados_storage=tarefa["dados_storage"])
     if ponto_montagem is None:
         # Mensagens de erro já foram apresentadas pela função acima
         return (erro_interno, status, {}, erros, avisos)
 
 
+
     # Verifica se pasta de destino existe
     # -----------------------------------
-    caminho_destino = ponto_montagem + tarefa["caminho_destino"]
+    caminho_destino = os.path.join(ponto_montagem, tarefa["caminho_destino"])
+    print("- Pasta de destino: ", caminho_destino)
+
     if not os.path.exists(caminho_destino):
         status = "Não iniciado (sem pasta)"
         print("- Pasta de destino ainda não foi criada.")
@@ -2840,7 +2775,7 @@ def determinar_situacao_no_storage(tarefa):
 
     # Valida arquivo xml
     print("- Validando Relatório.XML. Isto pode demorar, dependendo do tamanho do arquivo. Aguarde...")
-    arquivo_xml = os.path.join(caminho_destino, "Relatório.xml")
+    arquivo_xml = montar_caminho_longo(caminho_destino, "Relatório.xml")
     (resultado, dados_relevantes, erros, avisos) = processar_arquivo_xml(
         arquivo=arquivo_xml,
         numero_item=item["item"],
@@ -2974,11 +2909,20 @@ def _comparar_sistema_com_storage():
     return
 
 
-def exibir_situacao_apos_comando():
+def exibir_situacao_apos_comando(repetir=False):
+
+    # Deixa usuário decidir se fará ou não exibição contínua
     print()
-    espera_enter("<ENTER> para prosseguir. Será exibida a situação atualizada das tarefas ")
-    refresh_tarefas()
-    exibir_situacao()
+    continuo = pergunta_sim_nao("< Deseja entrar em modo de acompanhamento contínuo da situação das tarefas (*sgr)?","n")
+    if not continuo:
+        # Atualiza tela de situação e retorna
+        refresh_tarefas()
+        exibir_situacao()
+        return
+
+    # Modo de repetição contínuo. Fica em loop, até receber CTR-C
+    exibir_situacao_repetir()
+    return
 
 
 # Linha geral de cabeçalho
@@ -3270,7 +3214,7 @@ def _obter_solicitacao_exame():
     print()
     print("- Estas são as solicitações de exames que estão preparadas para serem executadas no SAPI.")
     print("- Se a solicitação de exame que você procura não está na lista, ")
-    print("  vá para SETEC3 (utilizando o comando *s3s), localize a solicitação de exame desejada, ")
+    print("  vá para SETEC3 (utilizando o comando *s3g), localize a solicitação de exame desejada, ")
     print("  e prepare a solicitação de exame para o SAPI, definindo as tarefas a serem executadas.")
 
     # Usuário escolhe a solicitação de exame de interesse
@@ -3280,16 +3224,16 @@ def _obter_solicitacao_exame():
         #
         print()
         num_solicitacao = input(
-            "< Indique o número de sequência (Sq) da solicitação na lista acima (ou digite *S3s => SAPI no SETEC3): ")
+            "< Indique o número de sequência (Sq) da solicitação na lista acima (ou digite *s3g => SAPI no SETEC3): ")
         num_solicitacao = num_solicitacao.strip()
 
-        if num_solicitacao=='*s3s':
+        if num_solicitacao=='*s3g':
             abrir_browser_setec3_sapi()
             continue
 
         if not num_solicitacao.isdigit():
             print("- Entre com o número sequencial da solicitacao (coluna Sq)")
-            print("- Digite *s3s para abrir a página de seus exames SAPI no SETEC3")
+            print("- Digite *s3g para abrir a página de seus exames SAPI no SETEC3")
             print("- Digite <CTR><C> para cancelar")
             continue
 
@@ -3372,7 +3316,7 @@ def refresh_tarefas():
     Gtarefas = tarefas
 
     # Ajusta índice, pois pode ter ocorrido exclusão de tarefas, deixando o índice com valor inválido
-    if Gicor>len(Gtarefas):
+    if Gtarefas is None or Gicor>len(Gtarefas):
         Gicor=1
 
     # Guarda data hora do último refresh de tarefas
@@ -3528,11 +3472,41 @@ def exibir_situacao_repetir():
 
 def main():
 
-    # The "\\?\" prefix can also be used with paths constructed according to the universal naming convention (UNC).
-    # To specify such a path using UNC, use the "\\?\UNC\" prefix.
-    # For example, "\\?\UNC\server\share",
-    # where "server" is the name of the computer and "share" is the name of the shared folder.
-    # These prefixes are not used as part of the path itself. They indicate that the path should be passed to the system with minimal modification, which means that you cannot use forward slashes to represent path separators, or a period to represent the current directory, or double dots to represent the parent directory. Because you cannot use the "\\?\" prefix with a relative path, relative paths are always limited to a total of MAX_PATH characters.
+    # caminho_storage="\\\\gtpi-sto-01\\storage"
+    # #caminho_arquivo_resultado='C:\\Users\\PCF -\\Dropbox\\desenvolvimento_python\\repositorio_github\\sapi\\net_use_consulta.txt'
+    # caminho_arquivo_resultado='net_use_consulta.txt'
+    # #with open(caminho_arquivo_resultado, mode='r', encoding='utf-8') as file:
+    # #with codecs.open(caminho_arquivo_resultado, mode='r', encoding='utf-8') as file:
+    # with open(caminho_arquivo_resultado, mode='r') as file:
+    #     for linha in file:
+    #         # Remove elementos sem utilidade
+    #         linha=linha.replace("Microsoft Windows Network","")
+    #         # Procura por uma linha que indique que o mapamento está ok
+    #         # OK           R:        \\gtpi-sto-01\storage           Microsoft Windows Network
+    #         termos=linha.split()
+    #         if len(termos)==0:
+    #             continue
+    #         if (termos[0]!='OK'):
+    #             # Se não está conectado, despreza a linha de informação de mapeamento
+    #             continue
+    #         #print(console_sanitiza_utf8_ok(linha))
+    #         letra=termos[1]
+    #         caminho=termos[2]
+    #         if caminho_storage in caminho:
+    #             print("achou: letra", letra)
+    #
+    #         print('**************')
+    #
+    #         print(termos[0])
+    #         if "zzzY:" in linha:
+    #             print("achou")
+    #
+    # die('ponto3519')
+
+
+    #with open("abc.txt", mode='r', encoding='utf-8') as file:
+    #    for linha in file:
+    #        print(linha)
 
     #caminho_original="\\\\10.41.87.237\\storage\\Memorando_1880-17_CF_PR-26/item04Arrecadacao06/item04Arrecadacao06_extracao"
     #caminho_ajustado=ajustar_caminho_destino_para_copy(caminho_original)
@@ -3702,7 +3676,7 @@ def main():
         elif (comando == '*s3'):
             abrir_browser_setec3_exame(GdadosGerais["codigo_solicitacao_exame_siscrim"])
             continue
-        elif (comando == '*s3s'):
+        elif (comando == '*s3g'):
             abrir_browser_setec3_sapi()
             continue
         elif (comando == '*db'):
