@@ -102,7 +102,6 @@ def dormir(tempo, rotulo=None):
     else:
         print_log("Sem pausa...deve ser usado apenas para debug...modo instantâneo (ver GmodoInstantaneo)")
 
-
 # Tratamento para erro no cliente
 def reportar_erro(erro):
     try:
@@ -143,7 +142,7 @@ def atualizar_sapi_iped():
         return False
 
     # Conecta no storage de deployment
-    (sucesso, ponto_montagem, erro) = acesso_storage_windows(storage_deployment)
+    (sucesso, ponto_montagem, erro) = acesso_storage_windows(storage_deployment, tipo_conexao='consulta')
     if not sucesso:
         # Talvez seja um problema de rede (trasiente)
         reportar_erro(erro)
@@ -200,6 +199,7 @@ def atualizar_sapi_iped():
                 print_log("Pasta ainda existe. Exclusão FALHOU. Erro inesperado!!!")
                 return False
 
+        dormir(5)  # Pausa para deixar sistema operacional se "situar"
 
         # Se a pasta tmp já existe, exclui
         if os.path.exists(caminho_destino_tmp):
@@ -208,6 +208,8 @@ def atualizar_sapi_iped():
             if os.path.exists(caminho_destino_tmp):
                 print_log("Pasta ainda existe. Exclusão FALHOU. Erro inesperado!!!")
                 return False
+
+        dormir(5)  # Pausa para deixar sistema operacional se "situar"
 
         print_log("Ok, nada mais a excluir")
 
@@ -224,8 +226,12 @@ def atualizar_sapi_iped():
         print_log("Testando para ver se consegue renomear",caminho_destino)
         executa_rename(caminho_destino, caminho_destino_old)
 
+        dormir(5)  # Pausa para deixar sistema operacional se "situar"
+
         print_log("Voltando para nome anterior")
         executa_rename(caminho_destino_old, caminho_destino)
+
+        dormir(5)  # Pausa para deixar sistema operacional se "situar"
 
         print_log("Ok, pasta sapi_iped está livre para ser trabalhada (sem nenhum tipo de lock)")
 
@@ -249,10 +255,14 @@ def atualizar_sapi_iped():
         print_log("4) Copiando "+caminho_origem+" para "+caminho_destino_tmp)
         shutil.copytree(caminho_origem, caminho_destino_tmp)
 
+        dormir(5)  # Pausa para deixar sistema operacional se "situar"
+
         # Salva a pasta atual para old, caso ocorra algum problema que tenha que ser restaurada
         # -------------------------------------------------------------------------------------
         print_log("5) Protege pasta atual, renomeando para _OLD")
         executa_rename(caminho_destino, caminho_destino_old)
+
+        dormir(5)  # Pausa para deixar sistema operacional se "situar"
 
     except WindowsError as e:
         # Por algum motivo, Erros de windows não estão sendo capturado por OSError e por consequência também
@@ -273,6 +283,7 @@ def atualizar_sapi_iped():
             print_log("Pausa antes de executar operação, para dar tempo do Windows 'se achar'")
             time.sleep(10)
             executa_rename(caminho_destino_tmp, caminho_destino)
+            dormir(5)  # Pausa para deixar sistema operacional se "situar"
 
         except WindowsError as e:
             # Isto não deveria ter acontecido....já foi tentando em passo anterior e funcionou...
@@ -314,6 +325,7 @@ def atualizar_sapi_iped():
         print_log("Copiando pasta [", pasta_profiles_customizados, "] para [", pasta_profiles_iped, "]")
         adiciona_diretorio(pasta_profiles_customizados, pasta_profiles_iped)
 
+
         # Copia arquivo de configuração local (relacionado com a máquina, discos SSD, etc)
         # --------------------------------------------------------------------------------
         # Talvez no futuro, seja necessário mais de um arquivo de configuração
@@ -322,6 +334,8 @@ def atualizar_sapi_iped():
         arquivo_destino = os.path.join(pasta_iped, "LocalConfig.txt")
         print_log("Copiando arquivo [", arquivo_origem, "] para [", arquivo_destino, "]")
         shutil.copy2(arquivo_origem, arquivo_destino)
+
+        dormir(5)  # Pausa para deixar sistema operacional se "situar"
 
     except WindowsError as e:
         # Por algum motivo, Erros de windows não estão sendo capturado por OSError e por consequência também
@@ -344,9 +358,9 @@ def limpa_log():
     print_log("9) Efetuando limpeza de arquivo de logs na pasta",logdir)
 
     qtd_dias_manter_log=7
-    #data_limite = datetime.datetime.now() - datetime.timedelta(days=qtd_dias_manter_log)
-    data_limite = datetime.datetime.now() - datetime.timedelta(hours=1)
-    print_log("Excluindo arquivos de log que não foram alterados após: ",data_limite)
+    data_limite = datetime.datetime.now() - datetime.timedelta(days=qtd_dias_manter_log)
+    #data_limite = datetime.datetime.now() - datetime.timedelta(hours=1)
+    print_log("Excluindo arquivos de log gerados antes de: ",data_limite)
 
     qtd_excluido=0
     for arq in os.listdir(logdir):
