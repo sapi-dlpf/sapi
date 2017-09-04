@@ -3584,7 +3584,7 @@ def main():
     print()
     print("Dicas:")
     print("- Este programa foi projetado para utilizar uma janela com largura mínima de 130 caracteres.")
-    print("- Se a linha de separador ---- está sendo dívida/quebrada,")
+    print("- Se a linha de separador ---- está sendo dividida/quebrada,")
     print("  configure o buffer de tela e tamanho de janela com largura mínima de 130 caracteres.")
     print("- Recomenda-se também trabalhar com a janela na altura máxima disponível do monitor.")
     print()
