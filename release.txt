@@ -84,20 +84,26 @@ necessitando apenas que o perito leve o seu certificado digital.
 
 === PCF Marcos =====
 SEM SAPI
-1a. Missao: Missão (sem viagem a serviço)	18/09/2016	15/10/2016	OMP 40/2016 Lava-Jato
-Dias úteis: 4x5 - 1 (feriado 12/outubro) = 19
+1a. Missao: Missão (sem viagem a serviço)	18/09/2016	15/10/2016	OMP 40/2016 Lava-Jato (4 semanas)
+Dias úteis: 19 = 4x5 - 1 (feriado 12/outubro)
 Total de laudos: 20
 Total de celulares: 46
 Celulares por dia útil: 2,42
 
 COM SAPI
-2a. Missao:
-Dias úteis: XXX - 3 (operação Hammer-on) - 1 (Operação dia 30/08) =
-Total de laudos:
-Total de celulares:
-Celulares por dia útil:
+2a. Missao: 17/07/2017 - 08/07/2017 (8 semanas)
+Dias úteis: 34 = 8x5 - 3 (operação Hammer-on) - 1 (Operação dia 30/08) - 2 (7 e 8 de setembro foram feriados em CWB)
+Total de laudos: 36
+Total de celulares: 90 (84 celulares, 6 tablets)
+Celulares por dia útil: 90/35 = 2,64
 
-Aumento de produtividade: xx %
-
+Aumento de produtividade: 9,4 %
 ================================================================
 
+1.8) Falhas relatadas pelos últimos usuários.
+---------------------------------------------
+OK Melhorar feedback do sapi_cellebrite
+OK Possibilidade de correção na estrutura de itens já processada (excluir tarefas, itens).
+OK Tolerância a falha em caso de não resposta do SETEC3 (travamento do sapi_iped)
+OK O BAT que invoca o multicase não está funcionando sem ter letra mapeada.
+OK Novo servidor de deployment

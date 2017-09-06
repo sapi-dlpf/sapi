@@ -4,33 +4,40 @@ TODO - Lista de pendências do projeto SAPI
 Planejamento de versões:
 =========================
 
-1.8) Falhas relatadas pelos últimos usuários.
----------------------------------------------
-OK Melhorar feedback do sapi_cellebrite
-OK Possibilidade de correção na estrutura de itens já processada (excluir tarefas, itens).
-OK Tolerância a falha em caso de não resposta do SETEC3 (travamento do sapi_iped)
-OK O BAT que invoca o multicase não está funcionando sem ter letra mapeada.
-OK Novo servidor de deployment
-
 1.9) Prioritário
-* sapi_atualiza_iped.py está falhando quando na configuração do sapi não tem nenhum servidor de deployment para o ambiente
-  ...não tinha nenhum para a produção (Dar mensagem de erro adequada neste caso no interface web)
-* Tarefa do Cristiano não retomou após atualização de versão???
-  - Fazer testes, derrubando servidor para ver o que está acontecendo.
-
+Durante semana de estabilização:
 * Novo ambiente de desenvolvimento
   * Instalar servidor gtpi-sto-03 para ter ambiente de desenvolvimento
   * Ajustar para que o servidor de deployment da produção seja separado do desenvolvimento
     \\macsetec3 x \\macsete2 ou então duas pastas...
-* Colocar Robocopy como mecanismo de cópia padrão (para resolver o problema do & no nome dos arquivos)
-* Fazer os testes de tolerância a falha no sapi_iped que acabei não fazendo....
-* Trocar senha de atualização das contas SAPI nos servidores (e nos arquivos de configuração)
+  * sapi_atualiza_iped.py está falhando quando na configuração do sapi não tem nenhum servidor de deployment para o ambiente
+    ...não tinha nenhum para a produção (Dar mensagem de erro adequada neste caso no interface web)
+* GTPI-STO-02:
+  * Bloquear Windows UPDATE
+  * Fundos de tela: Padronizar
+  * Screen saver (ajustar mensagem) para todos os usuários
 * Fazer nova versão do manual (novos comandos)
   * Explicar o conceito de multicase
   * Explicar o ferramenta_pesquisa.bat
+* Liberar sapi_midia básico (utilizando Robocopy)
+* Quando o GTPI-STO-02 foi desligado, entrou em modo hibernação. Isto é um risco, pois pode gerar inconsistência
+* Verificar se GTPI-STO-01 está utilizando proxy para conversar com SETEC3.
+* Laboratório - Máquinas do Cellebrite
+  * Instalar Libreoffice
+  * Instalar VNC
+  * Ver máquina que está problema de conexão na rede (abri chamado em 05/09)
+
+Após semana de estabilização:
+* Fazer os testes de tolerância a falha no sapi_iped que acabei não fazendo....
+* Trocar senha de atualização das contas SAPI nos servidores (e nos arquivos de configuração)
 * Ignorar indexação de UFDR com a dica do Nassif
+* Colocar Robocopy como mecanismo de cópia padrão (para resolver o problema do & no nome dos arquivos)
 
 1.10)
+- IPED 1.3.3...que tem incompatibilidade de multicase:
+  - Tem que dar opção ao perito escolher o IPED que deseja rodar.
+  - Todas as máquinas deverão possuir o mesmo conjunto de IPEDs.
+  - Neste caso, se a máquina não tiver o IPED disponível na versão deseja, irá falhar e abortar a tarefa.
 - Liberar sapi_midia básico
 
 1.10) sapi_midia final
@@ -152,6 +159,8 @@ OK Está dando erro para arquivo com mais de 256 caracteres...tem que tratar ist
 OK Comando STO, ao invés de abrir uma nova pasta, verificar se já tem um mapeamento com letra
 e utilizar este mapeamento...tem que ser assim, caso contrário o windows vai criar dezenas de letras...
 
+- Permitir nomes diferentes do default (Atualmente apenas relatório.pdf).
+  - Buscar o XML, e a partir daí buscar o nome dos demais componentes.
 - Se MSISDN não estiver disponível, trocar por "Não disponível"
 - Comando IPED: Invoca IPED para conferir resultado
 - Incluir novos campos (serial, ....), ver dados que marcos passou em
