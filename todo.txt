@@ -4,6 +4,7 @@ TODO - Lista de pendências do projeto SAPI
 Planejamento de versões:
 =========================
 
+
 1.9) Prioritário
 Durante semana de estabilização:
 * Novo ambiente de desenvolvimento
