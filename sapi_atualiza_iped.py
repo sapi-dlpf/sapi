@@ -58,7 +58,7 @@ if sys.version_info <= (3, 0):
 # GLOBAIS
 # =======================================================================
 Gprograma = "sapi_atualiza_iped"
-Gversao = "1.8.1"
+Gversao = "1.8.2"
 
 # Controle de tempos/pausas
 GtempoEntreAtualizacoesStatus = 180
@@ -120,9 +120,35 @@ def reportar_erro(erro):
 
 # Se ocorrer algum erro, será passado para o chamador
 def executa_rename(origem, destino):
+    dormir(5) # Pausa para deixar sistema operacional se situar
     print_log("Renomeando ", origem, " para ", destino)
     os.rename(origem, destino)
+    dormir(5) # Pausa para deixar sistema operacional se situar
+    # Verifica se efetuou rename com sucesso
+    if os.path.exists(origem):
+        print_log("Origem ainda existe. Rename falhou!!!")
+        return False
+    if not os.path.exists(destino):
+        print_log("Destino não existe. Rename falhou!!!")
+        return False
+    # Tudo certo
     print_log("Ok, renomeado")
+    return True
+
+def executa_delete(caminho):
+    dormir(5) # Pausa para deixar sistema operacional se situar
+    print_log("Excluindo pasta ", caminho)
+    shutil.rmtree(caminho)
+    dormir(5) # Pausa antes de verificar, para dar tempo do SO se situar
+    # Verifica se exclusão foi realmente executada
+    if os.path.exists(caminho):
+        print_log("Pasta ainda existe. Exclusão FALHOU. Erro inesperado!!!")
+        return False
+
+    # Tudo certo
+    print_log("Ok, pasta excluída")
+    return True
+
 
 # Atualiza a pasta do sapi_iped
 # a partir do servidor de deployment
@@ -193,23 +219,36 @@ def atualizar_sapi_iped():
         print_log("2) Excluindo pastas intermediárias que podem ter sobrado de processamentos anteriores")
         # Se a pasta old já existe, exclui
         if os.path.exists(caminho_destino_old):
-            print_log("Excluindo pasta ", caminho_destino_old)
-            shutil.rmtree(caminho_destino_old)
-            if os.path.exists(caminho_destino_old):
-                print_log("Pasta ainda existe. Exclusão FALHOU. Erro inesperado!!!")
+            if not executa_delete(caminho_destino_old):
+                # Falhou. Motivo já foi explicado na função chamada
                 return False
 
-        dormir(5)  # Pausa para deixar sistema operacional se "situar"
+        # Se a pasta old já existe, exclui
+        #if os.path.exists(caminho_destino_old):
+        #    print_log("Excluindo pasta ", caminho_destino_old)
+        #    shutil.rmtree(caminho_destino_old)
+        #    dormir(5)
+        #    if os.path.exists(caminho_destino_old):
+        #        print_log("Pasta ainda existe. Exclusão FALHOU. Erro inesperado!!!")
+        #        return False
+        #dormir(5)  # Pausa para deixar sistema operacional se "situar"
 
         # Se a pasta tmp já existe, exclui
         if os.path.exists(caminho_destino_tmp):
-            print_log("Excluindo pasta", caminho_destino_tmp)
-            shutil.rmtree(caminho_destino_tmp)
-            if os.path.exists(caminho_destino_tmp):
-                print_log("Pasta ainda existe. Exclusão FALHOU. Erro inesperado!!!")
+            if not executa_delete(caminho_destino_tmp):
+                # Falhou. Motivo já foi explicado na função chamada
                 return False
 
-        dormir(5)  # Pausa para deixar sistema operacional se "situar"
+        # # Se a pasta tmp já existe, exclui
+        # if os.path.exists(caminho_destino_tmp):
+        #     print_log("Excluindo pasta", caminho_destino_tmp)
+        #     shutil.rmtree(caminho_destino_tmp)
+        #     dormir(5)
+        #     if os.path.exists(caminho_destino_tmp):
+        #         print_log("Pasta ainda existe. Exclusão FALHOU. Erro inesperado!!!")
+        #         return False
+        #
+        # dormir(5)  # Pausa para deixar sistema operacional se "situar"
 
         print_log("Ok, nada mais a excluir")
 
@@ -224,14 +263,14 @@ def atualizar_sapi_iped():
         # (por exemplo, tem um prompt aberto na pasta)
         # Se não for possível renomear, também não será possível excluir depois
         print_log("Testando para ver se consegue renomear",caminho_destino)
-        executa_rename(caminho_destino, caminho_destino_old)
-
-        dormir(5)  # Pausa para deixar sistema operacional se "situar"
+        if not executa_rename(caminho_destino, caminho_destino_old):
+            # Mensagem de explicação já foi apresenta na função chamada
+            return False
 
         print_log("Voltando para nome anterior")
-        executa_rename(caminho_destino_old, caminho_destino)
-
-        dormir(5)  # Pausa para deixar sistema operacional se "situar"
+        if not executa_rename(caminho_destino_old, caminho_destino):
+            # Mensagem de explicação já foi apresenta na função chamada
+            return False
 
         print_log("Ok, pasta sapi_iped está livre para ser trabalhada (sem nenhum tipo de lock)")
 
@@ -241,7 +280,7 @@ def atualizar_sapi_iped():
         # No manual do python, WindowsErro não é subclasse de OSError....mas segundo usuário deveria ser...
         # Cuidado: Windows excp
         # De qualquer forma, vamos deixar este "reparo" aqui, para repassar qualquer WindowsError para BaseException
-        print_log("[258] Erro: ", e)
+        print_log("[281] Erro: ", e)
         return False
 
     try:
@@ -251,7 +290,7 @@ def atualizar_sapi_iped():
         # Neste copia vai o sapi e também a pasta do IPED
         # Esta operação é relativamente demorada
         # Se for interrompida no meio, não dará problema,
-        # pois estmaos apenas para outra pasta
+        # pois estamos apenas para uma pasta tempória
         print_log("4) Copiando "+caminho_origem+" para "+caminho_destino_tmp)
         shutil.copytree(caminho_origem, caminho_destino_tmp)
 
@@ -260,9 +299,9 @@ def atualizar_sapi_iped():
         # Salva a pasta atual para old, caso ocorra algum problema que tenha que ser restaurada
         # -------------------------------------------------------------------------------------
         print_log("5) Protege pasta atual, renomeando para _OLD")
-        executa_rename(caminho_destino, caminho_destino_old)
-
-        dormir(5)  # Pausa para deixar sistema operacional se "situar"
+        if not executa_rename(caminho_destino, caminho_destino_old):
+            # Mensagem de explicação já foi apresenta na função chamada
+            return False
 
     except WindowsError as e:
         # Por algum motivo, Erros de windows não estão sendo capturado por OSError e por consequência também
@@ -270,29 +309,25 @@ def atualizar_sapi_iped():
         # No manual do python, WindowsErro não é subclasse de OSError....mas segundo usuário deveria ser...
         # Cuidado: Windows excp
         # De qualquer forma, vamos deixar este "reparo" aqui, para repassar qualquer WindowsError para BaseException
-        print_log("Erro: ", e)
+        print_log("[310] Erro: ", e)
         return False
 
-    if __name__ == '__main__':
-        try:
 
-            # Renomeia a nova pasta para pasta atual
-            # ------------------------------------------------------------------
-            deu_erro_rename = False;
-            print_log("6) Renomeia TMP (copiada) para pasta atual")
-            print_log("Pausa antes de executar operação, para dar tempo do Windows 'se achar'")
-            time.sleep(10)
-            executa_rename(caminho_destino_tmp, caminho_destino)
-            dormir(5)  # Pausa para deixar sistema operacional se "situar"
+    try:
+        # Renomeia a nova pasta para pasta atual
+        # ------------------------------------------------------------------
+        deu_erro_rename = False;
+        print_log("6) Renomeia TMP (copiada) para pasta atual")
+        executa_rename(caminho_destino_tmp, caminho_destino)
 
-        except WindowsError as e:
-            # Isto não deveria ter acontecido....já foi tentando em passo anterior e funcionou...
-            print_log("Erro: ", e)
-            print_log("Isto não deveria ocorrer. Verifique se a pasta de destino está em uso (algum arquivo aberto, prompt ou mesmo aberta no File Explorer")
-            deu_erro_rename=True;
-            # Aqui não vamos encerrar,
-            # Vamos apenas sair da exception para o erro ser melhor tratado
-            # pois é muito complicado executar dentro do bloco de exception coisas que podem causar exception
+    except WindowsError as e:
+        # Isto não deveria ter acontecido....já foi tentando em passo anterior e funcionou...
+        print_log("[327] Erro: ", e)
+        print_log("Isto não deveria ocorrer. Verifique se a pasta de destino está em uso (algum arquivo aberto, prompt ou mesmo aberta no File Explorer")
+        deu_erro_rename=True;
+        # Aqui não vamos encerrar,
+        # Vamos apenas sair da exception para o erro ser melhor tratado
+        # pois é muito complicado executar dentro do bloco de exception coisas que podem causar exception
 
     # Se der erro no rename do TMP para a pasta oficial, volta a situação anterior
     # Se no próximo rename der erro também, aí não tem solução, o servidor ficará inativo exigindo intervenção humana
@@ -308,34 +343,40 @@ def atualizar_sapi_iped():
         # -------------------------------------------------------------------------
         print_log("7) Ajustando IPED")
         # Localiza pasta de destino de profiles do IPED
-        pasta_iped = None
+        lista_pasta_iped=list()
         for item in os.listdir(caminho_destino):
             if "IPED-" in item:
                 pasta_iped = os.path.join(caminho_destino, item)
                 print_log("Localizada pasta do IPED em  =>", pasta_iped)
+                lista_pasta_iped.append(pasta_iped)
 
-        if pasta_iped is None:
-            print_log("Não foi encontrada pasta do IPED")
+        if len(lista_pasta_iped)==0:
+            print_log("Não foi encontrada pasta do IPED. Confira pasta de deployment")
             return False
 
-        # Copia a pasta de profiles customizados para o IPED
-        # --------------------------------------------------
-        pasta_profiles_iped = os.path.join(pasta_iped, "profiles")
-        pasta_profiles_customizados = os.path.join(caminho_origem, "profiles_customizados")
-        print_log("Copiando pasta [", pasta_profiles_customizados, "] para [", pasta_profiles_iped, "]")
-        adiciona_diretorio(pasta_profiles_customizados, pasta_profiles_iped)
+        for pasta_iped in lista_pasta_iped:
+            print_log("Ajustando IPED que fica na pasta: ", pasta_iped)
+
+            # Copia a pasta de profiles customizados para o IPED
+            # --------------------------------------------------
+            pasta_profiles_iped = os.path.join(pasta_iped, "profiles")
+            pasta_profiles_customizados = os.path.join(caminho_origem, "profiles_customizados")
+            print_log("Copiando pasta [", pasta_profiles_customizados, "] para [", pasta_profiles_iped, "]")
+            adiciona_diretorio(pasta_profiles_customizados, pasta_profiles_iped)
+
+            # Copia arquivo de configuração local (relacionado com a máquina, discos SSD, etc)
+            # --------------------------------------------------------------------------------
+            # Talvez no futuro, seja necessário mais de um arquivo de configuração
+            # pois máquinas diferentes podem ter estruturas diferentes (SSD em outra letra, por exemplo)
+            # Neste caso, será necessário tornar configurável qual o LocalConfig a ser utilizado
+            arquivo_origem = os.path.join(caminho_origem, "LocalConfig_customizados", "LocalConfig.txt")
+            arquivo_destino = os.path.join(pasta_iped, "LocalConfig.txt")
+            print_log("Copiando arquivo [", arquivo_origem, "] para [", arquivo_destino, "]")
+            shutil.copy2(arquivo_origem, arquivo_destino)
+
+            print_log("Ajustado IPED OK")
 
 
-        # Copia arquivo de configuração local (relacionado com a máquina, discos SSD, etc)
-        # --------------------------------------------------------------------------------
-        # Talvez no futuro, seja necessário mais de um arquivo de configuração
-        # Neste caso, será necessário tornar configurável
-        arquivo_origem = os.path.join(caminho_origem, "LocalConfig_customizados", "LocalConfig.txt")
-        arquivo_destino = os.path.join(pasta_iped, "LocalConfig.txt")
-        print_log("Copiando arquivo [", arquivo_origem, "] para [", arquivo_destino, "]")
-        shutil.copy2(arquivo_origem, arquivo_destino)
-
-        dormir(5)  # Pausa para deixar sistema operacional se "situar"
 
     except WindowsError as e:
         # Por algum motivo, Erros de windows não estão sendo capturado por OSError e por consequência também

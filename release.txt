@@ -36,7 +36,6 @@ sapi_laudo:
 - Diversos atalhos para o setec3 (*S3)
 
 
-
 sapi_iped:
   - Capacidade para excluir tarefa de IPED, refazendo o multicase.
 

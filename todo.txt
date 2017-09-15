@@ -1,172 +1,68 @@
 TODO - Lista de pendências do projeto SAPI
 ============================================
 
-Planejamento de versões:
-=========================
-
-1.9) Prioritário
-Durante semana de estabilização:
-* Novo ambiente de desenvolvimento
-  * Instalar servidor gtpi-sto-03 para ter ambiente de desenvolvimento
-  * Ajustar para que o servidor de deployment da produção seja separado do desenvolvimento
-    \\macsetec3 x \\macsete2 ou então duas pastas...
-  * sapi_atualiza_iped.py está falhando quando na configuração do sapi não tem nenhum servidor de deployment para o ambiente
-    ...não tinha nenhum para a produção (Dar mensagem de erro adequada neste caso no interface web)
+Ajustes diversos:
 * GTPI-STO-02:
-  * Bloquear Windows UPDATE
   * Fundos de tela: Padronizar
   * Screen saver (ajustar mensagem) para todos os usuários
 * Fazer nova versão do manual (novos comandos)
   * Explicar o conceito de multicase
   * Explicar o ferramenta_pesquisa.bat
-* Liberar sapi_midia básico (utilizando Robocopy)
-* Quando o GTPI-STO-02 foi desligado, entrou em modo hibernação. Isto é um risco, pois pode gerar inconsistência
-* Verificar se GTPI-STO-01 está utilizando proxy para conversar com SETEC3.
-* Laboratório - Máquinas do Cellebrite
-  * Instalar Libreoffice
-  * Instalar VNC
-  * Ver máquina que está problema de conexão na rede (abri chamado em 05/09)
+* Quando o GTPI-STO-02 foi desligado, entrou em modo hibernação???
+  - Isto é um risco, pois pode gerar inconsistência...ou é uma oportunidade
+  - Desligar esta 'feature' e fazer testes no GTPI-STO-03
+  * Comparar GTPI-STO-01 com GTPI-STO-02 para descobrir porque tem comportamentos diferentes...
+* GTPI-STO-01:
+  * Verificar se GTPI-STO-01 está utilizando proxy para conversar com SETEC3.
 
-Após semana de estabilização:
-* Fazer os testes de tolerância a falha no sapi_iped que acabei não fazendo....
 * Trocar senha de atualização das contas SAPI nos servidores (e nos arquivos de configuração)
-* Ignorar indexação de UFDR com a dica do Nassif
-* Colocar Robocopy como mecanismo de cópia padrão (para resolver o problema do & no nome dos arquivos)
 
-1.10)
-- IPED 1.3.3...que tem incompatibilidade de multicase:
-  - Tem que dar opção ao perito escolher o IPED que deseja rodar.
-  - Todas as máquinas deverão possuir o mesmo conjunto de IPEDs.
-  - Neste caso, se a máquina não tiver o IPED disponível na versão deseja, irá falhar e abortar a tarefa.
-- Liberar sapi_midia básico
-
-1.10) sapi_midia final
-- Implementar geração de tarefas no servidor
-- sapi_midia apenas executa tarefas de geração:
-  - Solicita qual a pasta de destino
-  - Efetua o download e ajuste multicase
-
-1.11) Melhorias na tolerância a falhas:
-- Comparar tempo de copy via python com Robocopy. Avaliar se vale a pena converter.
-- sapi_watch_dog light:
-  - Reinicializa apenas a aplicação do sapi_iped (....como, kill forçado....)
-  - Não tem como reinicializar o servidor, uma vez que pode estar recebendo dados (copias), ou fazendo download
-- Falha durante cópia:
-  - Se Robocopy for tolerante a falhas de rede (interrompe rede) e continua quando reconecta, trocar para utilizar
-    robocopy ao invés do procedimento de cópia tradicional.
-  - Caso contrário, ajustar comando de cópia do python, para possibilitar retomada...
-
-1.12) sapi_imagem e melhorias no sapi_laudo
----------------------------------------------
-- Sapi_laudo:
-  - Integração com siscrim para criação de laudo (comando CL)
-  - Pequenos ajustes em dados do laudo
-- Possibilidade de fazer upload de imagens já criadas (para cartões de memória, por exemplo):
-  - sapi_imagem: programa para fazer upload
-  - sapi_laudo: precisa de modelo e tratamento para modelo para esta situação,
-    misturando em um mesmo laudo dispositivos de memória com celular
-
-1.13) Interface semi-gráfica
----------------------------------------------
-- Colocar uma semi-interface gráfica no sapi_cellebrite, para mostrar a lista de tarefas, com menu de contexto
-- Colocar uma semi-interface gráfica no sapi_laudo, para selecionar a itemização.
-
-1.14) Novas funcionalidades:
----------------------------------------------
-- Testar deployment em formato EXE:
-  Exemplo: pyinstaller --onefile sapi_laudo.py
-- Ferramenta_pesquisa.bat => Fazer um substituto em python, convertido para exe.
-
-1.15) Novas funcionalidades:
----------------------------------------------
-- Controle de acesso, para impedir que um usuário mexa em coisas do outro.
-- Incluir o terceiro storage
-- Opção (X) Escolher automaticamente, que irá definir o storage baseado nas características
-  (carga, xxxx)
-- Tratamento completo para inexiquibilidade.
-- Mais de uma versão do IPED
-- sapi_watchdog_log: Fica monitorando pasta de log, e reseta servidor se detectar inatividade
-  https://stackoverflow.com/questions/32053618/how-to-to-terminate-process-using-pythons-multiprocessing
-- Mecanismo para interromper uma tarefa em execução:
-  - No servidor, possibilidade de mandar Abortar a tarefa
-  - Nos clientes, quando for atualizar status e receber comando de abortar, interromper a execução.
-
-Novos conceitos:
-- Material de destino de transporte: Um hd de destino que é referenciado como destino por diversos laudos...
-  Como tratar isto:
-  - Deve ficar claro no laudo que material não está sendo exclusivamente utilizado por aquele laudo,
-    e que não será entregue junto com o laudo.
-  - A secretaria tem que estar ciente disto também.
-
-
-2.0) Tratamento para mídias de massa
----------------------------------------------
-2.1) Guymager
-- Revisar sapi_guymager
-
-2.2) Tableau
-- Desenvolver sapi_tableau
-
-2.3) Geração de ISO
---------------------
-- Geração automática de ISO para mídia
-- Armazenar o tamanho das pastas de cada tarefa
-- Tem que permitir fazer o split por tamanho de mídia (máximo)
-- Se não couber, aborta a tarefa
-- Atualização no SETEC3 mídia anexa.
-- Consulta no SETEC3 para usuário baixar mídia (talvez...)
-
-2.4) Cópia para mídia externa
-------------------------------
-- sapi_midia_externa.py:
-  - Pede o caminho para o HD externo. Verifica, confere.
-  - Solicita um memorando que está em processamento.
-  - Quando todas as tarefas associadas ao memorando em processamento forem concluídas, faz o cópia para a mídia montada
-- O usuário pode deixar este program rodando na sua máquina, ou então em alguma máquina do laboratório.
-
-2.5) Cópia direta para storage
-------------------------------
-- Depende de conexão veloz e disponibilidade em disco.
-- Revisar sapi_copia.py
-
-3.0) Regime de produção
----------------------------------------------
-- Faciliade de uso: Interface gráfica: Substituir uso da interface Web (tudo no cliente)
-- Na interface gráfica, trocar para usuário/senha (ao invés de matrícula)
-- Arquivamento (ver detalhes abaixo).
-
-4.0) Ampliação de base de usuários
----------------------------------------------
-- Módulo de configuração
-
+Versão 2.0)
+* sapi_imagem
+* Testes/ajustes no sapi_iped
+* Ajsutes no sapi_atualiza_iped
+* Novo storage GTPI-STO-03
 
 =======================================================================================================================
-Por programa/componente:
+Componentes PYTHON:
 =======================================================================================================================
 
 @sapi_lib
 ---------
-OK Nas requisições http, tratar ausência de resposta (timeout e retentativas)
+- Nada a fazer
+
+@sapi_imagem (NOVO):
+--------------------
+* Criar pasta para armazenamento da tarefa
+* Criar no servidor um schedule para iniciar sapi_imagem a cada 5 minutos
+  * Se o programa falhar, será reiniciado
+* Funcionalidade de submeter uma imagem a processamento
+* Reconhece formato do guymager (log)
+* Reconhece formato do tableu (log)
+* Configura os tableaus para se conectar no servidor (perfil de acesso):
+  * Tem como copiar o perfil de um tableau para outro?
+- Reconhece outros formatos sem log, mas neste caso não recupera nenhum dado para laudo:
+ - E01 genérico
+ - DD genérico
+ - Outros formatos raw (qualquer arquivo):
+   - Neste caso, ajusta para nomenclatura do IPED (apenas algumas extensões são aceitas...testar)
+   - Se tiver vários arquivos que formam um conjunto, tem que dar algum tratamento.
+
 
 @sapi_cellebrite:
 -----------------
-OK Tolerância a falha na atualização do status
-OK Tratamento adequado no caso de não conseguir modificar o status
-OK Log significativo.
-OK Comando EX, que exclui tarefa.
-OK Na cópia, além do %, calcular também o tempo estimado de término.
-OK Está dando erro para arquivo com mais de 256 caracteres...tem que tratar isto
-OK Comando STO, ao invés de abrir uma nova pasta, verificar se já tem um mapeamento com letra
-e utilizar este mapeamento...tem que ser assim, caso contrário o windows vai criar dezenas de letras...
-
+- SGR: Evoluir o tempo de 15, 30, 60 (segundos), para no começo mostrar a mudança.
+  - Só mostrar a mensagem que está com 60 segundos, quando estiver realmente neste tempo.
+- Colocar Robocopy como mecanismo de cópia padrão (para resolver o problema do & no nome dos arquivos)
+- Se MSISDN não estiver disponível, trocar por "Não disponível"
 - Permitir nomes diferentes do default (Atualmente apenas relatório.pdf).
   - Buscar o XML, e a partir daí buscar o nome dos demais componentes.
-- Se MSISDN não estiver disponível, trocar por "Não disponível"
+- Previsão de término:
+  - O primeiro valor está bem ruim.
+  - Talvez o tempo de cálculo do espaço esteja sendo embutido no primeira estimativa
 - Comando IPED: Invoca IPED para conferir resultado
 - Incluir novos campos (serial, ....), ver dados que marcos passou em
   I:\desenvolvimento\sapi\novos_campos_laudo\marcos_01
-- Para o Bauer, está aparecendo uma solicitação de exame que já foi arquivada.
-  - Revisar o critério para descobrir se está idêntica a lista de solicitações de exame SAPI no SETEC3.
 - Comando SI => Exibe situação de todas as tarefas de cada item. Algo como:
     Item                   Tarefa          Situação
     01/01: xxxxx           514-Extração    Sucesso
@@ -190,22 +86,18 @@ Colocar instrução na tela de como acessar:
 
 @sapi_iped_executar_bat:
 -------------------------
-OK Está gerando ano_dia_mes.log
 - No log do servidor, está aparecendo sapi_iped@10.2.192.23. Motivo???
 
 @sapi_atualiza_iped:
 --------------------
-OK Novo servidor de deployment (linux produção)
-OK Limpar logs: Está ficando muitos arquivos de log na pasta.
-- Registrar log informativo das diversas operação, inclusive da cópia.
-- Limpar pasta indexador no final da execução (IPED não está conseguindo limpar)
+* Registrar no log (do servidor) as informações sobre as diversas operações, cópias, exclusões, etc.
+- Está falhando quando na configuração do sapi não tem nenhum servidor de deployment para o ambiente
+  - Quando deu o problema, não tinha nenhum para a produção (Dar mensagem de erro adequada neste caso no interface web)
+
 
 @sapi_iped
 ----------
-OK Refactor: Utilizar paradigma do sapi_cellebrite
-OK Ajuste para path com mais de 256 caracteres: Não é necessário para o IPED, pois ele já trata isto legal.
-OK Exclusão de tarefa
-OK Novo servidor de deployment
+* Limpar as pastas temporária de indexação após o término de cada execução, e também na incialização.
 * Testar tolerância a falha de rede no servidor:
   - Quando está ocioso
   - Durante execução do IPED
@@ -227,19 +119,15 @@ OK Novo servidor de deployment
   - Utilizar o mesmo paradigma dos agentes com interface, ou seja, fica lendo um comando que será passado
     (ao invés de passar o comando pela linha de comando, vem via http)
 * Quando for montar multicase, desprezar pastas que não possuam conteúdo (acho que já faz isto...)
-* Receber comando de exclusão de tarefa.
-  - No servidor, quando mandar excluir tarefa, irá mudar para status (Aguardando execução), e o tipo será 'excluir'.
-  - Exclui pasta, e refaz o multicase.
-* Utilar sapilib com tratamento de timeout e retentativas para aumentar tolerância a falha
-  - Simular tratavadas...colocar resposta para dormir no servidor, com aleatoriedade, forçando retentativas...
-* Atualização de status intermediários, se não tiverem sucesso, tudo bem, tenta algumas vezes e desiste.
-* Atualização de status final, se não tiver sucesso após algumas tentativas, coloca tarefa como abortada (para ser retomada adiante)
-  e prossegue para a próxima.
 
-(1) Ignorar arquivos que não devem ser indexados pelo IPED:
+* Ignorar arquivos que não devem ser indexados pelo IPED:
+  Alternativa 1:
+  - Utilizar dica do Nassif para desprezar o .ufdr
+  Alternativa 2 (comecei mas não terminei)
   - Criar pasta xxx_ignorados (onde xxx é igual ao caminho da pasta do IPED)
   - Mover arquivos para lá antes de iniciar iped.
   - Restaurar arquivos de lá após finalizar iped (mover tudo da pasta, e depois excluir pasta _ignorados)
+
 (?) Mudar estrutura de log:
     gerar log em arquivo do memorando, que fica na pasta do Memorando de destino (log_sapi_iped.txt)
 +/- Na mensagem do hash, está aparecendo o texto listaArquivos.csv, quando deveria ser "Lista de Arquivos.csv" (Dante)
@@ -250,7 +138,14 @@ OK Novo servidor de deployment
 - Nao processar o UFDR e o XML: Mover poara outra pasta, e depois retornar novamente para a pasta original
   O XML podia até elmininar no destino, para não ocupar espaço.
 
+
+@sapi_guymager:
+---------------
+- Revisar para nova lib e conceitos que evoluiram
+
+
 @sapi_watchdog (NOVO)
+---------------------
 - Novo programa, que ficará monitorando se pasta de arquivo de log está sendo modificidado.
   https://stackoverflow.com/questions/32053618/how-to-to-terminate-process-using-pythons-multiprocessing
 - Parâmetros:
@@ -260,23 +155,10 @@ OK Novo servidor de deployment
 - Pode ter até mais de um watchdog rodando. Um pode por exemplo mandar email, etc, e outro pode restart o servidor.
 - sapi_watchdog não pode usar sapilib, para evitar "se congelar" pelo mesmo motivo que os outros programas...tem que ser leve.
 
-@sapi_imagem (NOVO):
-  - Funcionalidade de submeter uma imagem a processamento
-  - Reconhece formato do guymager (log)
-  - Reconhece formato do tableu (log)
-  - Reconhece outros formatos sem log, mas neste caso não recupera nenhum dado para laudo:
-     - E01 genérico
-     - DD genérico
-     - Outros formatos raw (qualquer arquivo):
-       - Neste caso, ajusta para nomenclatura do IPED (apenas algumas extensões são aceitas...testar)
-       - Se tiver vários arquivos que formam um conjunto, tem que dar algum tratamento.
 
 
 @sapi_laudo:
-  OK converter para sapilib0.8
-  OK Trocar logica(1), Logica(2) para "Cartão SIM(1)", "Cartão SIM(2)"...
-  OK Depois de gerar laudo, perguntar se usuário deseja abrir (invocar libreoffice, ou o odt diretamente...ver como)
-
+------------
   - Mostrar o nome do PCF no cabeçalho.
   - Só exibir dicas de uso (comandos GM GL etc) se todos os itens estão prontos para laudo.
   (1) Mudança de conceito:
@@ -308,93 +190,34 @@ OK Novo servidor de deployment
       https://stackoverflow.com/questions/9548729/how-to-authenticate-a-site-with-python-using-urllib2
       https://stackoverflow.com/questions/923296/keeping-a-session-in-python-while-making-http-requests
 
+=======================================================================================================================
+Componentes PHP - SETEC3 (WEB)
+=======================================================================================================================
 
-@modelo_sapi:
-  OK Ajustar MJSP para todos (revisar geral)
-  OK Colocar todos os campos que vem de digitação manual (secretaria) em fundo verde (nome do delegado, número do IPL) para que seja revisado.
-  OK Tem um espaço em cinza que aparece depois entre o nO. e IPL, entre o No. e outros números...
-  OK Quantidade de páginas, está ficando fixo depois que processa pelo sapi_laudo.py. Por enquanto, colocar em vermelho.
-  OK MSISDN: Está com alguma grafia incorreta.
-  OK Na página em anexo, corrigir Mídia ótica para Mídia Óptica
-  OK Na resposta aos quesitos, tem alguma "tabela" em minúsculo.
-  OK Resposta sobre contas, tem alguma "esta contas" ao invés de "estas contas".
-  OK Parágrafo UFREADER...cita pasta "Relatórios"...relatórios gravados na mídia de destino.
-  OK Novo modelo com 12 quesitos: Laudo 1661/17
-  OK Erro de sintaxe: Não foi recuperado de forma **automatização** nenhuma informação
-
-  - Armazenar as versões do sapi_cellebrite, sapi_iped e sapi_laudo (e modelo do laudo).
-  - Melhorar Tabela 3: Separar lacre da descrição
-       Registro Item        Lacre      Descrição
-                01/01       585858     Ver tabela 1
-                n/a(Destino) sem lacre Destinoxxxxxx
-
-  - Numeração de página: Não está conseguindo ajustar automaticamente.
-  - Pensar em deixar a folha de mídia anexa no laudo quando for DVD/Bluray, para facilitar
-  (e neste caso também deixar a folha para imprimir a etiqueta da mídia)
-  - Separar modelo de mídia óptica de BLURAY e DVD
-  - Etiqueta p/ RIMAGE P/ DVD: Colocar DVD na direita (como o bluray)
-  - Incluir página de mídia óptica, se for esta modalidade de entrega.
-
-
-@sapi_tableau (NOVO):
-  - Primeiro fazer o parser no sapi_imagem, para ter uma solução razoável para o pessoal ir utilizando.
-  - Controlar interface web
-
-
-DEPLOYMENT
-==========================================================================
-Deployment:
-  OK Montar esquema de deployment no macsetec3
-  OK No servidor de deployment, a credencial de acesso (login/senha) não pode ser igual à do servidor,
-    caso contrário o servidor se loga sozinho...é melhor controlar este acesso, utilizando uma conta diferente.
-    dep_admin
-    consulta
-  OK Roteiro do servidor de deployment no wiki
-  OK No desenvolvimento, ajustar servidor de deployment para macsetec2.
-  - O endereço do servidor de deployment deve ficar no conf, assim cada máquina tem o deployment independente.
-  - Para permitir deployment individual de cada programa, fazer configuração individual no setec3.
-    sapi_cellebrite.config.php
-    sapi_laudo.config.php
-    (etc)
-    - Armazenar versão e outros dados úteis...talvez através de constantes simbólicas
-  - Pasta de download, que armazena versões antigas.
-
-
-SETEC3
-=====================
-conf.inc
+SETEC3 @conf.inc
+----------------
 - Trocar referências a DNS por ip fixo (diminui a chance de problema quando temos problema de DNS).
 
-SETEC3 ????.php
- OK Quando uma mensagem de log for inserida, efetuar a exclusão de mensagens irrelevantes (ver script),
-  para manter log enxuto.
-
-SETEC3 sapi_painel_administracao.php
+SETEC3 @sapi_painel_administracao.php
+-------------------------------------
 - Novo resumo usuário x Situação
 - Resumo Tipo x Situação trocar por Situação x Tipo
 - Tarefas por período.
 
-SETEC3 sapi_tarefa:
-  OK Para tarefa de extração:
-    - Não permitir Excluir, Reiniciar, Abortar...tudo isto será executado agora apenas pelo sapi_cellebrite
-    - Colocar texto esclarecendo isto.
-  OK Para tarefa de IPED:
-      - Excluir pasta de uma execução já concluída, e corrigir o multicase, para não sobrar rastro da tarefa
-  OK Exibir a lista de arquivos associados à tarefa (que foi feito upload)
+SETEC3 @sapi_tarefa:
+--------------------
+OK Não pede mais o dispositivo (Tableau1, Tableau2...)
 
-SETEC3 sapi_exame_dados_apreensao.php:
+SETEC3 @sapi_exame_dados_apreensao.php:
+---------------------------------------
 - Exibir o texto do memorando de solicitação de exame, para que usuário possa fazer copy-paste
 (Tem que entender como localizar o arquivo...código do siscrim ou Mídia Anexa...)
 - Colocar uma recomendação (no próprio corpo do texto), instruindo a substituir pelo texto da solicitação de exame.
 - No modelo de laudo, colocar uma observação no campo de referência, indicando que o PCF deve procurar preservar a referência citada no memorando.
 
 
-SETEC3 sapi_exame.php:
-OK Não permitir CLIQUE DUPLO no botão (se clicar, desabilitar o botão)
-OK Esclarecer sobre desmembramento de itens
-OK Tratar ; ou , no final do item. Está aparecendo item nulo na tela de itens.
-OK Ocultar precedência (não precisa por enquanto...deixar hidden)
-
+SETEC3 @sapi_exame.php:
+-----------------------
 - Tratar múltiplos laudo para uma solicitação de exame:
   - Por equanto, apenas dar uma mensagem de aviso...não permitir mais de um laudo por solicitação de exame.
   - Exibir lista de laudos.
@@ -415,35 +238,37 @@ OK Ocultar precedência (não precisa por enquanto...deixar hidden)
   - Botão para gerar modelo do Laudo (Talvez já deixar amarrado aqui o código dos laudos do SAPI....boa)
 
 
-mídia anexa:
-  - Reativar mídia anexa para permitir upload de dados gravados.
-    - Limpar base. Salvar dump da base de dados antes de limpar, caso no futuro surja alguma dúvida.
-  - Permitir upload por programa, para que os isos produzidos no sapi possam ser copiados para o sistema mídia anexa.
+SETEC3 Módulo de mídia anexa:
+-----------------------------
+- Reativar mídia anexa para permitir upload de dados gravados.
+- Limpar base. Salvar dump da base de dados antes de limpar, caso no futuro surja alguma dúvida.
+- Permitir upload por programa, para que os isos produzidos no sapi possam ser copiados para o sistema mídia anexa.
 
 
-MÁQUINAS DE EXAME
-===================================================
-Máquinas do Cellebrite:
-- Instalar libreoffice
-- Instalar VNC viewer
-- No email, informar que é possível executar todas as tarefas lá...
+
+=======================================================================================================================
+Modelos de laudo
+=======================================================================================================================
+
+@modelo_sapi:
+-------------
+* Incluir componentes para descrição de mídias
+- Armazenar as versões do sapi_cellebrite, sapi_iped e sapi_laudo (e modelo do laudo).
+- Melhorar Tabela 3: Separar lacre da descrição
+   Registro Item        Lacre      Descrição
+            01/01       585858     Ver tabela 1
+            n/a(Destino) sem lacre Destinoxxxxxx
+
+- Numeração de página: Não está conseguindo ajustar automaticamente.
+- Pensar em deixar a folha de mídia anexa no laudo quando for DVD/Bluray, para facilitar
+(e neste caso também deixar a folha para imprimir a etiqueta da mídia)
+- Separar modelo de mídia óptica de BLURAY e DVD
+- Etiqueta p/ RIMAGE P/ DVD: Colocar DVD na direita (como o bluray)
+- Incluir página de mídia óptica, se for esta modalidade de entrega.
 
 
-STORAGES
-===================================================
-GTPI-STO-01:
-  - Promover o GTPI-STO-01 em produtivo.
-  - Colocar
 
-GTPI-STO-02:
-  - Colocar o GTPI-STO-02 em desenvolvimento novamente.
-  - Ajustar deployment para desenvolvimento
-  - Deixar rodando
-
-GTPI-STO-03:
-  - Reinstalar windows via pendrive. A reinstalação normal não funcionou.
-
-
+=======================================================================
 NOVAS FUNCIONALIDADES:
 =======================================================================
 Arquivamento:
@@ -458,5 +283,134 @@ Geração de ISO:
 - Permitir a seleção de itens, mostrando o tamanho de cada conjunto (para verificar se cabe na mídia de destino).
 - Geração de uma ou mais mídias para cada memorando (tarefas distintas).
 - Upload da mídia gerada para o servidor de mídia anexa.
+
+
+==========================================================================
+DEPLOYMENT
+==========================================================================
+Deployment:
+  - O endereço do servidor de deployment deve ficar no conf, assim cada máquina tem o deployment independente.
+  - Para permitir deployment individual de cada programa, fazer configuração individual no setec3.
+    sapi_cellebrite.config.php
+    sapi_laudo.config.php
+    (etc)
+    - Armazenar versão e outros dados úteis...talvez através de constantes simbólicas
+  - Pasta de download, que armazena versões antigas.
+
+
+===================================================
+Máquinas do Cellebrite:
+===================================================
+- Nada a fazer
+
+
+============================================================
+Planejamento de versões futuras
+============================================================
+
+Versão 2.1)
+- Liberar sapi_guymager
+- Permitir que usuário escolha a versão do IPED
+
+
+Versão 2.1)
+- Substituir copias normais por Robocopy (Testar para ver o que acontece quando copia é interrompidade no meio...um arquivo grande)
+- Liberar sapi_midia básico (utilizando Robocopy)
+- IPED 1.3.3...que tem incompatibilidade de multicase:
+  - Tem que dar opção ao perito escolher o IPED que deseja rodar.
+  - Todas as máquinas deverão possuir o mesmo conjunto de IPEDs.
+  - Neste caso, se a máquina não tiver o IPED disponível na versão deseja, irá falhar e abortar a tarefa.
+- Liberar sapi_midia básico
+
+Versão 2.2) sapi_midia final
+- Implementar geração de tarefas no servidor
+- sapi_midia apenas executa tarefas de geração:
+  - Solicita qual a pasta de destino
+  - Efetua o download e ajuste multicase
+
+Versão 2.3) Melhorias na tolerância a falhas:
+- Comparar tempo de copy via python com Robocopy. Avaliar se vale a pena converter.
+- sapi_watch_dog light:
+  - Reinicializa apenas a aplicação do sapi_iped (....como, kill forçado....)
+  - Não tem como reinicializar o servidor, uma vez que pode estar recebendo dados (copias), ou fazendo download
+- Falha durante cópia:
+  - Se Robocopy for tolerante a falhas de rede (interrompe rede) e continua quando reconecta, trocar para utilizar
+    robocopy ao invés do procedimento de cópia tradicional.
+  - Caso contrário, ajustar comando de cópia do python, para possibilitar retomada...
+
+Versão 2.4)
+---------------------------------------------
+- Sapi_laudo:
+  - Integração com siscrim para criação de laudo (comando CL)
+  - Pequenos ajustes em dados do laudo
+- Possibilidade de fazer upload de imagens já criadas (para cartões de memória, por exemplo):
+  - sapi_imagem: programa para fazer upload
+  - sapi_laudo: precisa de modelo e tratamento para modelo para esta situação,
+    misturando em um mesmo laudo dispositivos de memória com celular
+
+Versão 3.0) Interface semi-gráfica
+---------------------------------------------
+- Colocar uma semi-interface gráfica no sapi_cellebrite, para mostrar a lista de tarefas, com menu de contexto
+- Colocar uma semi-interface gráfica no sapi_laudo, para selecionar a itemização.
+
+Versão 3.1) Novas funcionalidades:
+---------------------------------------------
+- Testar deployment em formato EXE:
+  Exemplo: pyinstaller --onefile sapi_laudo.py
+- Ferramenta_pesquisa.bat => Fazer um substituto em python, convertido para exe.
+
+Versão 3.2) Novas funcionalidades:
+---------------------------------------------
+- Controle de acesso, para impedir que um usuário mexa em coisas do outro.
+- Incluir o terceiro storage
+- Opção (X) Escolher automaticamente, que irá definir o storage baseado nas características
+  (carga, xxxx)
+- Tratamento completo para inexiquibilidade.
+- Mais de uma versão do IPED
+- sapi_watchdog_log: Fica monitorando pasta de log, e reseta servidor se detectar inatividade
+  https://stackoverflow.com/questions/32053618/how-to-to-terminate-process-using-pythons-multiprocessing
+- Mecanismo para interromper uma tarefa em execução:
+  - No servidor, possibilidade de mandar Abortar a tarefa
+  - Nos clientes, quando for atualizar status e receber comando de abortar, interromper a execução.
+
+Novos conceitos:
+- Material de destino de transporte: Um hd de destino que é referenciado como destino por diversos laudos...
+  Como tratar isto:
+  - Deve ficar claro no laudo que material não está sendo exclusivamente utilizado por aquele laudo,
+    e que não será entregue junto com o laudo.
+  - A secretaria tem que estar ciente disto também.
+
+
+Versão 4.0) Geração de ISO
+--------------------
+- Geração automática de ISO para mídia
+- Armazenar o tamanho das pastas de cada tarefa
+- Tem que permitir fazer o split por tamanho de mídia (máximo)
+- Se não couber, aborta a tarefa
+- Atualização no SETEC3 mídia anexa.
+- Consulta no SETEC3 para usuário baixar mídia (talvez...)
+
+Versão 4.1) Cópia para mídia externa
+------------------------------
+- sapi_midia_externa.py:
+  - Pede o caminho para o HD externo. Verifica, confere.
+  - Solicita um memorando que está em processamento.
+  - Quando todas as tarefas associadas ao memorando em processamento forem concluídas, faz o cópia para a mídia montada
+- O usuário pode deixar este program rodando na sua máquina, ou então em alguma máquina do laboratório.
+
+2.5) Cópia direta para storage
+------------------------------
+- Depende de conexão veloz e disponibilidade em disco.
+- Revisar sapi_copia.py
+
+5.0) Regime de produção
+---------------------------------------------
+- Faciliade de uso: Interface gráfica: Substituir uso da interface Web (tudo no cliente)
+- Na interface gráfica, trocar para usuário/senha (ao invés de matrícula)
+- Arquivamento (ver detalhes abaixo).
+
+6.0) Ampliação de base de usuários
+---------------------------------------------
+- Módulo de configuração
 
 

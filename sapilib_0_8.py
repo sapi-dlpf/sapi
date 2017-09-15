@@ -92,6 +92,7 @@ GManterSituacaoAtual = 0
 GAguardandoPCF = 1
 GSemPastaNaoIniciado = 1
 GAguardandoProcessamento = 5
+GFilaCriacaoPasta = 7
 GAbortou = 8
 GFilaExclusao = 9
 GDespachadoParaAgente = 20
@@ -2496,7 +2497,7 @@ def montar_storage_windows(caminho_storage, usuario, senha, com_letra_drive=Fals
         " /user:" + usuario +
         " " + senha
     )
-    print_log('ponto2422: ', comando)
+    #print_log('ponto2422: ', comando)
 
     # Teste de comando, para gerar erro2
     # comando="net use \\\\10.41.87.239\\xxx"
