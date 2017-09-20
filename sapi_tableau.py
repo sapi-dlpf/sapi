@@ -5,8 +5,8 @@
 # ======================================================================================================================
 # SAPI - Sistema de Apoio a Procedimentos de Informática
 #
-# Componente: sapi_imagem
-# Objetivo: Agente para tratamento de imagem de mídia (Exemplo: E01)
+# Componente: sapi_tableau
+# Objetivo: Servidor para tratamento de imagem gerada pelo TD3/Tableau
 # Funcionalidades:
 #  - Conexão com o servidor SAPI para obter lista de tarefas de imagem
 #  - Criação de pasta para armazenamento da imagem
@@ -49,7 +49,7 @@ if sys.version_info <= (3, 0):
 # =======================================================================
 # GLOBAIS
 # =======================================================================
-Gprograma = "sapi_imagem"
+Gprograma = "sapi_tableau"
 Gversao = "1.8.1"
 
 # Controle de tempos/pausas
@@ -60,8 +60,11 @@ GmodoInstantaneo = False
 
 #
 Gconfiguracao = dict()
-Gcaminho_pid="sapi_imagem_pid.txt"
+Gcaminho_pid="sapi_tableau_pid.txt"
 
+# Pasta raiz da área temporária do tableau
+# Todos os storages tem que ter a mesma estrutura, no caso /storage/tableau
+Gpasta_raiz_tableau = "tableau"
 
 # Execução de tarefa
 Gcodigo_tarefa_executando = None
@@ -82,7 +85,7 @@ Gtamanho_destino_bytes = None
 
 # Para código produtivo, o comando abaixo deve ser substituído pelo
 # código integral de sapi.py, para evitar dependência
-from sapilib_0_8 import *
+from sapilib_0_8_1 import *
 
 
 # **********************************************************************
@@ -121,10 +124,10 @@ def inicializar():
 
     try:
         # Efetua inicialização
-        # Neste ponto, se a versão do sapi_imagem estiver desatualizada será gerado uma exceção
+        # Neste ponto, se a versão do sapi_tableau estiver desatualizada será gerado uma exceção
         print_log("Efetuando inicialização")
         #sapisrv_inicializar(Gprograma, Gversao)  # Outros parâmetros: nome_agente='xxxx', ambiente='desenv'
-        nome_arquivo_log = "log_sapi_imagem.txt"
+        nome_arquivo_log = "log_sapi_tableau.txt"
         sapisrv_inicializar_ok(Gprograma, Gversao, auto_atualizar=True, nome_arquivo_log=nome_arquivo_log)
         print_log('Inicializado com sucesso', Gprograma, ' - ', Gversao)
 
@@ -137,11 +140,11 @@ def inicializar():
     except SapiExceptionProgramaFoiAtualizado as e:
         print_log("Programa foi atualizado para nova versão em: ",e)
         print_log("Encerrando para ser reinicializadoem versão correta")
-        # Ao retornar False, o chamador entenderá que tem que atualizar o sapi_imagem, e encerrará a execução
+        # Ao retornar False, o chamador entenderá que tem que atualizar o sapi_tableau, e encerrará a execução
         return False
 
     except SapiExceptionVersaoDesatualizada:
-        print_log("sapi_imagem desatualizado. Não foi possível efetuar atualização automática. ")
+        print_log("sapi_tableau desatualizado. Não foi possível efetuar atualização automática. ")
         # Encerra sem sucesso
         return False
 
@@ -149,13 +152,13 @@ def inicializar():
         # Servidor sapi pode não estar respondendo (banco de dados inativo)
         # Logo, encerra e aguarda uma nova oportunidade
         print_log("AVISO: Não foi possível obter acesso (ver mensagens anteriores). Encerrando programa")
-        # Ao retornar False, o chamador entenderá que tem que atualizar o sapi_imagem, e encerrará a execução
+        # Ao retornar False, o chamador entenderá que tem que atualizar o sapi_tableau, e encerrará a execução
         return False
 
     except SapiExceptionFalhaComunicacao:
-        # Se versão do sapi_imagem está desatualizada, irá tentar se auto atualizar
+        # Se versão do sapi_tableau está desatualizada, irá tentar se auto atualizar
         print_log("Comunição com servidor falhou. Vamos encerrar e aguardar atualização, pois pode ser algum defeito no cliente")
-        # Ao retornar False, o chamador entenderá que tem que atualizar o sapi_imagem, e encerrará a execução
+        # Ao retornar False, o chamador entenderá que tem que atualizar o sapi_tableau, e encerrará a execução
         return False
 
     except BaseException as e:
@@ -169,7 +172,7 @@ def inicializar():
         trc_string=traceback.format_exc()
         print_log("[168]: Exceção abaixo sem tratamento específico. Avaliar se deve ser tratada")
         print_log(trc_string)
-        # Ao retornar False, o chamador entenderá que tem que atualizar o sapi_imagem, e encerrará a execução
+        # Ao retornar False, o chamador entenderá que tem que atualizar o sapi_tableau, e encerrará a execução
         return False
 
     # Tudo certo
@@ -307,31 +310,6 @@ def reportar_erro(erro):
         # Afinal, já são dois erros seguidos (pode ser que tenha perdido a rede)
         print_log("Não foi possível reportar o erro ao servidor: ", str(e))
 
-
-# Recupera dados de tarefa do servidor
-def recupera_tarefa_do_setec3(codigo_tarefa):
-
-    tarefa = None
-    try:
-        # Recupera dados atuais da tarefa do servidor,
-        (sucesso, msg_erro, tarefa) = sapisrv_chamar_programa(
-            "sapisrv_consultar_tarefa.php",
-            {'codigo_tarefa': codigo_tarefa}
-        )
-
-        # Insucesso. Provavelmente a tarefa não foi encontrada
-        if (not sucesso):
-            # Sem sucesso
-            print_log("[371] Recuperação de dados atualizados do SETEC da tarefa", codigo_tarefa, "FALHOU: ",
-                           msg_erro)
-            return None
-
-    except BaseException as e:
-        print_log("[376] Recuperação de dados atualizados do SETEC da tarefa", codigo_tarefa, "FALHOU: ",
-                       str(e))
-        return None
-
-    return tarefa
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -1551,11 +1529,7 @@ def exclui_pasta_tarefa(codigo_tarefa, caminho_destino):
 # Executa uma tarefa de iped que esteja ao alcance do agente
 # Retorna verdadeiro se executou uma tarefa e falso se não executou nada
 
-def executar_tarefas_imagem():
-
-    # Recupera lista de tarefas de imagem para o gtpi-sto-03
-    # xxxx
-    #
+def executar_tarefas_tableau():
 
     print_log("Buscando tarefas de imagem que necessitam de pasta para armazenamento")
 
@@ -1575,146 +1549,88 @@ def executar_tarefas_imagem():
     if not sucesso:
         return (False, msg_erro)
 
-    var_dump(sucesso)
-    var_dump(tarefas_imagem)
+    # var_dump(sucesso)
+    # var_dump(tarefas_imagem)
+    # die('ponto1581')
 
-    die('ponto1581')
+    # Cria pasta para tarefas
+    for t in tarefas_imagem:
+
+        print(t)
+
+        # Tem que estar aguardando criação de pasta
+        if int(t['codigo_situacao_tarefa'])!=int(GFilaCriacaoPasta):
+            continue
+
+        # Ok, pasta deve ser criada
+        criar_pasta_tableau(t['codigo_tarefa'])
 
 
+def criar_pasta_tableau(codigo_tarefa):
 
-def ciclo_executar():
+    # kkk
+    print_log("Criação de pasta para tarefa",codigo_tarefa)
 
-    # Se já tem tarefa rodando IPED,
-    # Verifica a situação da tarefa, comandos, etc
-    if Gcodigo_tarefa_executando is not None:
-        return tarefa_executando()
-    else:
-        return executar_nova_tarefa()
+    # Recupera tarefa
+    print_log("Buscando dados da tarefa", codigo_tarefa)
+    tarefa = recupera_tarefa_do_setec3(codigo_tarefa)
 
-
-# Retorna verdadeiro se tarefa ainda está executando
-def tarefa_executando():
-
-    global Gcodigo_tarefa_executando
-
-    print_log("Verificando se tarefa", Gcodigo_tarefa_executando, "ainda está executando")
-    tarefa=recupera_tarefa_do_setec3(Gcodigo_tarefa_executando)
-
-    executando=False
-    executando_setec3 = False
     if tarefa is None:
-        print_log("Não foi possível recuperar situação de tarefa do SETEC3.")
-        # Como não conseguimos confirmação do servidor, vamos presumir que tarefa ainda está executando
-        executando=True
-    else:
-        if tarefa["executando"]=='t':
-            print_log("Tarefa ainda está executando de acordo com SETEC3")
-            executando=True
-            executando_setec3=True
-        else:
-            print_log("Segundo SETEC3 tarefa não está mais executando")
-            # Se resultado não foi de sucesso, interrompe execução do sapi_imagem
-            # para permitir que seja feito um update,
-            # o qual pode permitir que a condição de falha seja superada
-            codigo_situacao_tarefa = int(tarefa['codigo_situacao_tarefa'])
-            if codigo_situacao_tarefa != GFinalizadoComSucesso:
-                print_log("Tarefa não foi concluída com sucesso (ex: abortada, excluída pelo usuário, reiniciada)")
-                print_log("Encerrando programa (e todos os filhos), para reiniciar procedimento (inclusive update) para sanar estas diversas situações")
-                finalizar_programa()
-
-    # Verifica se o subprocesso de execução da tarefa ainda está rodando
-    nome_processo="executar:"+str(Gcodigo_tarefa_executando)
-    processo=Gpfilhos.get(nome_processo, None)
-    if processo is not None and processo.is_alive():
-        # Ok, tarefa está sendo executada
-        print_log("Subprocesso de execução da tarefa ainda está rodando")
-        executando = True
-    else:
-        print_log("Subprocesso de execução da tarefa NÃO ESTÁ mais rodando")
-        if executando_setec3:
-            print_log("Como no setec3 ainda está em execução, isto provavelmente indica que o subprocesso de execução abortou")
-            print_log("Desta forma, a tarefa será abortada e o programa encerrado, visando tentar sanar o problema")
-            # Aborta tarefa
-            abortar(Gcodigo_tarefa_executando, "Processo de execução abortou. Verifique log do servidor")
-            print_log("Tarefa foi abortada e sapi_imagem finalizado")
-            finalizar_programa()
-
-    # Retorna se alguma condição acima indica que tarefa está executando
-    if executando:
-        return True
-
-    # Se não está mais executando
-    Gcodigo_tarefa_executando = None
-    return False
-
-
-# Retorna verdadeiro se uma nova tarefa foi iniciada
-def executar_nova_tarefa():
-
-    global Gcodigo_tarefa_executando
-    global Glabel_processo_executando
-
-    print_log("Buscando tarefas de imagem que necessitam de pasta para armazenamento")
-
-    # Recupera a lista de pasta das tarefas de imagem
-    # que necessitam de pasta de destino
-    # ---------------------------------------------------------------------------
-    try:
-        (sucesso, msg_erro, tarefas_iped_sucesso) = sapisrv_chamar_programa(
-            "sapisrv_obter_tarefas.php",
-            {'tipo': 'imagep',
-             'storage': storage,
-             'situacao': GFilaCriacaoPasta
-             }
-        )
-    except BaseException as e:
-        erro="Não foi possível recuperar a situação atualizada das tarefas do servidor"
-        return (False, erro)
-
-    if not sucesso:
-        return (False, msg_erro)
-
-
-
-
-    # Requisita tarefa
-    tipo='imagem'
-    storage='xxxx'
-    (disponivel, tarefa) = sapisrv_obter_iniciar_tarefa(tipo, storage=storage)
-    if disponivel:
-        print_log("Tarefa disponível")
-        return tarefa
-
-    # Se não tem nenhuma tarefa disponível, não tem o que fazer
-    if tarefa is None:
-        print_log("Nenhuma tarefa de IPED fornecida pelo servidor. Nada a ser executado por enquanto.")
+        print_log("Criação de pasta falhou, pois não foi possível recuperar tarefa")
         return False
+
 
     # Ok, temos trabalho a fazer
     # ------------------------------------------------------------------
     codigo_tarefa = tarefa["codigo_tarefa"]
 
-    # Verifica se é uma retomada de tarefa, ou seja,
-    # uma tarefa que foi iniciada mas que não foi concluída
-    retomada = False
-    if tarefa["executando"] == 't':
-        retomada = True
-
-    # Indicativo de início
-    if retomada:
-        print_log("Retomando tarefa interrompida: ", codigo_tarefa)
-    else:
-        print_log("Iniciando tarefa: ", codigo_tarefa)
-
-
-    # Montar storage
+    # Montar storage para a tarefa
+    # Normalmete o storage está na própria máquina que está rodando
+    # o sapi_tablau, mas vamos deixar genérico.
     # ------------------------------------------------------------------
     ponto_montagem=conectar_ponto_montagem_storage_ok(tarefa["dados_storage"])
     if ponto_montagem is None:
         # Mensagens de erro já foram apresentadas pela função acima
-        erro="Não foi possível conectar no storage"
-        abortar(codigo_tarefa, erro)
+        erro="Não foi possível conectar ao storage"
         return False
+
+    # Verifica se pasta raiz do tableau existe
+    pasta_raiz_tableau = montar_caminho(ponto_montagem,
+                                   Gpasta_raiz_tableau)
+
+    if not os.path.exists(pasta_raiz_tableau):
+        print_log("ERRO: Pasta raiz do tableau não foi encontrada: ", pasta_raiz_tableau)
+        print_log("Não é possível criar pasta para a tarefa.")
+        print_log("Siga o roteiro de instalação do storage conforme definido na Wiki do SAPI")
+
+
+    # Pasta para a tarefa
+    # kkk
+    pasta_tableau = montar_caminho(ponto_montagem,
+                                   Gpasta_raiz_tableau,
+                                   tarefa["dados_item"]["material_simples"])
+
+    # Verifica se pasta já existe
+    if os.path.exists(pasta_tableau):
+        print("AVISO: Pasta já existe para tarefa que está em situação de criação de pasta")
+        print("Existe alguma inconsistência")
+    else:
+        # Cria pasta de destino
+        try:
+            print_log("Criando pasta", pasta_tableau)
+            os.makedirs(pasta_tableau)
+            print_log("Pasta criada com sucesso")
+        except Exception as e:
+            erro = "Não foi possível criar pasta: " + str(e)
+            # Pode ter alguma condição temporária impedindo. Continuar tentando.
+            return False
+
+
+    # Se pasta de destino existe,
+    # Atualiza a situação de tarefa para GAguardandoPCF
+
+    die('ponto1588')
+
 
     # ------------------------------------------------------------------
     # Pastas de origem e destino
@@ -1851,7 +1767,7 @@ def background_executar_iped(tarefa, nome_arquivo_log, label_processo, dados_pai
     else:
         # Se ocorreu um erro, aborta tarefa
         # Isto fará com que o processo principal se encerre, gerando a auto atualização dos componentes
-        # sapi_imagem, iped, etc
+        # sapi_tableau, iped, etc
         print_log("ERRO: ", msg_erro)
         abortar(codigo_tarefa, msg_erro)
         print_log("Tarefa foi abortada")
@@ -1943,7 +1859,7 @@ def executa_sequencia_iped(
         # Tenta registrar no log o erro ocorrido
         sapisrv_atualizar_status_tarefa_informativo(
             codigo_tarefa=codigo_tarefa,
-            texto_status="ERRO em sapi_imagem: " + trc_string
+            texto_status="ERRO em sapi_tableau: " + trc_string
         )
         reportar_erro("Tarefa " + str(Gcodigo_tarefa_executando) + "Erro => " + trc_string)
         # subprocesso será abortado, e deixa o processo principal decidir o que fazer
@@ -2040,7 +1956,7 @@ def main():
         #alguma_pasta_criada = ciclo_executar()
         #algo_excluido = ciclo_excluir()
 
-        executar_tarefas_imagem()
+        executar_tarefas_tableau()
         dormir(60, "Pausa entre ciclo de execução de tarefas de imagens")
         if not inicializar():
             # Falhou na inicialização, talvez falha de comunicação, talvez mudança de versão...
@@ -2061,7 +1977,7 @@ def main():
         #     dormir(GdormirSemServico)
         #     # Depois que volta da soneca da ociosidade e reinicializa
         #     # pois algo pode ter mudado
-        #     # Se isto acontecer, finaliza sapi_imagem para que seja atualizado
+        #     # Se isto acontecer, finaliza sapi_tableau para que seja atualizado
         #     if not inicializar():
         #         # Falhou na inicialização, talvez falha de comunicação, talvez mudança de versão...
         #         finalizar_programa()

@@ -2373,6 +2373,7 @@ def gera_novo_odt(odt_raiz, caminho_arquivo_saida_odt):
     if pergunta_sim_nao("< Deseja abrir o arquivo de laudo para edição?"):
         webbrowser.open(caminho_arquivo_saida_odt)
     print("- Arquivo de destino foi aberto em programa compatível (normalmente libreoffice)")
+    print("- Recomenda-se utilizar o LIBREOFFICE com versão superior a 5.2")
 
     return
 

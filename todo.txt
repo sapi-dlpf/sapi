@@ -31,8 +31,12 @@ Componentes PYTHON:
 ---------
 - Nada a fazer
 
-@sapi_imagem (NOVO):
+@sapi_tableau (NOVO):
 --------------------
+* Roda no servidor
+* Trata apenas tarefas de imagem do tableau
+* Vai ser acionado pelo mesmo scheduler do sapi_iped
+*
 * Criar pasta para armazenamento da tarefa
 * Criar no servidor um schedule para iniciar sapi_imagem a cada 5 minutos
   * Se o programa falhar, será reiniciado
