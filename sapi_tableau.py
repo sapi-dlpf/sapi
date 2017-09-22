@@ -66,6 +66,13 @@ Gcaminho_pid="sapi_tableau_pid.txt"
 # Todos os storages tem que ter a mesma estrutura, no caso /storage/tableau
 Gpasta_raiz_tableau = "tableau"
 
+# Cache de tarefas
+Gcache_tarefa = dict()
+
+# radical a partir do qual se formam os nomes dos arquivos (.E01, .E02, .log, etc)
+Gtableau_imagem = "tableau-imagem"
+Gponto_montagem = None
+
 # Execução de tarefa
 Gcodigo_tarefa_executando = None
 Glabel_processo_executando = None
@@ -128,7 +135,7 @@ def inicializar():
         print_log("Efetuando inicialização")
         #sapisrv_inicializar(Gprograma, Gversao)  # Outros parâmetros: nome_agente='xxxx', ambiente='desenv'
         nome_arquivo_log = "log_sapi_tableau.txt"
-        sapisrv_inicializar_ok(Gprograma, Gversao, auto_atualizar=True, nome_arquivo_log=nome_arquivo_log)
+        sapisrv_inicializar(Gprograma, Gversao, auto_atualizar=True, nome_arquivo_log=nome_arquivo_log)
         print_log('Inicializado com sucesso', Gprograma, ' - ', Gversao)
 
         # Obtendo arquivo de configuração
@@ -139,7 +146,7 @@ def inicializar():
 
     except SapiExceptionProgramaFoiAtualizado as e:
         print_log("Programa foi atualizado para nova versão em: ",e)
-        print_log("Encerrando para ser reinicializadoem versão correta")
+        print_log("Encerrando para ser reinicializado em versão correta")
         # Ao retornar False, o chamador entenderá que tem que atualizar o sapi_tableau, e encerrará a execução
         return False
 
@@ -561,9 +568,13 @@ def executa_iped(codigo_tarefa, comando, caminho_origem, caminho_destino, caminh
     return (True, "")
 
 
-# Acompanha a execução do IPED e atualiza o status da tarefa
-def background_acompanhar_iped(codigo_tarefa, caminho_tela_iped,
-                               nome_arquivo_log, label_processo, dados_pai_para_filho):
+# Acompanha a execução do Tableau e atualiza o status da tarefa
+def background_acompanhar_tableau(
+        codigo_tarefa,
+        pasta_tableau,
+        nome_arquivo_log,
+        label_processo,
+        dados_pai_para_filho):
 
     # Restaura dados herdados do processo pai
     restaura_dados_no_processo_filho(dados_pai_para_filho)
@@ -573,7 +584,6 @@ def background_acompanhar_iped(codigo_tarefa, caminho_tela_iped,
     if not modo_background():
         ligar_log_dual()
 
-
     # Inicializa sapilib
     # Será utilizado o mesmo arquivo de log do processo pai
     sapisrv_inicializar(nome_programa=Gprograma,
@@ -582,37 +592,501 @@ def background_acompanhar_iped(codigo_tarefa, caminho_tela_iped,
                         label_processo=label_processo
                         )
 
-    print_log("Processo de acompanhamento de IPED")
+    print_log("Processo de acompanhamento de tarefa de imagem Tableau iniciado")
 
-    # Fica em loop infinito. Será encerrado pelo pai (com terminate)
+    # Fica em loop infinito.
+    # Será encerrado quando não tiver mais nada a fazer,
+    # ou então pelo pai (com terminate)
     while True:
 
-        if os.path.isfile(caminho_tela_iped):
-            print_log("Arquivo de tela de iped ainda não existe. Aguardando")
-            time.sleep(30)
+        # Se pasta do Tableau não existe, não tem o que acompanhar
+        # Isto não deveria acontecer
+        if not os.path.exists(pasta_tableau):
+            print_log("Pasta para tableau não existe:", pasta_tableau)
+            print_log("Abandonando acompanhamento desta tarefa")
+            return
 
-        # Le arquivo de resultado (tela) e busca pela última mensagem de situação e projeção
-        # Exemplo:
-        # IPED-2017-01-31 17:14:11 [MSG] Processando 29308/39593 (25%) 31GB/h Termino em 0h 5m 33s
-        texto_status=None
-        with open(caminho_tela_iped, "r") as fentrada:
-            for linha in fentrada:
-                # Troca tabulação por espaço
-                linha=linha.replace('\t',' ')
-                # Procura por linha de status
-                if "[MSG] Processando" in linha:
-                    texto_status=linha
+        # Verifica quantas pastas tem no pasta temporária do tableau
+        # O normal é ter apenas uma subpasta, que o Tableau cria
+        # ----
+        # Não pode ter mais do que uma pasta, pois isto pode indicar
+        # que o usuário iniciou mais de uma cópia no mesmo destino
+        # Todo: Talvez permitir que tenha uma pasta que abortou e outra que está ok
+        # Todo: Mas se for duas pela metadade, o usuário terá que excluir uma das portas
+        qtd_pastas = 0
+        for dirpath, dirnames, filenames in os.walk(pasta_tableau):
+            qtd_pastas += 1
+            subpasta=dirpath
 
-        # Atualiza status
-        if texto_status is not None:
-            print_log("Atualizando status para tarefa",codigo_tarefa,":", texto_status)
-            sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status)
-            # Intervalo entre atualizações de status
-            dormir(GtempoEntreAtualizacoesStatus, "Dormindo entre atualização de status do IPED")
+        if qtd_pastas>2:
+            texto_status="Existe mais de uma subpasta, indicando que houve mais de um processamento do Tableau para este item"
+            abortar(codigo_tarefa, texto_status)
+            return
+
+        # Processa subpasta da imagem gerada
+        print_log("Subpasta encontrada:", subpasta)
+
+
+        # Verifica se já tem o primeiro arquivo
+        # Por convenção, o arquivo de imagem do tableau deve ter nome tableau_imagem.E01
+        primeiro_arquivo=Gtableau_imagem+".E01"
+        caminho_primeiro_arquivo = montar_caminho(subpasta, primeiro_arquivo)
+        if os.path.isfile(caminho_primeiro_arquivo):
+            print_log("Encontrado arquivo:", primeiro_arquivo)
         else:
-            # Como ainda não atualizou o status, vamos dormir por um período menor
-            # Assim pega a primeira atualização de status logo que sair
-            dormir(30)
+            texto_status="Não foi encontrado arquivo: "+primeiro_arquivo
+            abortar(codigo_tarefa, texto_status)
+            return
+
+
+        # Verifica se já existe arquivo de log
+        arquivo_log=Gtableau_imagem+".log"
+        caminho_arquivo_log = montar_caminho(subpasta, arquivo_log)
+        if os.path.isfile(caminho_arquivo_log):
+            print_log("Encontrado arquivo de log:", caminho_arquivo_log)
+            # Interrompe loop, pois agora irá somente analisar o resultado do log
+            break
+
+        # Calcula o tamanho da pasta do tableau e atualiza
+        carac = obter_caracteristicas_pasta_ok(subpasta)
+        if carac is not None:
+            tam_pasta_tableau = carac.get("tamanho_total", None)
+            sapisrv_atualizar_status_tarefa_informativo(
+                codigo_tarefa=codigo_tarefa,
+                texto_status="Tamanho atual da pasta do tableau: " + converte_bytes_humano(tam_pasta_tableau)
+            )
+        else:
+            print_log("Falhou na determinação do tamanho da pasta do tableau")
+
+        # Pausa para evitar sobrecarga no servidor
+        dormir(60, "pausa entre atualizações de status")
+
+        # Fim do While - Loop eterno
+
+
+    # Processa log do tableau, extraindo dados da tarefa para utilização no laudo
+    (sucesso, dados_laudo)=parse_arquivo_log(caminho_arquivo_log)
+
+    # Grava arquivo de log, para consulta do usuário
+
+    # Atualiza situação da tarefa para sucesso
+
+
+
+
+
+# Faz parse no arquivo de log do Tableau e extrai informações relevantes para laudo
+# Recebe o arquivo de log, e o item correspondente
+
+def parse_arquivo_log(caminho_arquivo_log, item):
+
+    try:
+        _parse_arquivo_log(caminho_arquivo_log, item)
+
+    except Exception as e:
+        ret = dict()
+        ret["sucesso"] = False
+        ret["erro"] = "Parse de log do Tableau falhou: " + str(e)
+        ret["dados"] = dict()
+        return ret
+
+
+def _parse_arquivo_log(caminho_arquivo_log, item):
+
+    # Estutura de dados de retorno
+    ret = dict()
+    ret["sucesso"]=False
+    ret["erro"]=None
+    ret["dados"]=dict()
+
+    '''
+    -----------------------------Start of TD3 Log Entry-----------------------------
+
+    Task: Disk Image
+    Status: Ok
+    Created: Thu Sep 21 14:31:53 2017
+    Started: Thu Sep 21 14:31:53 2017
+    Closed: Thu Sep 21 14:42:49 2017
+    Elapsed: 11 min
+    User: <<not entered>>
+    Case ID: <<not entered>>
+    Case Notes: <<not entered>>
+
+    Imager App: TD3
+    Imager Ver: 2.0.0
+    TD3 S/N: 000ecc11d370f2
+
+    ------------------------------Source Disk-------------------------------
+
+    Interface: USB
+    Model: Kingston DataTraveler 108
+    Firmware revision: PMAP
+    USB Serial number: 0060E049DF71EBB100005893
+    Capacity in bytes: 3,926,949,888 (3.9 GB)
+    Block Size: 512 bytes
+    Block Count: 7,669,824
+
+    ----------------------------Destination CIFS----------------------------
+
+    Share Name: //10.41.87.235/tableau
+
+    --------------------------Disk Imaging Results--------------------------
+
+    Output file format: E01 - EnCase format
+    Chunk size in bytes: 2,147,483,648 (2.1 GB)
+    Chunks written: 2
+    Filename of first chunk: 1023_17_parte_1/2017-09-21_14-31-52/temporario.E01
+    Total errors: 0
+    Acquisition MD5:   cfdd6b92b8599309bbc8901d05ec2927
+    Acquisition SHA-1: bb6bc7a155d22e748148b7f6100d50edabdb324c
+
+    ---------------------Readback Verification Results----------------------
+
+    Verification MD5:   cfdd6b92b8599309bbc8901d05ec2927
+    Verification SHA-1: bb6bc7a155d22e748148b7f6100d50edabdb324c
+    Status: Verified
+
+    ------------------------------End of TD3 Log Entry------------------------------
+    '''
+
+    # Definição de identificadores de blocos
+    blocos=dict()
+    blocos["start"]="-----Start of TD3"
+    blocos["source"]="----Source"
+    blocos["destination"]="---Destination"
+    blocos["result"]="---Disk Imaging Results"
+    blocos["verification"]="---Readback Verification Results"
+
+    # Definicção de tags de campos
+    tags=dict()
+    tags["task"]="Task: "
+    tags["status"]="Status: "
+    tags["created"]="Created: "
+    tags["started"]="Started: "
+    tags["closed"]="Closed: "
+    tags["elapsed"]="Elapsed: "
+    tags["user"]="User: "
+    tags["case"]="Case ID:"
+    tags["notes"]="Case Notes:"
+    tags["imager_app"]="Imager App:"
+    tags["imager_ver"]="Imager Ver:"
+    tags["td3_sn"]="TD3 S/N:"
+    tags["interface"]="Interface: "
+    tags["modelo"]="Model: "
+    tags["firmware_revision"]="Firmware revision:"
+    tags["usb_serial_number"]="USB Serial number:"
+    tags["capacity"]="Capacity in bytes:"
+    tags["block_size"]="Block Size:"
+    tags["block_count"]="Block Count:"
+    tags["share_name"]="Share Name:"
+    tags["output_file_format"]="Output file format:"
+    tags["chunk_bytes"]="Chunk size in bytes:"
+    tags["chunks_written"]="Chunks written:"
+    tags["first_chunk"]="Filename of first chunk:"
+    tags["total_erros"]="Total errors:"
+    tags["aquisition_md5"]="Acquisition MD5:"
+    tags["aquisition_sha1"]="Acquisition SHA-1:"
+    tags["verification_md5"]="Verification MD5: "
+    tags["verification_sha1"]="Verification SHA-1:"
+
+    # Processa o arquivo de log
+    with open(caminho_arquivo_log, "r") as fentrada:
+
+        id_bloco = None
+        valores = dict()
+        for linha in fentrada:
+
+            # Sanitiza
+            # Troca tabulação por espaço
+            #linha=linha.replace('\t',' ')
+
+            processado = True
+
+            # Verifica se é uma linha de início de bloco
+            for b in blocos:
+                if blocos[b] in linha:
+                    id_bloco=b
+                    break
+
+            # Verifica se é linha de tag conhecido
+            for t in tags:
+                if tags[t] in linha:
+                    id_tag=t
+                    # Separa valor
+                    # Task: Disk Image
+                    partes=linha.split(':')
+                    v=partes[1].strip()
+                    # Armazena valor
+                    chave=id_bloco+":"+id_tag
+                    valores[chave]=v
+                    #
+                    break
+
+            # Ok, prossegue para a proxima linha
+            continue
+
+    #var_dump(valores)
+    #die('ponto756')
+
+    # -----------------------------------------------------------------------------
+    # O código acima irá produzir um dicionário sendo:
+    # Chave: concatenação do bloco com o tag identificador do campo (ex: start:elapsed)
+    # Valor: O que vem depois do tag
+    # -----------------------------------------------------------------------------
+    # Exemplo:
+    '''
+     valores={
+     'start:case': '<<not entered>>',
+     'start:closed': 'Thu Sep 21 14',
+     'start:created': 'Thu Sep 21 14',
+     'start:elapsed': '11 min',
+     'start:imager_app': 'TD3',
+     'start:imager_ver': '2.0.0',
+     'start:notes': '<<not entered>>',
+     'start:started': 'Thu Sep 21 14',
+     'start:status': 'Ok',
+     'start:task': 'Disk Image',
+     'start:td3_sn': '000ecc11d370f2',
+     'start:user': '<<not entered>>',
+     'source:block_count': '7,669,824',
+     'source:block_size': '512 bytes',
+     'source:capacity': '3,926,949,888 (3.9 GB)',
+     'source:firmware_revision': 'PMAP',
+     'source:interface': 'USB',
+     'source:modelo': 'Kingston DataTraveler 108',
+     'source:usb_serial_number': '0060E049DF71EBB100005893',
+     'destination:share_name': '//10.41.87.235/tableau',
+     'result:aquisition_md5': 'cfdd6b92b8599309bbc8901d05ec2927',
+     'result:aquisition_sha1': 'bb6bc7a155d22e748148b7f6100d50edabdb324c',
+     'result:chunk_bytes': '2,147,483,648 (2.1 GB)',
+     'result:chunks_written': '2',
+     'result:first_chunk': '1023_17_parte_1/2017-09-21_14-31-52/temporario.E01',
+     'result:output_file_format': 'E01 - EnCase format',
+     'result:total_erros': '0',
+     'verification:status': 'Verified',
+     'verification:verification_md5': 'cfdd6b92b8599309bbc8901d05ec2927',
+     'verification:verification_sha1': 'bb6bc7a155d22e748148b7f6100d50edabdb324c'
+     }
+    '''
+
+    # Verifica se o resultado é sucesso
+    # Se não for sucesso, não tem por que prosseguir,
+    # pois operação terá que ser refeita
+    resultado=valores.get('verification:status',None)
+    if resultado is None:
+        ret["erro"]= "Não foi possível identificar resultado final da imagem (não encontrado Bloco Readback Verification Results, com campo Status: Verified. Confirme se opção de verificação está ativa."
+        ret["sucesso"]=False
+        return ret
+
+    # -----------------------------------------------------------------------------
+    # Duplicação efetuada com SUCESSO
+    # -----------------------------------------------------------------------------
+    ret["sucesso"] = True
+
+    # Dicionário para armazenamento de dados do componente que foi duplicado
+    dlaudo = dict()
+    dcomp = dict()
+
+    # -----------------------------------------------------------------------------
+    # Versão do tableau
+    # -----------------------------------------------------------------------------
+    # start:imager_ver': '2.0.0'
+    versao=valores.get('start:imager_ver',None)
+    if versao is None:
+        ret["erro"]="Não foi possível identificar a versão do Tableau."
+        ret["sucesso"]=False
+        return ret
+
+    if versao != '2.0.0':
+        ret["erro"]="Versão do Tableau utilizado: "+versao+" é diferente da versão esperada (2.0.0)"
+        ret["sucesso"]=False
+        return ret
+
+    tableau_versao=valores.get('start:imager_app',"?") + " " + versao
+    dlaudo["sapiSoftwareVersao"] = "Tableau " + tableau_versao
+
+
+    # Separa outros elementos relevantes para utilização em laudo
+    # A chave é o nome no tableau
+    # O texto é o nome no SAPI
+    relevantes = {
+        # Elapsed: 11 min
+        'start:elapsed': 'sapiTempoExecucaoSegundos',
+
+        # TD3 S/N: 000ecc11d370f2
+        'start:td3_sn': 'sapiTableauSN',
+
+        # Share Name: //10.41.87.235/tableau
+        'destination:share_name': 'sapiStorageDestino',
+
+        # Model: Seagate Expansion
+        'source:modelo': 'sapiModelo',
+
+        # USB Serial number: NA8NMGTN
+        'Serial number': 'sapiSerial',
+
+        # Capacity in bytes: 3,926,949,888 (3.9 GB)
+        'source:capacity': 'sapiTamanhoBytes',
+
+        # Output file format: E01 - EnCase format
+        'result:output_file_format': 'sapiFormatoArquivo',
+
+        # Filename of first chunk: 1023_17_parte_1/2017-09-21_14-31-52/temporario.E01
+        'result:first_chunk': 'sapiCaminhoImagemTemporario',
+
+        # Total errors: 0
+        'result:total_erros': 'sapiQuantidadeErros'
+
+    }
+
+    for r in relevantes:
+        if (r in valores):
+            chave_sapi=relevantes[r]
+            dcomp[chave_sapi]=valores[r]
+
+
+    #
+    var_dump(dcomp)
+
+
+    # ------------------------------------------------------------------------------
+    # Ajuste no tamanho da mídia
+    # ------------------------------------------------------------------------------
+    tamanho=dcomp.get('sapiTamanhoBytes', None)
+    if tamanho is None:
+        ret["erro"]="Não foi possível identificar o tamanho da mídia de origem (source:capacity)"
+        ret["sucesso"]=False
+        return ret
+
+    # 3,926,949,888(3.9 GB)
+    partes=tamanho.split("(")
+    t=partes[0].strip()
+    t=t.replace(",","")
+    try:
+        tamanho=int(t)
+    except:
+        ret["erro"]="Não foi possível converter tamanho da mídia para inteiro:" + t
+        ret["sucesso"]=False
+        return ret
+
+    dcomp['sapiTamanhoBytes']=tamanho
+
+    # ------------------------------------------------------------------------------
+    # Ajuste no tempo
+    # ------------------------------------------------------------------------------
+    tempo=dcomp.get('sapiTempoExecucaoSegundos', None)
+    if tempo is None:
+        ret["erro"]="Não foi possível identificar o tempo de execução da duplicação (start:elapsed)"
+        ret["sucesso"]=False
+        return ret
+    
+    # Elapsed: 1 hour 28 min 15 sec
+    tempo_orginal=tempo
+    tempo=tempo.replace(' ','')
+    tempo=tempo.replace('day', ':d ')
+    tempo=tempo.replace('hour', ':h ')
+    tempo=tempo.replace('min', ':m ')
+    tempo=tempo.replace('sec', ':s ')
+    tempo=tempo.strip()
+    partes_tempo=tempo.split(' ')
+
+    tempo_segundos=0
+    erro=None
+    for p in partes_tempo:
+        var_dump(p)
+        #die('ponto983')
+
+        x=p.split(':')
+        if len(x)<2:
+            erro="Formato de unidade de medida inesperado ("+p+")"
+            break
+        valor=int(x[0])
+        unidade=x[1]
+        if unidade=='d':
+            valor=24*3600*valor
+        elif unidade=='h':
+            valor=3600*valor
+        elif unidade=='m':
+            valor=60*valor
+        elif unidade=='s':
+            valor=valor
+        else:
+            erro="Unidade de medida (" + unidade + ") inesperada"
+
+        tempo_segundos = tempo_segundos + valor
+
+    if erro is not None:
+        ret["erro"] = "Fomato de elapsed ("+tempo_orginal+") inesperado : " + erro
+        ret["sucesso"] = False
+        return ret
+
+    # Tudo certo
+    dcomp['sapiTempoExecucaoSegundos']=tempo_segundos
+
+
+    # TODO: Converte tempo para minutos
+    # TODO: Imagem com erro Failure sumary
+    # Todo: Calcular o tamanho dos erros (quando são erros de leitura) e o % do disco afetado
+    # Todo: Detectar mensagens de cancelamento
+
+    # Todo: Gerar registro no log se ficar mais de (5, 10, 20, 40, 80, vai dobrando) minutos sem nenhum progresso no tamanho da imagem
+
+
+    # ------------------------------------------------------------------------------
+    # Calculo da quantidade de erros
+    # ------------------------------------------------------------------------------
+
+
+    # ------------------------------------------------------------------------------
+    # Tratamento para hashes
+    # ------------------------------------------------------------------------------
+    # Verification MD5:   cfdd6b92b8599309bbc8901d05ec2927
+    # 'verification:verification_md5'
+
+    # Verification SHA-1: bb6bc7a155d22e748148b7f6100d50edabdb324c
+    # 'verification:verification_sha1'
+
+    '''
+    sapiHashes =>
+        0 =>
+        sapiHashAlgoritmo => sha256
+        sapiHashDescricao => Hash do arquivo item03Arrecadacao03_extracao_iped/listaArquivos.csv
+        sapiHashValor => 17a074d5608f35cdfc1f7cb5701f292da2597a1bc34533a7dc975fb8c01f878d
+    '''
+
+    # Armazena dados de hash
+    h = dict()
+
+    # Processa os hashes
+    for tipo_hash in ('md5', 'sha1'):
+        valor_hash=valores.get('verification:verification_'+tipo_hash,None)
+        if valor_hash is not None:
+            h["sapiHashDescricao"] = "Hash "+tipo_hash+" do conjunto de setores lidos do material " + item
+            h["sapiHashValor"] = valor_hash
+            h["sapiHashAlgoritmo"] = tipo_hash
+        else:
+            ret["erro"]="Não foi localizado o hash "+tipo_hash
+            ret["sucesso"] = False
+            return ret
+
+    #
+    lista_hash = [h]
+
+
+    # Finalizado com sucesso
+    finalizado_sucesso=True
+
+
+    # conclui dados para laudo
+    dlaudo["comp1"] = dcomp
+    dlaudo["sapiQuantidadeComponentes"] = 1 #Só tem um componente
+    dlaudo["sapiTipoAquisicao"] = "imagem"
+
+    ret["sucesso"]=True
+    ret["dados"]['laudo'] = dlaudo
+
+
+    return ret
 
 
 # Verifica se existe indicação que iped foi finalizado com sucesso
@@ -707,409 +1181,6 @@ def calcula_hash_iped(codigo_tarefa, caminho_destino):
     return (True, "")
 
 
-# Ajuste para execução multicase
-def ajusta_multicase(tarefa, codigo_tarefa, caminho_destino):
-
-    # Situação informativa
-    # -------------------------------------------------------------
-    sapisrv_atualizar_status_tarefa_informativo(
-        codigo_tarefa=codigo_tarefa,
-        texto_status="Efetuando ajuste para IPED multicase"
-    )
-
-    # Montar storage
-    # ------------------------------------------------------------------
-    ponto_montagem=conectar_ponto_montagem_storage_ok(tarefa["dados_storage"])
-    if ponto_montagem is None:
-        # Mensagens de erro já foram apresentadas pela função acima
-        erro="Não foi possível conectar no storage"
-        return (False, erro)
-
-    # ------------------------------------------------------------------------------------------------------------------
-    # Pastas relacionadas
-    # ------------------------------------------------------------------------------------------------------------------
-    # O iped multicase possui a seguinte estrutura:
-    # Memorando_xxxx_xx
-    #   + multicase
-    #     + indexador
-    #       + lib
-    #       + conf
-    #       + Ferramenta de Pesquisa.exe
-    #       + iped-itens.txt
-    #
-    # Cada item possui a seguinte estrutura
-    # Memorando_xxxx_xx
-    #   + item01Arrecadacao01
-    #   + item01Arrecadacao01_iped
-    #     + IPED-SearchApp.exe
-    #     + Lista de Arquivos.csv
-    #     + indexador
-    #       + lib
-    #       + conf
-    #       + ....
-    #
-    # ------------------------------------------------------------------------------------------------------------------
-
-    # Ajusta caminho de destino
-    caminho_destino = caminho_destino + "\\"
-
-    # Extraí pasta do memorando
-    # Localiza pasta do item no caminho de destino
-    inicio_pasta_item = caminho_destino.find(tarefa["pasta_item"])
-    caminho_memorando = caminho_destino[0:inicio_pasta_item]
-
-    # Caminho para bat
-    nome_bat = "ferramenta_pesquisa.bat"
-    caminho_bat = montar_caminho(caminho_memorando, nome_bat)
-
-    caminho_iped_multicase      = montar_caminho(caminho_memorando,"multicase")
-
-    # Recupera a lista de pasta das tarefas IPED que foram concluídas com sucesso
-    # ---------------------------------------------------------------------------
-    codigo_solicitacao_exame_siscrim=tarefa["dados_solicitacao_exame"]["codigo_documento_externo"]
-    try:
-        (sucesso, msg_erro, tarefas_iped_sucesso) = sapisrv_chamar_programa(
-            "sapisrv_obter_tarefas.php",
-            {'tipo': 'iped%',
-             'codigo_solicitacao_exame_siscrim': codigo_solicitacao_exame_siscrim
-             }
-        )
-    except BaseException as e:
-        erro="Não foi possível recuperar a situação atualizada das tarefas do servidor"
-        return (False, erro)
-
-    if not sucesso:
-        return (False, msg_erro)
-
-
-    # Processa tarefas iped,
-    # selecionando apenas as que já passaram pela fase do IPED
-    # ---------------------------------------------------------------------
-    caminhos_tarefas_iped_finalizado=list()
-    for t in tarefas_iped_sucesso:
-        tarefa_finalizada=t["tarefa"]
-        # Problema: O teste >=GIpedFinalizado pode ser um problema no futuro...
-        # se algum dia for inserido um código de erro maior que 62...
-        # Códigos de erro (abortado, por exemplo) tem que ser pequenos,
-        # obrigatoriamente no início do range
-        codigo_situacao_tarefa=int(tarefa_finalizada["codigo_situacao_tarefa"])
-        if codigo_situacao_tarefa>=GIpedFinalizado:
-            caminhos_tarefas_iped_finalizado.append(tarefa_finalizada["caminho_destino"])
-
-    # Se não tem nenhuma tarefa com iped Finalizado
-    # exclui a extrutura multicase e encerra
-    if len(caminhos_tarefas_iped_finalizado) == 0:
-        print_log("Não possui nenhuma tarefa com iped finalizado. Multicase será excluído")
-        return excluir_multicase(caminho_iped_multicase, caminho_bat)
-
-    # Ok, existem tarefas concluídas com sucesso, prossegue na montagem do multicase
-
-    # Confere se todas as pastas das tarefas finalizadas estão ok
-    # -------------------------------------------------------------
-    for caminho_destino in caminhos_tarefas_iped_finalizado:
-        pasta_iped=montar_caminho(ponto_montagem, caminho_destino)
-        if not os.path.exists(pasta_iped):
-            erro="[756] Não foi encontrada pasta de IPED de tarefa concluída"+pasta_iped
-            return (False, erro)
-
-        # Verifica integridade da pasta
-        if os.path.exists(montar_caminho(pasta_iped, "indexador", "lib")) \
-                and os.path.exists(montar_caminho(pasta_iped, "indexador", "conf")) \
-                and os.path.isfile(montar_caminho(pasta_iped, GnomeProgramaInterface)):
-            print_log("Pasta", pasta_iped," está íntegra")
-        else:
-            erro="[765] Pasta de IPED danificada: "+pasta_iped
-            return (False, erro)
-
-    # A primeira pasta de IPED será utilizada como modelo, para copiar lib e outros componentes
-    # para o multicase
-    caminho_iped_origem=montar_caminho(ponto_montagem, caminhos_tarefas_iped_finalizado[0])
-
-    # Código antigo, para verificar pastas _iped
-    # Confere se todas as pastas de tarefas iped concluídas existem
-    # -------------------------------------------------------------
-    # qtd_pastas_iped=0
-    # lista_pastas=list()
-    # caminho_iped_origem=None
-    # for root, subdirs, files in os_walklevel(caminho_memorando, level=1):
-    #     if ("_iped" in root):
-    #         # Converte caminho absoluto em relativo
-    #         # Exemplo:
-    #         # De    \\gtpi-sto-01\storage\Memorando_1086-16\item11\item11_extracao_iped
-    #         # para  ..\item11\item11_extracao_iped'
-    #         pasta="..\\" +root.replace(caminho_memorando,'')
-    #         lista_pastas.append(pasta)
-    #         qtd_pastas_iped=qtd_pastas_iped+1
-    #         # Verifica se abaixo deste pasta existe uma pasta indexador/lib
-    #         # Se existir, guarda para uso futuro
-    #         if caminho_iped_origem is None:
-    #             if      os.path.exists(montar_caminho(root,"indexador", "lib"))\
-    #                 and os.path.exists(montar_caminho(root,"indexador", "conf"))\
-    #                 and os.path.isfile(montar_caminho(root,GnomeProgramaInterface)):
-    #                 caminho_iped_origem=root
-
-
-    # Cria estrutura multicase, copiando elementos da pasta caminho_iped_origem para caminho_iped_multicase
-    # -----------------------------------------------------------------------------------------------------
-
-    # Pasta para o indexador do multicase
-    caminho_indexador_multicase = montar_caminho(caminho_iped_multicase, "indexador")
-
-    # Cria pastas para multicase, se ainda não existirem
-    try:
-        if not os.path.exists(caminho_iped_multicase):
-            os.makedirs(caminho_iped_multicase)
-
-        if not os.path.exists(caminho_indexador_multicase):
-            os.makedirs(caminho_indexador_multicase)
-    except Exception as e:
-        erro = "[818] Não foi possível criar estrutura de pasta para multicase " + str(e)
-        return (False, erro)
-
-    # Confere criação de pasta
-    if os.path.exists(caminho_iped_multicase):
-        print_log("Encontrada pasta" + caminho_iped_multicase)
-    else:
-        erro = "[791] Situação inesperada: Pasta " + caminho_iped_multicase + " não existe"
-        return (False, erro)
-
-    if os.path.exists(caminho_indexador_multicase):
-        print_log("Encontrada pasta" + caminho_indexador_multicase)
-    else:
-        erro = "[797] Situação inesperada: Pasta " + caminho_indexador_multicase + " não existe"
-        return (False, erro)
-
-
-    # ------------------------------------------------------------------------------------------------------------------
-    # Pasta LIB => Esta pasta contém os programas java e bibliotecas utilizados na pesquisa
-    # Efetua a cópia da pasta lib de um item para a pasta do multicase caso isto não tenha sido feito anteriormente
-    # ------------------------------------------------------------------------------------------------------------------
-    caminho_lib_origem      =montar_caminho(caminho_iped_origem   , "indexador", "lib")
-    caminho_lib_multicase   =montar_caminho(caminho_iped_multicase, "indexador", "lib")
-
-    # Se pasta lib não existe, cria pasta, copiando da pasta de processamento de IPED do item
-    if not os.path.exists(caminho_lib_multicase):
-        try:
-            # Cria pasta de lib
-            print_log("Copiando lib " + caminho_iped_origem +
-                      " para lib da pasta multicase " + caminho_lib_multicase)
-            shutil.copytree(caminho_lib_origem, caminho_lib_multicase)
-        except Exception as e:
-            erro = "Não foi possível copiar lib para multicase: " + str(e)
-            return (False, erro)
-
-    # Confere se lib existe
-    if os.path.exists(caminho_lib_multicase):
-        print_log("Encontrada pasta " + caminho_lib_multicase + ": ok")
-    else:
-        erro = "[823] Situação inesperada: Pasta [" + caminho_lib_multicase + "] foi copiada MAS NÃO existe"
-        return (False, erro)
-
-    # ------------------------------------------------------------------------------------------------------------------
-    # Pasta CONF => Copia a pasta conf do item para a pasta do iped multicase, caso isto ainda não tenha sido feito
-    # A rigor, cada item pode ter uma configuração independente, logo existe um problema conceitual aqui.
-    # Mas como todos são rodados pelo sistema, isto não deve dar diferença
-    # ------------------------------------------------------------------------------------------------------------------
-    caminho_conf_origem     =montar_caminho(caminho_iped_origem,      "indexador", "conf")
-    caminho_conf_multicase  =montar_caminho(caminho_iped_multicase,   "indexador", "conf")
-
-    # Se pasta conf não existe, cria pasta, copiando da pasta de processamento de IPED do item
-    if not os.path.exists(caminho_conf_multicase):
-        try:
-            print_log("Copiando conf do item" + caminho_conf_origem +
-                      " para conf da pasta multicase" + caminho_conf_multicase)
-            shutil.copytree(caminho_conf_origem, caminho_conf_multicase)
-        except Exception as e:
-            erro = "Não foi possível copiar para multicase: " + str(e)
-            return (False, erro)
-
-    # Confere se conf existe
-    if os.path.exists(caminho_conf_multicase):
-        print_log("Encontrada pasta", caminho_conf_multicase, ": ok")
-    else:
-        erro = "[848] Situação inesperada: Pasta" + caminho_conf_multicase + "não existe"
-        return (False, erro)
-
-    # ------------------------------------------------------------------------------------------------------------------
-    # Copia IPED-SearchApp.exe para pasta do multicase
-    # ------------------------------------------------------------------------------------------------------------------
-    caminho_de   = montar_caminho(caminho_iped_origem,  GnomeProgramaInterface)
-    caminho_para = montar_caminho(caminho_iped_multicase, GnomeProgramaInterface)
-    try:
-        print_log("Copiando arquivo" + caminho_de + "para" + caminho_para)
-        shutil.copy(caminho_de, caminho_para)
-    except Exception as e:
-        erro = "Não foi possível copiar" + caminho_de + "para" + caminho_para +": " + str(e)
-        return (False, erro)
-
-    # Confere se copiou ok
-    if os.path.isfile(caminho_para):
-        print_log("Encontrado arquivo", caminho_para)
-    else:
-        erro = "[867] Situação inesperada: Arquivo " + caminho_para + " não existe"
-        return (False, erro)
-
-    # ------------------------------------------------------------------------------------------------------------------
-    # Gera arquivo contendo as listas de pasta dos itens, para ser utilizado na opção multicase
-    # Este passo sempre é executado e o arquivo é refeito, refletindo o conteúdo completo da pasta
-    # ------------------------------------------------------------------------------------------------------------------
-    arquivo_pastas="iped-itens.txt"
-    caminho_arquivo_pastas = montar_caminho(caminho_iped_multicase, arquivo_pastas)
-
-    # # Recupera lista de pastas com processamento por IPED
-    # qtd_pastas_iped=0
-    # lista_pastas=list()
-    # for root, subdirs, files in os_walklevel(caminho_memorando, level=1):
-    #     if ("_iped" in root):
-    #         # Converte caminho absoluto em relativo
-    #         # Exemplo:
-    #         # De    \\gtpi-sto-01\storage\Memorando_1086-16\item11\item11_extracao_iped
-    #         # para  ..\item11\item11_extracao_iped'
-    #         pasta="..\\" +root.replace(caminho_memorando,'')
-    #         lista_pastas.append(pasta)
-    #         qtd_pastas_iped=qtd_pastas_iped+1
-    lista_pastas = list()
-    for p in caminhos_tarefas_iped_finalizado:
-        # Converte caminho absoluto em relativo
-        # Exemplo:
-        # De    \\gtpi-sto-01\storage\Memorando_1086-16\item11\item11_extracao_iped
-        # para  ..\item11\item11_extracao_iped'
-        #pasta="..\\" +p.replace(caminho_memorando,'')
-        inicio_pasta_item = p.find("\\item")
-        if inicio_pasta_item==-1:
-            inicio_pasta_item = p.find("/item")
-            if inicio_pasta_item == -1:
-                erro = "[945] Não foi encontrada subpasta do item em " + p
-                return (False, erro)
-
-        #print(inicio_pasta_item)
-        p_comecando_item = p[inicio_pasta_item:]
-        #print(p_comecando_item)
-        pasta = ".." + p_comecando_item
-        #print(pasta)
-
-        #zzz
-        #print_log("pasta para ajustar", p)
-        #print_log("Caminho memorando: ", caminho_memorando)
-        print_log("Multicase: Incluido em ", arquivo_pastas, "a pasta",pasta)
-        lista_pastas.append(pasta)
-
-
-    # Criar/recria arquivo
-    try:
-        print_log("Criando/Atualizando arquivo [" + caminho_arquivo_pastas + "]")
-        # Cria arquivo
-        f = open(caminho_arquivo_pastas, 'w')
-        # Escreve lista de pastas, cada pasta em uma linha
-        f.write("\n".join(lista_pastas))
-        f.close()
-    except Exception as e:
-        erro = "Não foi possível criar arquivo: " + str(e)
-        # Neste caso, aborta tarefa, pois este erro deve ser analisado
-        return (False, erro)
-
-    # ------------------------------------------------------------------------------------------------------------------
-    # Cria arquivo bat "ferramenta_pesquisa.bat"
-    # Este será o arquivo que o usuário irá clicar para invocar o IPED multicase
-    # ------------------------------------------------------------------------------------------------------------------
-    conteudo_bat="""
-@echo off
-REM SAPI - Carregamento do caso no iped, modo multicase
-REM ====================================================================================
-REM echo %~d0
-REM Se nao tem drive, exibe mensagem explicativa
-IF "%~d0" == "\\\\" (
-  echo .
-  echo *** ERRO: Nao existe drive, IPED nao pode ser invocado ***
-  echo .
-  echo Problema:
-  echo - Voce estah tentando invocar a ferramenta de pesquisa direto de uma pasta compartilhada da rede, que nao estah mapeada.
-  echo .
-  echo Solucao:
-  echo - Efetue um mapeamento da pasta de rede para um letra, por exemplo z:
-  echo - Navegue para pasta mapeada e clique novamente sobre ferramenta_pesquisa.bat
-  echo .
-  pause
-  exit
-)
-
-REM Ajusta diretório corrente para a pasta de armazenamento do multicase
-REM --------------------------------------------------------------------
-CD /D %~dp0
-CD multicase
-
-REM Executa Ferramenta de Pesquisa, passando os parâmetros para multicase
-REM --------------------------------------------------------------------
-"xxx_programa_interface.exe" -multicases iped-itens.txt
-
-echo Carregando IPED (Indexador e Processador de Evidencias Digitais). Aguarde alguns segundos...
-REM Isto aqui embaixo é só um truque para dar um sleep para dar tempo do IPED carregar
-ping -n 120 127.0.0.1 > nul
-
-REM =========================================================================
-REM Para debug
-REM Se o comando acima falhar, habilitar as linhas a seguir (retirar o REM)
-REM para poder observar a mensagem de erro
-REM =========================================================================
-REM java -jar "indexador/lib/iped-search-app.jar -multicases iped-itens.txt"
-REM pause
-"""
-
-    # Troca o nome do programa do executavel
-    conteudo_bat=conteudo_bat.replace("xxx_programa_interface.exe", GnomeProgramaInterface)
-
-    # Se não existe, cria
-    if not os.path.isfile(caminho_bat):
-        try:
-            print_log("Criando arquivo [" + caminho_bat + "]")
-            # Cria arquivo
-            f = open(caminho_bat, 'w')
-            f.write(conteudo_bat)
-            f.close()
-        except Exception as e:
-            erro = "Não foi possível criar arquivo: " + str(e)
-            # Neste caso, aborta tarefa, pois este erro deve ser analisado
-            return (False, erro)
-
-    # Confere se arquivo existe
-    if os.path.isfile(caminho_bat):
-        print_log("Encontrado arquivo [" + caminho_bat + "]: ok")
-    else:
-        erro = "[976] Situação inesperada: Arquivo [" + caminho_bat + "] não existe"
-        return (False, erro)
-
-    # Tudo certo, ajuste multicase concluído
-    sapisrv_troca_situacao_tarefa_loop(
-        codigo_tarefa=codigo_tarefa,
-        codigo_situacao_tarefa=GIpedMulticaseAjustado,
-        texto_status="Ajuste multicase efetuado")
-    return (True, "")
-
-# Retorna: (sucess/insucesso, erro)
-def excluir_multicase(caminho_iped_multicase, caminho_bat):
-
-    print_log("Efetuando exclusão de componentes multicase")
-    try:
-        # Exclui pasta multicase
-        if os.path.exists(caminho_iped_multicase):
-            shutil.rmtree(caminho_iped_multicase)
-            print_log("Excluída pasta:", caminho_iped_multicase)
-        else:
-            print_log("Pasta multicase", caminho_iped_multicase, "não existe")
-        # Exclui bat de pesquisa
-        if os.path.isfile(caminho_bat):
-            os.remove(caminho_bat)
-            print_log("Excluído arquivo:", caminho_bat)
-        else:
-            print_log("Arquivo", caminho_bat, "não existe")
-
-        # Sucesso
-        return (True, "")
-
-    except Exception as e:
-        erro = "Erro na exclusão de multicase: " + str(e)
-        # Neste caso, aborta tarefa, pois este erro deve ser analisado
-        return (False, erro)
 
 # Calculo de tamanho da pasta de destino
 def calcula_tamanho_total_pasta(caminho_destino):
@@ -1204,6 +1275,12 @@ def recupera_dados_laudo(codigo_tarefa, caminho_log_iped):
 # Efetua conexão no ponto de montagem, dando tratamento em caso de problemas
 def conectar_ponto_montagem_storage_ok(dados_storage):
 
+    global Gponto_montagem
+
+    # Se já montou, apenas retorna
+    if Gponto_montagem is not None:
+        return Gponto_montagem
+
     # Confirma que tem acesso ao storage escolhido
     nome_storage = dados_storage['maquina_netbios']
     print_log("Verificando conexão com storage", nome_storage)
@@ -1218,7 +1295,9 @@ def conectar_ponto_montagem_storage_ok(dados_storage):
 
     print_log("Storage", nome_storage, "acessível")
 
-    return ponto_montagem
+    Gponto_montagem=ponto_montagem
+
+    return Gponto_montagem
 
 
 # ------------------------------------------------------------------------------------------------------------------
@@ -1531,15 +1610,16 @@ def exclui_pasta_tarefa(codigo_tarefa, caminho_destino):
 
 def executar_tarefas_tableau():
 
-    print_log("Buscando tarefas de imagem que necessitam de pasta para armazenamento")
 
     # Recupera a lista de pasta das tarefas de imagem
     # que necessitam de pasta de destino
     # ---------------------------------------------------------------------------
     try:
+        storage=Gconfiguracao["storage_unico"]
+        print_log("Buscando tarefas de imagem para storage:", storage)
         (sucesso, msg_erro, tarefas_imagem) = sapisrv_chamar_programa(
             "sapisrv_obter_tarefas_imagem.php",
-            {'storage': Gconfiguracao["storage_unico"]
+            {'storage': storage
              }
         )
     except BaseException as e:
@@ -1550,31 +1630,67 @@ def executar_tarefas_tableau():
         return (False, msg_erro)
 
     # var_dump(sucesso)
-    # var_dump(tarefas_imagem)
+    var_dump(tarefas_imagem)
     # die('ponto1581')
 
-    # Cria pasta para tarefas
+    print_log("Foram recuperadas", len(tarefas_imagem), "tarefas de imagem")
+
     for t in tarefas_imagem:
 
-        print(t)
+        codigo_tarefa=t['codigo_tarefa']
+        codigo_situacao_tarefa=int(t['codigo_situacao_tarefa'])
 
-        # Tem que estar aguardando criação de pasta
-        if int(t['codigo_situacao_tarefa'])!=int(GFilaCriacaoPasta):
-            continue
+        # Se está na fila para criação de pasta,
+        # Cria pasta para tarefa
+        if codigo_situacao_tarefa==GFilaCriacaoPasta:
+            criar_pasta_tableau(codigo_tarefa)
 
-        # Ok, pasta deve ser criada
-        criar_pasta_tableau(t['codigo_tarefa'])
+        # Se está aguardando PCF,
+        # Verifica se upload já iniciou
+        if codigo_situacao_tarefa==GAguardandoPCF:
+            monitorar_tarefa(codigo_tarefa)
+
+        # Se já está executando, monitora tarefa
+        if codigo_situacao_tarefa == GTableauExecutando:
+            monitorar_tarefa(codigo_tarefa)
 
 
-def criar_pasta_tableau(codigo_tarefa):
 
-    # kkk
-    print_log("Criação de pasta para tarefa",codigo_tarefa)
+
+def obter_tarefa(codigo_tarefa):
+
+    global Gcache_tarefa
 
     # Recupera tarefa
     print_log("Buscando dados da tarefa", codigo_tarefa)
     tarefa = recupera_tarefa_do_setec3(codigo_tarefa)
 
+    # Armazena em cache
+    Gcache_tarefa[codigo_tarefa]=tarefa
+
+    return tarefa
+
+
+
+# Se tarefa já estiver em cache, devolve dados do cache
+# Caso contrário, consulta o servidor para buscar os dados
+def obter_tarefa_cache(codigo_tarefa):
+
+    if codigo_tarefa in Gcache_tarefa:
+        # Está em cache. Retorna valor do cache
+        return Gcache_tarefa[codigo_tarefa]
+
+    # Obtem tarefa que não está em cache
+    return obter_tarefa(codigo_tarefa)
+
+
+
+def criar_pasta_tableau(codigo_tarefa):
+
+    print_log("Criação de pasta para tarefa",codigo_tarefa)
+
+    # Recupera tarefa
+    tarefa = obter_tarefa_cache(codigo_tarefa)
     if tarefa is None:
         print_log("Criação de pasta falhou, pois não foi possível recuperar tarefa")
         return False
@@ -1591,7 +1707,6 @@ def criar_pasta_tableau(codigo_tarefa):
     ponto_montagem=conectar_ponto_montagem_storage_ok(tarefa["dados_storage"])
     if ponto_montagem is None:
         # Mensagens de erro já foram apresentadas pela função acima
-        erro="Não foi possível conectar ao storage"
         return False
 
     # Verifica se pasta raiz do tableau existe
@@ -1605,16 +1720,12 @@ def criar_pasta_tableau(codigo_tarefa):
 
 
     # Pasta para a tarefa
-    # kkk
     pasta_tableau = montar_caminho(ponto_montagem,
                                    Gpasta_raiz_tableau,
                                    tarefa["dados_item"]["material_simples"])
 
-    # Verifica se pasta já existe
-    if os.path.exists(pasta_tableau):
-        print("AVISO: Pasta já existe para tarefa que está em situação de criação de pasta")
-        print("Existe alguma inconsistência")
-    else:
+    # Se pasta não existe, cria
+    if not os.path.exists(pasta_tableau):
         # Cria pasta de destino
         try:
             print_log("Criando pasta", pasta_tableau)
@@ -1626,11 +1737,125 @@ def criar_pasta_tableau(codigo_tarefa):
             return False
 
 
-    # Se pasta de destino existe,
-    # Atualiza a situação de tarefa para GAguardandoPCF
+    # Se pasta de destino existe, atualiza a situação de tarefa para GAguardandoPCF
+    if os.path.exists(pasta_tableau):
+        sapisrv_troca_situacao_tarefa_loop(
+            codigo_tarefa=codigo_tarefa,
+            codigo_situacao_tarefa=GAguardandoPCF,
+            texto_status="Pasta para upload do tableau está pronta"
+        )
 
+    # Tudo certo
+    return True
+
+
+# Retorna verdadeiro se a tarefa já está sendo acompanhada
+def tarefa_sendo_acompanhada(codigo_tarefa):
+    return False
+
+
+
+def monitorar_tarefa(codigo_tarefa):
+
+    # Se tarefa já iniciou e está sendo acompanhada,
+    # não há mais nada a fazer
+    if tarefa_sendo_acompanhada(codigo_tarefa):
+        # Não tem mais nada a fazer
+        return True
+
+    # Recupera dados da tarefa do cache,
+    # para evitar sobrecarregar o servidor com requisições
+    tarefa = obter_tarefa_cache(codigo_tarefa)
+
+    # Montar storage para a tarefa
+    # Normalmete o storage está na própria máquina que está rodando
+    # o sapi_tablau, mas vamos deixar genérico.
+    # ------------------------------------------------------------------------
+    ponto_montagem=conectar_ponto_montagem_storage_ok(tarefa["dados_storage"])
+    if ponto_montagem is None:
+        # Mensagens de erro já foram apresentadas pela função acima
+        return False
+
+    # Pasta para a tarefa
+    pasta_tableau = montar_caminho(ponto_montagem,
+                                   Gpasta_raiz_tableau,
+                                   tarefa["dados_item"]["material_simples"])
+
+    # Se pasta não existe, tem algo erro aqui!!!
+    if not os.path.exists(pasta_tableau):
+        print_log("Erro: Pasta do tableau ", pasta_tableau,"não existe para tarefa", codigo_tarefa)
+        return False
+
+    # Se pasta da tarefa está vazia,
+    # ou seja, ainda não foi iniciado o upload,
+    # então não tem nada a fazer
+    # Recupera tamanho da pasta
+    carac = obter_caracteristicas_pasta_ok(pasta_tableau)
+    if carac is None:
+        return False
+
+    if carac["tamanho_total"]==0:
+        # Pasta está zerada (tamanho zero)
+        # Logo, ainda não tem nada a fazer
+        return False
+
+    # Acompanha execução da tarefa de cópia
+    deu_erro = False
+    erro_exception=None
+    try:
+
+        if tarefa["codigo_situacao_tarefa"] != GTableauExecutando:
+            # Registra comando de execução do IPED
+            sapisrv_troca_situacao_tarefa_loop(
+                codigo_tarefa=codigo_tarefa,
+                codigo_situacao_tarefa=GTableauExecutando,
+                texto_status="Pasta do tableau com dados"
+            )
+
+        # Inicia processo para acompanhamento em background
+        print_log("Tarefa: ", codigo_tarefa, "Pasta do tableau tem conteúdo. Iniciando acompanhamento")
+
+        # Inicia subprocesso para acompanhamento do Tableau
+        # ------------------------------------------------
+        nome_arquivo_log = obter_nome_arquivo_log()
+        dados_pai_para_filho = obter_dados_para_processo_filho()
+        label_processo = "acompanhar:" + str(codigo_tarefa)
+        p_acompanhar = multiprocessing.Process(
+            target=background_acompanhar_tableau,
+            args=(codigo_tarefa, pasta_tableau,
+                  nome_arquivo_log, label_processo, dados_pai_para_filho
+                  )
+        )
+        p_acompanhar.start()
+
+        registra_processo_filho(label_processo, p_acompanhar)
+
+    except subprocess.CalledProcessError as e:
+        # Se der algum erro, não volta nada acima, mas tem como capturar pegando o output da exception
+        erro_exception = str(e.output)
+        deu_erro = True
+    except Exception as e:
+        # Alguma outra coisa aconteceu...
+        erro_exception = str(e)
+        deu_erro = True
+
+    if deu_erro:
+        print_log("Erro na chamada do acompanahmento de tarefa: ", erro_exception)
+        return False
+
+
+    time.sleep(100)
+    print("Interrompendo principal para iniciar apenas uma tarefa")
+    die('ponto1784')
+
+    # Ok, tudo certo. O resto é com o processo em background
+    return True
+
+
+def resto():
+
+    # kkk
     die('ponto1588')
-
 
     # ------------------------------------------------------------------
     # Pastas de origem e destino
@@ -1907,17 +2132,6 @@ def finalizar_programa():
 
 
 
-# ------------------------------------------------------------------------------------------------------------------
-# Execução de tarefa
-# ------------------------------------------------------------------------------------------------------------------
-
-# Executa criação de pasta para armazenamento de imagem
-def ciclo_criar_pasta_imagem():
-
-    return executar_nova_tarefa()
-
-
-
 
 # ======================================================================
 # Rotina Principal 
@@ -1960,6 +2174,7 @@ def main():
         dormir(60, "Pausa entre ciclo de execução de tarefas de imagens")
         if not inicializar():
             # Falhou na inicialização, talvez falha de comunicação, talvez mudança de versão...
+            # Irá finalizar, e o scheduler vai reiniciar o programa no próximo ciclo
             finalizar_programa()
 
 
@@ -1986,5 +2201,10 @@ def main():
 # Chamada para rotina principal
 # ----------------------------------------------------------------------------------
 if __name__ == '__main__':
+
+    ret=parse_arquivo_log("tableau_imagem.log", "item01Arrecadacao01")
+    var_dump(ret)
+    die('ponto2152')
+
     main()
 

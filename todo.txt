@@ -18,7 +18,9 @@ Ajustes diversos:
 * Trocar senha de atualização das contas SAPI nos servidores (e nos arquivos de configuração)
 
 Versão 2.0)
+* sapi_exame: Dar aviso/esclarecimento sobre mídia de destino, quando o usuário tentar colocar a mídia como destino e não tem mídia de destino.
 * sapi_imagem
+* Exclusões de pastas: Jogar para o garbage coletor, para ser mais rápido
 * Testes/ajustes no sapi_iped
 * Ajsutes no sapi_atualiza_iped
 * Novo storage GTPI-STO-03

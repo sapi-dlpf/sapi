@@ -99,6 +99,7 @@ GDespachadoParaAgente = 20
 GPastaDestinoCriada = 30
 GEmExclusao = 35
 GEmAndamento = 40
+GTableauExecutando = 50
 GIpedExecutando = 60
 GIpedFinalizado = 62
 GIpedHashCalculado = 65
@@ -2175,7 +2176,9 @@ def tamanho_pasta(start_path):
 def obter_caracteristicas_pasta(start_path):
     total_size = 0
     qtd=0
+    qtd_pastas=0
     for dirpath, dirnames, filenames in os.walk(start_path):
+        qtd_pastas += 1
         for f in filenames:
             fp = montar_caminho_longo(dirpath, f)
             total_size += os.path.getsize(fp)
@@ -2184,11 +2187,25 @@ def obter_caracteristicas_pasta(start_path):
     # Dicionários de retorno
     ret=dict()
     ret["quantidade_arquivos"]=qtd
+    ret["quantidade_pastas"]=qtd_pastas
     ret["tamanho_total"]=total_size
 
     return ret
 
 
+# Características de pasta
+def obter_caracteristicas_pasta_ok(start_path):
+    try:
+        carac = obter_caracteristicas_pasta(start_path)
+    except OSError as e:
+        print_log("[2197] obter_caracteristicas_pasta_ok falhou para pasta",start_path," erro: ",str(e))
+        return None
+    except BaseException as e:
+        print_log("[2200] obter_caracteristicas_pasta_ok falhou para pasta",start_path," erro: ",str(e))
+        return None
+
+    # Tudo certo
+    return carac
 
 
 # Converte Bytes para formato Humano
