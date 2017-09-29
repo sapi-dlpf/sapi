@@ -244,7 +244,7 @@ def abrir_browser_setec3_exame(codigo_solicitacao_exame_siscrim):
     debug("Aberto URL",url)
 
 def abrir_browser_siscrim(pagina_parametros, descricao_pagina=None):
-    pagina_parametros="controle_documento.php?action=elaborar&objeto_pai=33316600&categoria=2"
+    #pagina_parametros="controle_documento.php?action=elaborar&objeto_pai=33316600&categoria=2"
     url = urllib.parse.urljoin(get_parini('url_base_siscrim'),pagina_parametros)
     webbrowser.open(url)
     if descricao_pagina is not None:
@@ -351,7 +351,19 @@ def obter_info_deployment():
     return r
 
 
+# ----------------------------------------------------------------------------------------------------------------------
+# Gerais
+# ----------------------------------------------------------------------------------------------------------------------
+# Faz um pausa por alguns segundos
+# Dependendo de parâmetro, ignora a pausa
+def dormir(tempo, rotulo=None):
+    texto="Dormindo por " + str(tempo) + " segundos"
+    if rotulo is not None:
+        texto = rotulo + ": " + texto
+    print_log(texto)
+    time.sleep(tempo)
 
+# ----------------------------------------------------------------------------------------------------------------------
 # Parâmetros de configuração da comunicação http
 # ---------------------------------------------------------------------------
 def set_http_timeout(timeout):
@@ -749,7 +761,7 @@ def sapisrv_inicializar(*args, **kwargs):
 # Parâmetros:
 #   programa: Nome do programa
 #   ip (opcional): IP da máquina
-def sapisrv_reportar_erro_cliente(erro):
+def _sapisrv_reportar_erro_cliente(erro):
     # Lista de parâmetros
     param = dict()
     param['erro'] = erro
@@ -773,6 +785,35 @@ def sapisrv_reportar_erro_cliente(erro):
 
     # Não tem o que retornar
     return True
+
+
+# Registra mensagem de erro do cliente
+def sapisrv_reportar_erro(*arg):
+    linha = concatena_args(*arg)
+    try:
+        # Registra no log (local)
+        print_log("ERRO: ", linha)
+
+        # Reportanto ao servidor, para registrar no log do servidor
+        _sapisrv_reportar_erro_cliente(linha)
+        print_log("Erro reportado ao servidor")
+
+    except Exception as e:
+        # Se não conseguiu reportar ao servidor, deixa para lá
+        # Afinal, já são dois erros seguidos (pode ser que tenha perdido a rede)
+        print_log("Não foi possível reportar o erro ao servidor: ", str(e))
+
+
+# Registra mensagem de erro do cliente relacionado com uma tarefa
+def sapisrv_reportar_erro_tarefa(codigo_tarefa, texto_erro):
+
+    linha="[[tarefa:" + codigo_tarefa+ "]] " + texto_erro
+    sapisrv_reportar_erro(linha)
+    # Registra diretamente na situação da tarefa
+    sapisrv_atualizar_status_tarefa_informativo(
+        codigo_tarefa=codigo_tarefa,
+        texto_status="ERRO: " + texto_erro
+    )
 
 
 # Obtem a configuração de um programa cliente
@@ -1068,6 +1109,7 @@ def sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status):
 
         # Alguma coisa está impedindo tarefa de ser encontrada
         if (not sucesso):
+            debug("A consulta da tarefa falhou")
             # Ignora atualização, pois o registro do status em andamento é apenas informativo
             return False
 
@@ -1092,6 +1134,7 @@ def sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status):
         # Se ocorrer algum erro, ignora (registrando no log)
         # Afinal, o status em andamento é apenas informativo
         if not ok:
+            debug("Não foi possível atualizar o status: ", msg_erro)
             return False
 
     except BaseException as e:
@@ -1295,6 +1338,53 @@ def sapisrv_chamar_programa_sucesso_ok(programa, parametros, registrar_log=False
         erro_fatal("Resposta inesperada para ", programa, " => ", msg_erro)
 
     return dados
+
+
+
+# Aborta tarefa.
+# Retorna False sempre, para repassar para cima
+def sapisrv_abortar_tarefa(codigo_tarefa, texto_status):
+
+    erro="Abortando [[tarefa:" + codigo_tarefa+ "]] em função de ERRO: " + texto_status
+
+    # Registra em log
+    print_log(erro)
+
+    # Reportar erro para ficar registrado no servidor
+    # Desta forma, é possível analisar os erros diretamente
+    sapisrv_reportar_erro(erro)
+
+    # Registra situação de devolução
+    sapisrv_troca_situacao_tarefa_loop(
+        codigo_tarefa=codigo_tarefa,
+        codigo_situacao_tarefa=GAbortou,
+        texto_status=texto_status
+    )
+
+    # Ok
+    print_log("Execução da tarefa abortada")
+
+    return False
+
+
+# Atualiza arquivo de texto no servidor
+# Fica em loop até conseguir
+def sapisrv_armazenar_texto_tarefa(codigo_tarefa, titulo, conteudo):
+    # Se a atualização falhar, fica tentando até conseguir
+    # Se for problema transiente, vai resolver
+    # Caso contrário, algum humano irá mais cedo ou mais tarde intervir
+    while not sapisrv_armazenar_texto(tipo_objeto='tarefa',
+                                      codigo_objeto=codigo_tarefa,
+                                      titulo=titulo,
+                                      conteudo=conteudo
+                                      ):
+        print_log("Falhou upload de texto para tarefa [", codigo_tarefa, "]. Tentando novamente")
+        dormir(60)  # Tenta novamente em 1 minuto
+
+    # Ok, conseguiu atualizar
+    print_log("Efetuado upload de texto [", titulo, "] para tarefa [", codigo_tarefa, "]")
+
+
 
 
 # Retorna o nome do ambiente de execução
@@ -1717,6 +1807,10 @@ def concatena_args(*arg):
     s=s.strip()
 
     return s
+
+# Sintaxe mais óbvia
+def texto(*arg):
+    return concatena_args(*arg)
 
 # Retorna verdadeiro se está em modo background
 # Neste modo, não exibe a saída regular na console (stdout)
@@ -2274,6 +2368,10 @@ def ajustar_para_path_longo(path):
     if ":" in path:
         return path
 
+    # Se no caminho não contém \\ não faz sentido ajustar (ex: ..\pasta1)
+    if ('\\\\' not in path):
+        return path
+
     # O separador não pode ser /, tem que ser \
     # Como \ é escape, tem que dobrar \\.
     path = path.replace('/', os.sep).replace('\\', os.sep)
@@ -2753,6 +2851,22 @@ def conectar_storage_atualizacao_ok(dados_storage):
     )
 
     return ponto_montagem
+
+
+
+# =======================================================================================================
+# Movimentação de pastas no storage
+# =======================================================================================================
+
+def mover_lixeira(pasta):
+    # Todo: Implementar lixeira
+    print_log("Movendo para lixeira: ", pasta)
+    die('saplib ponto2765')
+
+def mover_pasta_storage(pasta_origem, pasta_destino):
+    print_log("Movendo pasta ", pasta_origem, "para", pasta_destino)
+    os.rename(pasta_origem, pasta_destino)
+    print_log("Movimentado com sucesso")
 
 
 

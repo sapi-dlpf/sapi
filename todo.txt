@@ -17,13 +17,32 @@ Ajustes diversos:
 
 * Trocar senha de atualização das contas SAPI nos servidores (e nos arquivos de configuração)
 
-Versão 2.0)
+Versão 2.0:
+Bugs:
+* Aumentar tamanho da operação para 15 caracteres (8 está muito pequeno)
+* Para desfazer uma tarefa para a qual foi reportado a inexiquilidade, tem que excluir a tarefa.
+  * Permitir excluir tarefa de imagem que não tenha pasta.
+* Ver bugs para o pfeifer:
+  ** Quando foi utilizar o *s3g no sapi_cellebrite, abriu uma outra solicitação de exame.
+  ** No sapi_laudo, na execução da criação do laudo, caiu em um memorando errado
+  ** No sapi_laudo, depois que o laudo foi criado, não apareceu na tela...tem que dar refresh.
+* sapi-cellebrite: Mostrar no acompanhamento a quantidade de arquivos copiados também => 13% (28.5GB, 125.714 arquivos) Taxa:....
+* Configurar as máquinas de storage, para quando voltar a energia, permanecerem desligadas....
 * sapi_exame: Dar aviso/esclarecimento sobre mídia de destino, quando o usuário tentar colocar a mídia como destino e não tem mídia de destino.
 * sapi_imagem
 * Exclusões de pastas: Jogar para o garbage coletor, para ser mais rápido
 * Testes/ajustes no sapi_iped
 * Ajsutes no sapi_atualiza_iped
 * Novo storage GTPI-STO-03
+* Para tarefa abortada, mudar padrão no SETEC3. Talvez um fundo VERMELHO, com letras brancas
+* Parse do log do tableau: Quando os números de séries USB e dispositivo são iguais,
+  significa que pegou o número de série do USB. Neste caso, deixa em branco o número de série do
+  dispositivo, pois não reconheceu esta informação.
+
+
+Futuro:
+http://www.forensicswiki.org/wiki/Libewf
+- Tem bind para python. Talvez seja possível montar o E01 e pegar o número de série, conferir volumes, etc
 
 =======================================================================================================================
 Componentes PYTHON:

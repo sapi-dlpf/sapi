@@ -243,7 +243,7 @@ def abrir_browser_setec3_exame(codigo_solicitacao_exame_siscrim):
     debug("Aberto URL",url)
 
 def abrir_browser_siscrim(pagina_parametros, descricao_pagina=None):
-    pagina_parametros="controle_documento.php?action=elaborar&objeto_pai=33316600&categoria=2"
+    #pagina_parametros="controle_documento.php?action=elaborar&objeto_pai=33316600&categoria=2"
     url = urllib.parse.urljoin(get_parini('url_base_siscrim'),pagina_parametros)
     webbrowser.open(url)
     if descricao_pagina is not None:

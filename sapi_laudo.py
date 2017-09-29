@@ -55,7 +55,7 @@ if sys.version_info <= (3, 0):
 # GLOBAIS
 # =======================================================================
 Gprograma = "sapi_laudo"
-Gversao = "1.8.1"
+Gversao = "1.8.2"
 
 # Para gravação de estado
 Garquivo_estado = Gprograma + "v" + Gversao.replace('.', '_') + ".sapi"
@@ -3142,7 +3142,6 @@ def criar_novo_laudo(matricula):
 
         # Ok, selecionado
         solicitacao = lista_solicitacoes[ix_solicitacao]
-
         pagina_parametros = "controle_documento.php?action=elaborar&"\
                             +"objeto_pai="+solicitacao["codigo_documento_externo"]\
                             +"&categoria=2"
