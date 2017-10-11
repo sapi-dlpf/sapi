@@ -56,11 +56,6 @@ Gversao = "1.8.1"
 Gconfiguracao = dict()
 Gcaminho_pid = "sapi_tableau_pid.txt"
 
-# Pasta raiz da área temporária do tableau
-# Todos os storages tem que ter a mesma estrutura, no caso \storage\tableau
-# Como o programa é iniciado sempre na pasta \storage\sistema,
-# temos que subir e descer para a pasta tableau
-Gpasta_raiz_tableau = "..\\tableau"
 
 # Configuração de limites para avisos
 # Irá gerar mensagem de aviso,
@@ -70,10 +65,15 @@ GlimitePercentualErroLeitura = 1
 # Cache de tarefas, para evitar releitura
 Gcache_tarefa = dict()
 
+# Pasta raiz do tableau (será definida durante a inicialização)
+Gpasta_raiz_tableau = None
+
 # Radical base a partir do qual se formam
 # os nomes dos arquivos (.E01, .E02, .log, etc)
-Gtableau_imagem = "tableau-imagem"
+Gtableau_imagem = "image"
 
+# Tipo de componente, para que laudo possa montar descrição adequada
+Gsapi_tipo_componente = 'armazenamento'
 
 # **********************************************************************
 # PRODUCAO DEPLOYMENT AJUSTAR
@@ -95,6 +95,10 @@ def main():
     # Processa parâmetros logo na entrada, para garantir que configurações
     # relativas a saída sejam respeitadas
     sapi_processar_parametros_usuario()
+
+    #Teste da lixeira
+    #pasta="Memorando_1880-17_CF_PR-26/item01Arrecadacao01a/item01Arrecadacao01a_imagem"
+    #mover_lixeira(pasta)
 
     # Se não estiver em modo background (opção do usuário),
     # liga modo dual, para exibir saída na tela e no log
@@ -138,23 +142,22 @@ def main():
 # ===================================================================================
 def inicializar():
     global Gconfiguracao
+    global Gpasta_raiz_tableau
 
     try:
         # Efetua inicialização
         # Neste ponto, se a versão do sapi_tableau estiver
         # desatualizada será gerado uma exceção
         print_log("Efetuando inicialização")
-        nome_arquivo_log = "log_sapi_tableau.txt"
+        # nome_arquivo_log = "log_sapi_tableau.txt"
         sapisrv_inicializar(Gprograma, Gversao,
-                            auto_atualizar=True,
-                            nome_arquivo_log=nome_arquivo_log)
+                            auto_atualizar=True)
         print_log('Inicializado com sucesso', Gprograma, ' - ', Gversao)
 
         # Obtendo arquivo de configuração
         print_log("Obtendo configuração")
         Gconfiguracao = sapisrv_obter_configuracao_cliente(Gprograma)
         print_log(Gconfiguracao)
-
 
     except SapiExceptionProgramaFoiAtualizado as e:
         print_log("Programa foi atualizado para nova versão em: ", e)
@@ -191,6 +194,10 @@ def inicializar():
         # Encerra sem sucesso
         return False
 
+
+    # Determinação de pastas default
+    Gpasta_raiz_tableau = montar_caminho(get_parini('raiz_storage'), "tableau")
+
     # Tudo certo
     return True
 
@@ -205,8 +212,7 @@ def executar():
         print_log("Buscando tarefas de imagem para storage:", storage)
         (sucesso, msg_erro, tarefas_imagem) = sapisrv_chamar_programa(
             "sapisrv_obter_tarefas_imagem.php",
-            {'storage': storage
-             }
+            {'storage': storage }
         )
     except BaseException as e:
         erro = "Não foi possível recuperar a situação atualizada das tarefas do servidor"
@@ -219,6 +225,10 @@ def executar():
     # var_dump(tarefas_imagem)
     # die('ponto1581')
 
+    if len(tarefas_imagem)==0:
+        print_log("Não existe nenhuma tarefa de imagem para ser processada")
+        return
+
     print_log("Foram recuperadas", len(tarefas_imagem), "tarefas de imagem")
 
     for t in tarefas_imagem:
@@ -226,19 +236,21 @@ def executar():
         codigo_tarefa = t['codigo_tarefa']
         codigo_situacao_tarefa = int(t['codigo_situacao_tarefa'])
 
-        # Se está na fila para criação de pasta,
-        # Cria pasta para tarefa
         if codigo_situacao_tarefa == GFilaCriacaoPasta:
+            # Se está na fila para criação de pasta,
+            # Cria pasta para tarefa
             criar_pasta_tableau(codigo_tarefa)
-
-        # Se está aguardando PCF,
-        # Verifica se upload já iniciou
-        if codigo_situacao_tarefa == GAguardandoPCF:
+        elif codigo_situacao_tarefa == GAguardandoPCF:
+            # Se está aguardando PCF,
+            # Verifica se upload já iniciou
             monitorar_tarefa(codigo_tarefa)
-
-        # Se já está executando, monitora tarefa
-        if codigo_situacao_tarefa == GTableauExecutando:
+        elif codigo_situacao_tarefa == GTableauExecutando:
+            # Se já está executando, monitora tarefa
             monitorar_tarefa(codigo_tarefa)
+        else:
+            # Nada a fazer para as demais situações
+            print_log("Nenhuma ação tomada para tarefa", codigo_tarefa, "que está com situação", codigo_situacao_tarefa)
+
 
 
 # Obtem dados de uma tarefa
@@ -255,6 +267,7 @@ def obter_tarefa_cache(codigo_tarefa):
     # Recupera tarefa do servidor
     print_log("Buscando dados da tarefa", codigo_tarefa)
     tarefa = recupera_tarefa_do_setec3(codigo_tarefa)
+    print_log("Dados recuperados")
 
     # Armazena em cache
     Gcache_tarefa[codigo_tarefa] = tarefa
@@ -265,21 +278,42 @@ def obter_tarefa_cache(codigo_tarefa):
 
 # Retorna o caminho para a pasta temporária do tableau da tarefa
 def obter_caminho_pasta_tableau(tarefa):
+
+    #var_dump(tarefa)
+    #die('ponto282')
+
+    # identificador do sujeito responsável pelo exame
+    dados_exame = tarefa["dados_solicitacao_exame"]["dados_exame"]
+    nome = dados_exame["nome_guerra_sujeito_posse"]
+    matricula = dados_exame["matricula_sujeito_posse"]
+    sujeito = nome + "_" + matricula
+
+    # Protocolo
     protocolo = tarefa["dados_solicitacao_exame"]["numero_protocolo"]
     protocolo = protocolo.zfill(5)
-    pasta_material = "proto" + protocolo + "_mat" + tarefa["dados_item"]["material_simples"]
-    # Santiiza
-    pasta_material = pasta_material.replace("/", "_")
-    pasta_material = pasta_material.replace(" ", "_")
-    pasta_tableau = montar_caminho(Gpasta_raiz_tableau,
-                                   pasta_material
-                                   )
+    # Tirei o ano, para ficar mais curto
+    #protocolo = "p_" + protocolo + "_" + tarefa["dados_solicitacao_exame"]["ano_protocolo"]
+    protocolo = "p_" + protocolo + "_" + tarefa["dados_solicitacao_exame"]["ano_protocolo"]
+    protocolo = sanitiza_parte_caminho(protocolo)
+
+    # Material
+    material = "mt_" + tarefa["dados_item"]["material_simples"]
+    material = sanitiza_parte_caminho(material)
+
+    # Agrupa
+    pasta_material = montar_caminho(sujeito, protocolo, material)
+    pasta_tableau  = montar_caminho(Gpasta_raiz_tableau, pasta_material)
+
+    #var_dump(pasta_tableau)
+    #var_dump(pasta_material)
+    #die('ponto302')
 
     return (pasta_tableau, pasta_material)
 
 
 # Cria pasta temporária para o tableau, caso ainda não exista
 def criar_pasta_tableau(codigo_tarefa):
+
     label_log = "[Tarefa " + str(codigo_tarefa) + "]"
 
     print_log(label_log, "Criação de pasta para tarefa")
@@ -291,7 +325,13 @@ def criar_pasta_tableau(codigo_tarefa):
         print_log(label_log, "Criação de pasta falhou, pois não foi possível recuperar tarefa")
         return False
 
-    # Verifica se pasta raiz do tableau existe
+    #var_dump(tarefa)
+    #die('ponto308')
+
+    # Nome do storage
+    nome_storage = tarefa["dados_storage"]["maquina_netbios"]
+
+    # Verifica se pasta temporária para tableau existe
     # ------------------------------------------------------------------
     if not os.path.exists(Gpasta_raiz_tableau):
         print_log("Não foi encontrada pasta raiz do tableau: ", Gpasta_raiz_tableau)
@@ -329,7 +369,10 @@ def criar_pasta_tableau(codigo_tarefa):
         sapisrv_troca_situacao_tarefa_loop(
             codigo_tarefa=codigo_tarefa,
             codigo_situacao_tarefa=GAguardandoPCF,
-            texto_status="Pasta para upload do tableau foi criada: " + pasta_material
+            texto_status=texto("Pasta para recepção de tableau criada em",
+                               pasta_tableau,
+                               "no storage",
+                               nome_storage)
         )
 
     # Tudo certo
@@ -346,7 +389,11 @@ def monitorar_tarefa(codigo_tarefa):
     # não há mais nada a fazer
     if tarefa_sendo_acompanhada(codigo_tarefa):
         # Não tem mais nada a fazer
+        print_log("Tarefa", codigo_tarefa, "já está sendo monitorada")
         return True
+
+
+    print_log("Inicio de monitaramento da tarefa", codigo_tarefa)
 
     # Recupera dados da tarefa do cache,
     # para evitar sobrecarregar o servidor com requisições
@@ -354,10 +401,12 @@ def monitorar_tarefa(codigo_tarefa):
 
     # Pasta para a tarefa
     (pasta_tableau, pasta_material) = obter_caminho_pasta_tableau(tarefa)
+    print_log("Pasta de tableau da tarefa: ", pasta_tableau)
 
     # Se pasta não existe, tem algo erro aqui
     if not os.path.exists(pasta_tableau):
-        erro = texto("Pasta do tableau", pasta_tableau, "não existe")
+        # Isto aqui não deveria acontecer nunca...foi feita exclusão manual?
+        erro = texto("Pasta do tableau não existe")
         sapisrv_reportar_erro_tarefa(codigo_tarefa, erro)
         return False
 
@@ -372,6 +421,7 @@ def monitorar_tarefa(codigo_tarefa):
     if carac["tamanho_total"] == 0:
         # Pasta está zerada (tamanho zero)
         # Logo, ainda não tem nada a fazer
+        print_log("Tarefa ainda sem dados na pasta de temporária. Aguardar início do tableau")
         return False
 
     # Acompanha execução da tarefa de cópia
@@ -416,6 +466,10 @@ def monitorar_tarefa(codigo_tarefa):
 
         # A pasta de destino é a pasta onde serão armazenados os arquivos .E01 .E02 etc
         pasta_destino = "/".join(partes)
+        pasta_item = "/".join(partes[:-1])
+        # Adiciona caminho relativo (uma vez que está sendo executado na pasta /sistema)
+        pasta_destino = montar_caminho(get_parini('raiz_storage'), pasta_destino)
+        pasta_item = montar_caminho(get_parini('raiz_storage'), pasta_item)
 
         # Inicia tarefa em background
         # ----------------------------
@@ -424,6 +478,7 @@ def monitorar_tarefa(codigo_tarefa):
             args=(codigo_tarefa,
                   item,
                   pasta_tableau,
+                  pasta_item,
                   pasta_destino,
                   nome_base,
                   nome_arquivo_log,
@@ -462,6 +517,7 @@ def background_acompanhar_tableau(
         codigo_tarefa,
         item,
         pasta_tableau,
+        pasta_item,
         pasta_destino,
         nome_base,
         nome_arquivo_log,
@@ -546,13 +602,19 @@ def background_acompanhar_tableau(
             registrado_subpasta = True
 
         # Verifica se já tem o primeiro arquivo
-        # Por convenção (fixado no tableau),
-        # o arquivo de imagem do tableau deve ter nome
-        # tableau_imagem.E01
-        primeiro_arquivo = Gtableau_imagem + ".E01"
-        primeiro_arquivo_partial = Gtableau_imagem + ".E01" + ".partial"
+        # Por convenção (fixado no tableau), grava será
+        # image.E01.partial (se ainda não terminou o primeiro arquivo)
+        # image.E01 (se já terminou o primeiro arquivo)
+        # Se pasta já foi renomeada, então será algo como
+        # item01Arrecadacao01.E01
+        nome_possiveis=list()
+        for prefixo in (Gtableau_imagem, nome_base):
+            for sufixo in (".E01", ".E01.partial"):
+                nome_arquivo=prefixo + sufixo
+                nome_possiveis.append(nome_arquivo)
+
         encontrado_primeiro = False
-        for nome_arquivo in (primeiro_arquivo, primeiro_arquivo_partial):
+        for nome_arquivo in nome_possiveis:
             caminho_primeiro_arquivo = montar_caminho(subpasta, nome_arquivo)
             if os.path.isfile(caminho_primeiro_arquivo):
                 print_log("Encontrado arquivo", caminho_primeiro_arquivo)
@@ -569,17 +631,28 @@ def background_acompanhar_tableau(
             return
 
         # Verifica se já existe arquivo de log
-        arquivo_log = Gtableau_imagem + ".log"
-        caminho_arquivo_log = montar_caminho(subpasta, arquivo_log)
-        if os.path.isfile(caminho_arquivo_log):
+        print_log("Verificando se já existe arquivo de log")
+        encontrado_log = False
+        for prefixo in (Gtableau_imagem, nome_base):
+            arquivo_log = prefixo + ".log"
+            caminho_arquivo_log = montar_caminho(subpasta, arquivo_log)
+            if os.path.isfile(caminho_arquivo_log):
+                encontrado_log = True
+                break
+            else:
+                print_log("Não encontrado arquivo", arquivo_log)
+
+        if encontrado_log:
             print_log("Encontrado arquivo de log:", caminho_arquivo_log)
             sapisrv_atualizar_status_tarefa_informativo(
                 codigo_tarefa=codigo_tarefa,
                 texto_status=texto("Detectado existência de arquivo de log, "
                                    "indicando que tableau finalizou")
             )
-            # Interrompe loop, pois agora irá somente analisar o resultado do log
+            print_log("Interrompe loop de acompanhamento. Será analisado resultado")
             break
+        else:
+            print_log("Ainda não existe arquivo de log")
 
         # Calcula o tamanho da pasta do tableau e atualiza
         carac = obter_caracteristicas_pasta_ok(subpasta)
@@ -587,7 +660,8 @@ def background_acompanhar_tableau(
             tam_pasta_tableau = carac.get("tamanho_total", None)
             sapisrv_atualizar_status_tarefa_informativo(
                 codigo_tarefa=codigo_tarefa,
-                texto_status="Tamanho atual da pasta temporária do tableau: " + converte_bytes_humano(tam_pasta_tableau)
+                texto_status="Tamanho atual da pasta temporária do tableau: " + converte_bytes_humano(tam_pasta_tableau),
+                tamanho_destino_bytes = tam_pasta_tableau
             )
         else:
             print_log("Falhou na determinação do tamanho da pasta do tableau")
@@ -595,8 +669,8 @@ def background_acompanhar_tableau(
         # Pausa para evitar sobrecarga no servidor
         dormir(60, "pausa entre atualizações de status")
 
-        # Fim do While - Loop eterno
-        # --------------------------
+        # Fim do While - Fica em loop até achar arquivo de log
+        # ----------------------------------------------------
 
 
     # Faz upload do arquivo de log do tableau
@@ -641,19 +715,62 @@ def background_acompanhar_tableau(
             # Adiciona erro
             erro_adicional = texto("E também não foi possível renomear pasta com erro", subpasta, ":", e)
             erro = texto(erro, erro_adicional)
-            var_dump(erro)
-            die('ponto328')
             return
 
         # Aborta tarefa
         sapisrv_abortar_tarefa(codigo_tarefa, erro)
         return
 
-    # Move pasta temporária para pasta definitiva
+    # Ajusta nomes dos arquivos de imagem e log, para ficarem com nomes padronizados
+    # Exemplo: item01Arrecadacao01.E01
+    # Ajusta nomes dos arquivos na pasta de destino
+    # Exemplo: tableau-imagem.E01 => item01Arrecadacao01.E01
+    # -------------------------------------------------------------------------------
+    try:
+        sapisrv_atualizar_status_tarefa_informativo(
+            codigo_tarefa=codigo_tarefa,
+            texto_status="Ajustando nomes de arquivos da pasta definitiva"
+        )
+
+        # Ajusta nomes dos arquivos na pasta de destino
+        for nome_arquivo in os.listdir(subpasta):
+
+            nome_arquivo=montar_caminho(subpasta, nome_arquivo)
+
+            if not os.path.isfile(nome_arquivo):
+                continue
+
+            if (Gtableau_imagem not in nome_arquivo and
+                nome_base not in nome_arquivo):
+                print_log("Arquivo inesperado na pasta de destino: ", nome_arquivo)
+                continue
+
+            nome_novo = nome_arquivo.replace(Gtableau_imagem, nome_base)
+            print_log("Renomeando",nome_arquivo, "para", nome_novo)
+            os.rename(nome_arquivo, nome_novo)
+
+        sapisrv_atualizar_status_tarefa_informativo(
+            codigo_tarefa=codigo_tarefa,
+            texto_status="Nomes de arquivos ajustados"
+        )
+
+    except Exception as e:
+        # Isto não deveria acontecer nunca
+        erro = "Não foi possível ajustar nomes dos arquivos: " + str(e)
+        sapisrv_abortar_tarefa(codigo_tarefa, erro)
+        return
+
+
+
+    # Move pasta temporária para pasta definitiva. Exemplo:
+    # De:   tableau\Ronaldo_14940\proto_00943_2017\mat_1023_17_parte_2\2071005050_09_01_05
+    # para:
+    #
     # -------------------------------------------------------------------------------
     try:
 
         # Se pasta de destino já existe, move para lixeira
+        # Isto pode acontecer se a tarefa foi reiniciada
         if os.path.exists(pasta_destino):
             sapisrv_atualizar_status_tarefa_informativo(
                 codigo_tarefa=codigo_tarefa,
@@ -662,12 +779,16 @@ def background_acompanhar_tableau(
             # Move pasta de destino para lixeira
             mover_lixeira(pasta_destino)
 
+        # Se não existe pasta pai, cria
+        if not os.path.exists(pasta_item):
+            os.makedirs(pasta_item)
+
         # Move pasta temporária para definitiva
         sapisrv_atualizar_status_tarefa_informativo(
             codigo_tarefa=codigo_tarefa,
             texto_status="Movendo pasta temporária para definitiva"
         )
-        mover_pasta_storage(pasta_tableau, pasta_destino)
+        mover_pasta_storage(subpasta, pasta_destino)
 
         sapisrv_atualizar_status_tarefa_informativo(
             codigo_tarefa=codigo_tarefa,
@@ -680,31 +801,6 @@ def background_acompanhar_tableau(
         sapisrv_abortar_tarefa(codigo_tarefa, erro)
         return
 
-    # Ajusta nomes dos arquivos na pasta de destino
-    # Exemplo: tableau-imagem.E01 => item01Arrecadacao01.E01
-    # -------------------------------------------------------------------------------
-    try:
-        sapisrv_atualizar_status_tarefa_informativo(
-            codigo_tarefa=codigo_tarefa,
-            texto_status="Ajustando nomes de arquivos da pasta definitiva"
-        )
-
-        # Ajusta nomes dos arquivos na pasta de destino
-        for nome_arquivo in pasta_destino:
-            nome_atual = montar_caminho(pasta_destino, nome_arquivo)
-            nome_novo = nome_atual.replace(Gtableau_imagem, nome_base)
-            os.rename(nome_atual, nome_novo)
-
-        sapisrv_atualizar_status_tarefa_informativo(
-            codigo_tarefa=codigo_tarefa,
-            texto_status="Nomes de arquivos ajustados"
-        )
-
-    except Exception as e:
-        # Isto não deveria acontecer nunca
-        erro = "Não foi possível ajustar nomes dos arquivos: " + str(e)
-        sapisrv_abortar_tarefa(codigo_tarefa, erro)
-        return
 
     # Atualiza situação da tarefa para sucesso
     # ----------------------------------------
@@ -800,7 +896,7 @@ def _parse_arquivo_log_tableau(caminho_arquivo_log, item):
     blocos["verification"] = "---Readback Verification Results"
     blocos["fim"] = "----End of TD3"
 
-    # Definicção de tags de campos
+    # Definição de tags de campos
     tags = dict()
     tags["erro_geral"] = "<<< CAUTION: "
     tags["task"] = "Task: "
@@ -818,7 +914,8 @@ def _parse_arquivo_log_tableau(caminho_arquivo_log, item):
     tags["interface"] = "Interface: "
     tags["modelo"] = "Model: "
     tags["firmware_revision"] = "Firmware revision:"
-    tags["usb_serial_number"] = "USB Serial number:"
+    tags["0_usb_serial_number"] = "USB Serial number:"
+    tags["1_serial_number"] = "Serial number:"
     tags["capacity"] = "Capacity in bytes:"
     tags["block_size"] = "Block Size:"
     tags["block_count"] = "Block Count:"
@@ -830,8 +927,8 @@ def _parse_arquivo_log_tableau(caminho_arquivo_log, item):
     tags["total_erros"] = "Total errors:"
     tags["aquisition_md5"] = "Acquisition MD5:"
     tags["aquisition_sha1"] = "Acquisition SHA-1:"
-    tags["verification_md5"] = "Verification MD5: "
-    tags["verification_sha1"] = "Verification SHA-1:"
+    #tags["verification_md5"] = "Verification MD5: "
+    #tags["verification_sha1"] = "Verification SHA-1:"
 
     # Processa o arquivo de log
     with open(caminho_arquivo_log, "r") as fentrada:
@@ -853,7 +950,7 @@ def _parse_arquivo_log_tableau(caminho_arquivo_log, item):
                     break
 
             # Verifica se é linha de tag conhecido
-            for t in tags:
+            for t in sorted(tags):
                 if tags[t] in linha:
                     id_tag = t
                     # Separa valor
@@ -899,7 +996,8 @@ def _parse_arquivo_log_tableau(caminho_arquivo_log, item):
      'source:firmware_revision': 'PMAP',
      'source:interface': 'USB',
      'source:modelo': 'Kingston DataTraveler 108',
-     'source:usb_serial_number': '0060E049DF71EBB100005893',
+     'source:0_usb_serial_number': '0060E049DF71EBB100005893',
+     'source:1_serial_number': 'NA8NMGTN',
      'destination:share_name': '//10.41.87.235/tableau',
      'result:aquisition_md5': 'cfdd6b92b8599309bbc8901d05ec2927',
      'result:aquisition_sha1': 'bb6bc7a155d22e748148b7f6100d50edabdb324c',
@@ -907,12 +1005,15 @@ def _parse_arquivo_log_tableau(caminho_arquivo_log, item):
      'result:chunks_written': '2',
      'result:first_chunk': '1023_17_parte_1/2017-09-21_14-31-52/temporario.E01',
      'result:output_file_format': 'E01 - EnCase format',
-     'result:total_erros': '0',
-     'verification:status': 'Verified',
-     'verification:verification_md5': 'cfdd6b92b8599309bbc8901d05ec2927',
-     'verification:verification_sha1': 'bb6bc7a155d22e748148b7f6100d50edabdb324c'
+     'result:total_erros': '0'
      }
     '''
+
+    # Não exigem mais verificação
+    # Isto será feito no servidor
+    #'verification:status': 'Verified',
+    #'verification:verification_md5': 'cfdd6b92b8599309bbc8901d05ec2927',
+    #'verification:verification_sha1': 'bb6bc7a155d22e748148b7f6100d50edabdb324c'
 
     # Duplicação não foi finalizada
     erro_geral = valores.get('start:erro_geral', None)
@@ -922,16 +1023,27 @@ def _parse_arquivo_log_tableau(caminho_arquivo_log, item):
                      " para mais detalhes")
         return (False, erro, {})
 
+    # Verificação não deveria estar ligada
+    # Se estiver ligada, acusa um erro, para evitar que a lentidão afete outros
+    # procedimentos
     # Verifica se o resultado é sucesso
     # Se não for sucesso, não tem por que prosseguir,
     # pois operação terá que ser refeita
     resultado = valores.get('verification:status', None)
-    if resultado is None:
-        erro = texto("Não foi possível identificar resultado final da imagem",
-                     "(não encontrado Bloco Readback Verification Results ",
-                     "com campo Status: Verified). ",
-                     "Confirme se opção de verificação está ativa.")
+    # No início, exigia verificação. Agora, não pode ter verificação
+    # if resultado is None:
+    #     erro = texto("Não foi possível identificar resultado final da imagem",
+    #                  "(não encontrado Bloco Readback Verification Results ",
+    #                  "com campo Status: Verified). ",
+    #                  "Confirme se opção de verificação está ativa.")
+    #     return (False, erro, {})
+    if resultado is not None:
+        erro = texto("A verificação do Tableau está ligada.",
+                     " Isto dobra o tempo de imagem.",
+                     " Desligue a verificação"
+                     );
         return (False, erro, {})
+
 
     # -----------------------------------------------------------------------------
     # Duplicação efetuada com SUCESSO
@@ -975,8 +1087,18 @@ def _parse_arquivo_log_tableau(caminho_arquivo_log, item):
         # Model: Seagate Expansion
         'source:modelo': 'sapiModelo',
 
-        # USB Serial number: NA8NMGTN
-        'Serial number': 'sapiSerial',
+        # Tem duas informações serial: da USB e do dispositivo
+        # Aparentemente, todos os dispositivos tem uma identificação serial USB
+        # Contudo, nem todos também disponibilizam a sua identificação serial
+        # do dispositivo interno
+        # Por exemplo: Um hd externo terial o serial da USB e também o serial do próprio HD
+        # que está dentro do case USB.
+
+        # USB Serial number: 0060E049DF71EBB100005893
+        'source:0_usb_serial_number': 'sapiSerialUSB',
+
+        # Serial number: NA8NMGTN
+        'source:1_serial_number': 'sapiSerialDispositivo',
 
         # Capacity in bytes: 3,926,949,888 (3.9 GB)
         'source:capacity': 'sapiTamanhoBytes',
@@ -1018,8 +1140,11 @@ def _parse_arquivo_log_tableau(caminho_arquivo_log, item):
         erro = "Não foi possível converter tamanho da mídia para inteiro:" + t
         return (False, erro, {})
 
+    dcomp['sapiTipoComponente'] = Gsapi_tipo_componente
     dcomp['sapiTamanhoBytes'] = tamanho
     dcomp['sapiTamanhoBytesHumano'] = converte_bytes_humano(tamanho)
+    dcomp['sapiTamanhoBytesHumanoMil'] = converte_bytes_humano(tamanho,
+                                                            utilizar_base_mil=True)
 
     # ------------------------------------------------------------------------------
     # Ajuste no tempo
@@ -1153,21 +1278,28 @@ def _parse_arquivo_log_tableau(caminho_arquivo_log, item):
             formatado = formatado.replace('.', ',')
             dcomp['sapiErrosLeituraPercentualHumano'] = formatado
 
-        # Se o limite de erro ultrapassar um certo limite
-        # gera um aviso, que deverá ser confirmado pelo usuário
-        # para que o processamento prossiga
+        # Se o limite de erro ultrapassar um certo limite gera um aviso
         if percentual_erro > GlimitePercentualErroLeitura:
             avisos.append("Total de erros (" + dcomp['sapiErrosLeituraPercentualHumano']
                           + ") excede limite (" + str(GlimitePercentualErroLeitura) + "%)")
+            texto_resultado_duplicao = ''
+
+        # Resultado resumido da duplicação
+        texto_resultado_duplicacao = ''
+        if total_bytes_erro==0:
+            texto_resultado_duplicacao = 'Dispositivo duplicado com sucesso'
+        else:
+            texto_resultado_duplicacao = 'Dispositivo duplicado, porém ocorreram erros de leitura.'
+        dcomp['sapiResultadoDuplicacao'] = texto_resultado_duplicacao
 
     # ------------------------------------------------------------------------------
     # Tratamento para hashes
     # ------------------------------------------------------------------------------
-    # Verification MD5:   cfdd6b92b8599309bbc8901d05ec2927
-    # 'verification:verification_md5'
+    #Acquisition MD5:   cfdd6b92b8599309bbc8901d05ec2927
+    #'result:aquisition_md5': 'cfdd6b92b8599309bbc8901d05ec2927',
 
-    # Verification SHA-1: bb6bc7a155d22e748148b7f6100d50edabdb324c
-    # 'verification:verification_sha1'
+    #Acquisition SHA-1: bb6bc7a155d22e748148b7f6100d50edabdb324c
+    #'result:aquisition_sha1': 'bb6bc7a155d22e748148b7f6100d50edabdb324c',
 
     '''
     sapiHashes =>
@@ -1178,23 +1310,23 @@ def _parse_arquivo_log_tableau(caminho_arquivo_log, item):
     '''
 
     # Armazena dados de hash
-    hashes = dict()
+    hashes = list()
 
     # Processa os hashes
     ix_hash = 0
     for tipo_hash in ('md5', 'sha1'):
         h = dict()
-        valor_hash = valores.get('verification:verification_' + tipo_hash, None)
+        valor_hash = valores.get('result:aquisition_' + tipo_hash, None)
         if valor_hash is not None:
-            h["sapiHashDescricao"] = "Hash " + tipo_hash + " de bytes lidos do " + item
+            h["sapiHashDescricao"] = "Hash " + tipo_hash.upper() + " de leitura do item " + item
             h["sapiHashValor"] = valor_hash
             h["sapiHashAlgoritmo"] = tipo_hash
         else:
             erro = "Não foi localizado o hash " + tipo_hash
             return (False, erro, {})
 
-        # Armazena no dicionário de hashs
-        hashes[ix_hash] = h
+        # Armazena na lista de hashes
+        hashes.append(h)
         ix_hash += 1
 
     # Finalizado com sucesso
@@ -1212,8 +1344,6 @@ def _parse_arquivo_log_tableau(caminho_arquivo_log, item):
     dados_relevantes['avisos'] = avisos
 
     return (True, None, dados_relevantes)
-
-
 
 # Abortar execução do programa
 # Esta rotina é invocada quando alguma situação exige que para a restauração da ordem

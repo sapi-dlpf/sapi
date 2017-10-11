@@ -19,15 +19,21 @@ Ajustes diversos:
 
 Versão 2.0:
 Bugs:
+* Tarefa de imagem já iniciada (já tem pasta de destino). Para excluir, tem que colocar na fila.
+  - Pode reiniciar? Se puder reiniciar, irá deixar excluir direto (sem colocar na fila)....
+  - O conceito tem que ser o mesmo do IPED....revisar
+* IPED: Fazer upload do Lista Arquivos.csv
+* Sapi_laudo: Avisar na tela de entrada, que está faltando a definição do tipo de mídia de destino.
+  - Avisar que usuário deve corrigir no SETEC3 (dar a dica do comando), e em seguida digitar *SG (para busca a nova situação)
+  - Não permitir comando *GL sem ter ajustado a mídia de destino.
+  - O *SG não está carregado a situação atual da 'midia de destino'...porque??
+* Configurar as máquinas de storage, para quando voltar a energia,
+  permanecerem desligadas (primeiro STO-03)
+* Configurar storage para não acordarem com teclado/mouse
 * Aumentar tamanho da operação para 15 caracteres (8 está muito pequeno)
-* Para desfazer uma tarefa para a qual foi reportado a inexiquilidade, tem que excluir a tarefa.
+* Para desfazer uma tarefa para a qual foi reportado a inexiquilidade,
+  tem que excluir a tarefa.
   * Permitir excluir tarefa de imagem que não tenha pasta.
-* Ver bugs para o pfeifer:
-  ** Quando foi utilizar o *s3g no sapi_cellebrite, abriu uma outra solicitação de exame.
-  ** No sapi_laudo, na execução da criação do laudo, caiu em um memorando errado
-  ** No sapi_laudo, depois que o laudo foi criado, não apareceu na tela...tem que dar refresh.
-* sapi-cellebrite: Mostrar no acompanhamento a quantidade de arquivos copiados também => 13% (28.5GB, 125.714 arquivos) Taxa:....
-* Configurar as máquinas de storage, para quando voltar a energia, permanecerem desligadas....
 * sapi_exame: Dar aviso/esclarecimento sobre mídia de destino, quando o usuário tentar colocar a mídia como destino e não tem mídia de destino.
 * sapi_imagem
 * Exclusões de pastas: Jogar para o garbage coletor, para ser mais rápido
@@ -38,15 +44,56 @@ Bugs:
 * Parse do log do tableau: Quando os números de séries USB e dispositivo são iguais,
   significa que pegou o número de série do USB. Neste caso, deixa em branco o número de série do
   dispositivo, pois não reconheceu esta informação.
+* Testar deployment do sapi_tableau direto do setec3
+
+Próxima:
+- sapi_laudo: Para contas de usuário (aparelho), separar por linha (uma conta em cada linha)...talvez se a conta for muito grande (testar...)
+- Quando tarefa foi abortada, tem que mostrar um icone mais significativo (ou cor) em sapi_exame.php
+- sapi_tarefa: Quando uma tarefa for reiniciada, ou alguma coisa assim, se deu tudo certo, retonar para sapi_exame e exibir mensagem de feedback lá. Se der erro, fica na mesma tela e exibe mensagem de erro.
+- Incluir a verificação da imagem (Ver ftkimager cli, instalei em d:\tempr)
+- Implementar verificação do E01 no storage utilizando o ewf_verify
+- Utilizar Robocopy para fazer as cópias.
+- sapi-cellebrite: Mostrar no acompanhamento a quantidade de arquivos copiados também => 13% (28.5GB, 125.714 arquivos) Taxa:....
+- Instalação do java hardcode (pasta específica, chamando em linha de comando hardcoded)
+- Quando tem mais do que um item, dar uma mensagem mais explícita (com cor),
+  indicando que não há necessidade de efetuar a decomposição...Talvez um botão de dica
+  - Teria que ser capaz de verificar se o material ainda não foi logicamente decomposto
+    (compara a quantidade de itens informado versus o quantidade do siscrim...se for diferente destacar material)
+- Dicas de como cadastrar material de destino...incluir link ao lado da opção que seleciona o material de destino, apontando para o wiki.
+- Para material que deve ser subdivido, melhorar interface. Alerar ser o material não foi subdivido, e mostra um ponto de exclamação ao lado do material.
+- Incluir na pasta um leia_me.txt
 
 
 Futuro:
 http://www.forensicswiki.org/wiki/Libewf
 - Tem bind para python. Talvez seja possível montar o E01 e pegar o número de série, conferir volumes, etc
 
+
+ftkimager (para verificar integridade da imagem):
+=================================================
+D:\tempr\ftkimager>
+ftkimager I:\desenvolvimento\sapi\dados_para_testes\tableau_imagem\pendrive_azul\pendrive_azul.E01 --verify
+AccessData FTK Imager v3.1.1 CLI (Aug 20 2012)
+Copyright 2006-2012 AccessData Corp., 384 South 400 West, Lindon, UT 84042
+All rights reserved.
+
+Verifying image...
+Image verification complete.
+
+D:\tempr\ftkimager>type resultado.txt
+[MD5]
+ Computed hash: 2ec0a74d7e00f4917d1768e5a6c9ad13
+ Image hash:    2ec0a74d7e00f4917d1768e5a6c9ad13
+ Verify result: Match
+[SHA1]
+ Computed hash: 7cce1e6b0d6da4fc8211ba995b12029694e670f3
+
+
 =======================================================================================================================
 Componentes PYTHON:
 =======================================================================================================================
+
+
 
 @sapi_lib
 ---------

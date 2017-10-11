@@ -136,7 +136,6 @@ Gconf_ambiente['prod'] = {
     'url_base_siscrim': 'https://ditec.pf.gov.br/sistemas/criminalistica/'
 }
 
-
 # Definido durante inicializacao
 # --------------------------------
 Ginicializado = False
@@ -166,6 +165,19 @@ Gpfilhos = dict()  # Processos filhos
 # Storage, verificacação
 Garquivo_controle='storage_sapi_nao_excluir.txt'
 
+
+# Estrutura do storage
+# --------------------
+# Todos os storages tem que ter a mesma estrutura
+# Caso a raiz seja diferente, dever executar com o parâmetro --raiz_storage
+# A estrutura do servidor é fixa
+# E:\sistema
+# E:\tableau
+# E:\Memorandoxxxx
+# E:\Memorandoyyy
+# As variáveis abaixo ajustam o caminho para chegar em diversas pastas
+# Default para storage
+Gdefault_raiz_storage = "E:\\"
 
 # Configuração de Tela
 # Todo: transferir para o sapicli
@@ -397,6 +409,8 @@ def sapi_processar_parametros_usuario():
                           action="store", dest="logfile", help="Arquivo para registro de log")
         parser.add_option("--logdir",
                           action="store", dest="logdir", help="Pasta onde será criado o arquivo de log. Pasta deve existir.")
+        parser.add_option("--raiz_storage",
+                          action="store", dest="raiz_storage", help="Pasta de raiz do storage (default E:/)")
 
         (options, args) = parser.parse_args()
         # print(options)
@@ -410,6 +424,12 @@ def sapi_processar_parametros_usuario():
 
         if options.logfile:
             set_parini('logfile', options.logfile)
+
+        if options.raiz_storage:
+            set_parini('raiz_storage', options.raiz_storage)
+        else:
+            # Default
+            set_parini('raiz_storage', Gdefault_raiz_storage)
 
         # Feedback dos parâmetros selecionados
         if options.background:
@@ -1094,7 +1114,10 @@ def _sapisrv_atualizar_status_tarefa(codigo_tarefa,
 # Retorna:
 #  - True: Se foi possível atualizar o status
 #  - False: Se não atualizou o status
-def sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status):
+def sapisrv_atualizar_status_tarefa_informativo(
+        codigo_tarefa,
+        texto_status,
+        tamanho_destino_bytes = None):
 
     try:
 
@@ -1128,7 +1151,8 @@ def sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status):
         (ok, msg_erro) = _sapisrv_atualizar_status_tarefa(
             codigo_tarefa=codigo_tarefa,
             codigo_situacao_tarefa=GManterSituacaoAtual,
-            status=texto_status
+            status=texto_status,
+            tamanho_destino_bytes=tamanho_destino_bytes
         )
 
         # Se ocorrer algum erro, ignora (registrando no log)
@@ -2303,12 +2327,15 @@ def obter_caracteristicas_pasta_ok(start_path):
 
 
 # Converte Bytes para formato Humano
-def converte_bytes_humano(size, precision=1):
+def converte_bytes_humano(size, precision=1, utilizar_base_mil=False):
     suffixes = ['B', 'KB', 'MB', 'GB', 'TB', "PB", "EB", "ZB", "YB"]
     suffix_index = 0
-    while size > 1024 and suffix_index < 8:
+    base = 1024.0
+    if utilizar_base_mil:
+        base=1000
+    while size > base and suffix_index < 8:
         suffix_index += 1  # increment the index of the suffix
-        size /= 1024.0  # apply the division
+        size /= base  # apply the division
     return "%.*f%s" % (precision, size, suffixes[suffix_index])
 
 # Converte segundo para formato humano, para previsão de conclusão de tarefa
@@ -2382,6 +2409,14 @@ def ajustar_para_path_longo(path):
     if '\\\\?\\' not in path:
         path = '\\\\?\\' + path
     return path
+
+
+def sanitiza_parte_caminho(parte_caminho):
+    # Remove alguns caracteres que não são muito desejáveis no path
+    parte_caminho = parte_caminho.replace("/", "_")
+    parte_caminho = parte_caminho.replace(" ", "_")
+    return parte_caminho
+
 
 def montar_caminho(*arg):
     caminho=os.path.join(*arg)
@@ -2858,15 +2893,55 @@ def conectar_storage_atualizacao_ok(dados_storage):
 # Movimentação de pastas no storage
 # =======================================================================================================
 
-def mover_lixeira(pasta):
-    # Todo: Implementar lixeira
-    print_log("Movendo para lixeira: ", pasta)
-    die('saplib ponto2765')
+
+def mover_lixeira(pasta_mover):
+
+    print_log("Movendo para lixeira: ", pasta_mover)
+
+    data_hora = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+
+    # Obtém o caminho absoluto. Por exemplo:
+    # ../Memorando_1880-17_CF_PR-26/item01Arrecadacao01a/item01Arrecadacao01a_imagem
+    # E:/storage/Memorando_1880-17_CF_PR-26/item01Arrecadacao01a/item01Arrecadacao01a_imagem
+    caminho_absoluto=os.path.abspath(pasta_mover)
+    # Remove drive
+    caminho_absoluto=caminho_absoluto[3:]
+
+    #var_dump(caminho_absoluto)
+    #die('ponto2876')
+
+
+    raiz_storage = get_parini('raiz_storage')
+    pasta_lixeira = montar_caminho(raiz_storage,
+                                   "lixeira",
+                                   data_hora,
+                                   caminho_absoluto)
+
+    #var_dump(pasta_lixeira)
+    #die('ponto2907')
+
+
+    #os.path.abspath(pasta)
+    #var_dump(pasta_lixeira)
+    #die('ponto2876')
+
+    # Criar a pasta pai
+    partes=pasta_lixeira.split('\\')
+    pasta_pai='/'.join(partes[:-1])
+    if not os.path.exists(pasta_pai):
+        os.makedirs(pasta_pai)
+
+    #var_dump(pasta_pai)
+    #die('ponto2892')
+
+    os.rename(pasta_mover, pasta_lixeira)
+    print_log("Movido com sucesso para lixeira em: ", pasta_lixeira)
+
 
 def mover_pasta_storage(pasta_origem, pasta_destino):
     print_log("Movendo pasta ", pasta_origem, "para", pasta_destino)
     os.rename(pasta_origem, pasta_destino)
-    print_log("Movimentado com sucesso")
+    print_log("Movido com sucesso")
 
 
 

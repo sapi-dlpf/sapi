@@ -55,7 +55,7 @@ if sys.version_info <= (3, 0):
 # GLOBAIS
 # =======================================================================
 Gprograma = "sapi_laudo"
-Gversao = "1.8.2"
+Gversao = "2.1"
 
 # Para gravação de estado
 Garquivo_estado = Gprograma + "v" + Gversao.replace('.', '_') + ".sapi"
@@ -118,6 +118,9 @@ GsapiQuesitos   = 'sapiQuesitos'
 GsapiRespostas  = 'sapiRespostas'
 GsapiEntrega    = 'sapiEntrega'
 
+#
+Gtipos_componentes = dict()
+
 # Debug
 Gverbose = False  # Aumenta a exibição de detalhes (para debug)
 
@@ -127,7 +130,7 @@ Gverbose = False  # Aumenta a exibição de detalhes (para debug)
 
 # Para código produtivo, o comando abaixo deve ser substituído pelo
 # código integral de sapi_xxx.py, para evitar dependência
-from sapilib_0_8 import *
+from sapilib_0_8_1 import *
 
 # **********************************************************************
 # PRODUCAO
@@ -688,6 +691,21 @@ def odt_substitui_campo_variavel_texto(lista_cv, substituir, valor):
     return qtd_substituicoes
 
 
+
+
+# Substitui um parágrafo por uma lista de parágrafos
+def odt_determinar_elemento_pai(paragrafo, raiz):
+    # mapeamento de pai filho, para poder subir para o ancestral
+    filho_para_pai = {
+        c: p for p in raiz.iter() for c in p
+        }
+
+    # Determina o pai
+    pai = filho_para_pai[paragrafo]
+
+    return pai
+
+
 # Substitui um parágrafo por uma lista de parágrafos
 def odt_substituir_paragrafo_por_lista(paragrafo_substituir, raiz, lista_novos_par):
     # mapeamento de pai filho, para poder subir para o ancestral
@@ -1066,10 +1084,12 @@ def obter_tarefas_finalizadas_item(item):
 
     return tarefas
 
-
 # Cria uma linha para tabela de materiais para o item
 # Recebe a linha de modelo e os dados do item
 def criar_linha_para_item(tr_modelo, dados_item, dblocos):
+
+    global Gtipos_componentes
+
     # Duplica modelo para criar nova linha
     tr_nova_linha_item = copy.deepcopy(tr_modelo)
 
@@ -1123,14 +1143,23 @@ def criar_linha_para_item(tr_modelo, dados_item, dblocos):
             # Tipo de componente
             tipo = dados_componente['sapiTipoComponente']
 
+            # Armazena o tipo de componente detectado
+            Gtipos_componentes[tipo]=1
+
             # Recupera bloco de identificação específico
             # para o tipo de componente
             # (ex: sapiIdentificacaoAparelho, sapiIdentificacaoSim)
             nome_bloco_componente = "sapiIdentificacao" + tipo
             bloco = dblocos.get(nome_bloco_componente.lower(), None)
             if bloco is None:
-                print_tela_log("Erro: Não foi localizado bloco com nome[", nome_bloco_componente,
-                               "] no seu documento. Confira/corrija. (Esclarecimento: Nome do bloco NÃO é case sensitive)")
+                print_tela_log(
+                    texto("Erro: Não foi localizado bloco com nome[",
+                          nome_bloco_componente,
+                          "] no seu documento.",
+                          " Confira/corrija o seu modelo.",
+                          "(Esclarecimento: Nome do bloco NÃO é case sensitive)"
+                          )
+                )
                 return None
 
             # Monta lista de parágrafos para substituir
@@ -1251,7 +1280,7 @@ def criar_linhas_hash_para_item(tr_modelo, dados_item):
             (sucesso, lista_cv_tr_nova_linha_item) = odt_recupera_lista_campos_variaveis_sapi(tr_nova_linha_item)
 
             # Adiciona item na descrição do hash
-            descricao = "Item " + dados_item['item'] + " - " + h["sapiHashDescricao"]
+            descricao = "Item " + str(dados_item['item']) + " - " + h["sapiHashDescricao"]
 
             # substituição de campos na nova linha de hashes
             dcs = dict()
@@ -1498,6 +1527,15 @@ def formata_frases(texto, tamanho_max):
 # -nome_bloco_respostas
 # ---------------------------------------------------------------------------------------------------------------------
 def usuario_escolhe_quesitacao(quesitos_respostas):
+    try:
+        return _usuario_escolhe_quesitacao(quesitos_respostas)
+    except KeyboardInterrupt:
+        print()
+        print("- Operação interrompida pelo usuário <CTR><C>s")
+        return None
+
+
+def _usuario_escolhe_quesitacao(quesitos_respostas):
     # Isto não deveria acontecer
     if (len(quesitos_respostas) == 0):
         erro_fatal("Inesperado: Não existem quesitos disponíveis")
@@ -1527,71 +1565,132 @@ def usuario_escolhe_quesitacao(quesitos_respostas):
 
     # Exibe lista de quesitos para seleção
     # ------------------------------------
-    print('- Observe na lista abaixo o resumo dos quesitações padrões disponíveis no modelo selecionado.')
-    print('- Caso a quesitação da solicitação de exame não seja idêntica a nenhuma das quesitações padrões,')
-    print('  selecione a que possuir maior semelhança, efetue os ajustes diretamente no seu laudo')
-    print('  e posteriormente notique o gestor do GTPI (informando o número do laudo), para que este avalie')
-    print('  a necessidade de ampliação dos modelos de quesitação.')
-    print('- Em função de limitações da console,  é possível que alguns caracteres acentuados tenham ')
-    print('  sido substituídos por "?" no resumo abaixo. Não se preocupe, no laudo gerado ficará ok.')
-
-    qtd_opcoes = 0
-    for qtd_nome in lista:
-
-        qtd_opcoes += 1
-
-        # Separa o nome da chave de ordenação e recupera quesitação
-        nome_quesito = qtd_nome.split("^")[1]
-        quesitacao = quesitos_respostas[nome_quesito]
-        resumo_quesitos = quesitacao["resumo_quesitos"]
-        # var_dump(quesitacao)
-        quantidade_quesitos = quesitacao["quantidade_quesitos"]
-
-        print_centralizado("")
-        print(qtd_opcoes, "=> ", "Qtd. quesitos:", int(quantidade_quesitos), "  Nome da quesitação:", nome_quesito)
-        print_centralizado("")
-        # Imprime o resumo de três quesitos por linha
-        #tam_linha = 105
-        #for i in range(0, len(resumo_quesitos), tam_linha):
-        #    print("  ", resumo_quesitos[i:i + tam_linha])
-        print(resumo_quesitos)
-        print()
+    # qtd_seq = 0
+    # for qtd_nome in lista:
+    #
+    #     qtd_seq += 1
+    #
+    #     # Separa o nome da chave de ordenação e recupera quesitação
+    #     nome_quesito = qtd_nome.split("^")[1]
+    #     quesitacao = quesitos_respostas[nome_quesito]
+    #     resumo_quesitos = quesitacao["resumo_quesitos"]
+    #     # var_dump(quesitacao)
+    #     quantidade_quesitos = quesitacao["quantidade_quesitos"]
+    #
+    #     print_centralizado("")
+    #     print(qtd_seq, "=> ", "Qtd. quesitos:", int(quantidade_quesitos), "  Nome da quesitação:", nome_quesito)
+    #     print_centralizado("")
+    #     # Imprime o resumo de três quesitos por linha
+    #     #tam_linha = 105
+    #     #for i in range(0, len(resumo_quesitos), tam_linha):
+    #     #    print("  ", resumo_quesitos[i:i + tam_linha])
+    #     print(resumo_quesitos)
+    #     print()
 
     # Solicita o número de sequencia da quesitação
-    print()
-    print("- Dica: Na lista acima, as quesitações estão ordenadas por número de quesitos.")
-    print("  No nome da quesitação identifica-se também a unidade de origem (ex: cac, lda)")
-    print(
-        "- O texto exibido é só uma referência, e PODE APRESENTAR ALGUMAS DISTORÇOES em relação ao texto realmente contido no modelo.")
-    print(
-        "  Não se preocupe se alguns caracteres estiverem diferentes, ou mesmo se houver omissão de palavras nas frase.")
-    print("  Isto ocorre em função de algumas complexidades no parse do ODT. No laudo gerado, a quesitação estará ok.")
-    print()
-    print("- Escolha a quesitação que mais se aproxima da quesitação da solicitação.")
     while True:
+
+        # Solicita que usuário informe a quantidade de quesitos da solicitação
+        while True:
+            pergunta = "< Quantos quesitos tem na solicitação de exame (n, ou * para listar todos)?  "
+            # Valida resposta
+            qtd_quesitos_solicitacao = input(pergunta)
+            qtd_quesitos_solicitacao = qtd_quesitos_solicitacao.strip()
+            if qtd_quesitos_solicitacao=='*':
+                break
+            if not qtd_quesitos_solicitacao.isdigit():
+                continue
+            # Tudo certo
+            if int(qtd_quesitos_solicitacao)==0:
+                print("- Mesmo quando não existe quesito explícito, a própria solicitação é considerada um quesito.")
+                print("- Logo, no mínimo é 1. Convertido 0 para 1.")
+                qtd_quesitos_solicitacao=1
+            break
+
+        # Exibe opções de quesitos com quantidade selecionada
+        map_ix_para_seq=dict()
+        qtd_seq = 0
+        for ix in range(0, len(lista)):
+            #var_dump(lista)
+            #var_dump(ix)
+
+            qtd_nome=lista[ix]
+
+            #var_dump(qtd_nome)
+            #die('ponto1612')
+
+            # Separa o nome da chave de ordenação e recupera quesitação
+            nome_quesito = qtd_nome.split("^")[1]
+            quesitacao = quesitos_respostas[nome_quesito]
+            resumo_quesitos = quesitacao["resumo_quesitos"]
+            # var_dump(quesitacao)
+            quantidade_quesitos = quesitacao["quantidade_quesitos"]
+
+            if (  qtd_quesitos_solicitacao!='*' and
+                  int(quantidade_quesitos)!=int(qtd_quesitos_solicitacao)):
+                continue
+
+            # Ok, quesitação aceita
+            qtd_seq += 1
+
+            # Guarda mapeamento
+            map_ix_para_seq[qtd_seq]=ix
+
+            print_centralizado("")
+            print(qtd_seq, "=> ", "Qtd. quesitos:", int(quantidade_quesitos), "  Nome da quesitação:", nome_quesito)
+            print_centralizado("")
+            # Imprime o resumo de três quesitos por linha
+            # tam_linha = 105
+            # for i in range(0, len(resumo_quesitos), tam_linha):
+            #    print("  ", resumo_quesitos[i:i + tam_linha])
+            print(resumo_quesitos)
+            print()
+
+        # Se não achar nenhuma quesitação
+        if qtd_seq==0:
+            print("- Não existe nenhuma opção de quesitação com", qtd_quesitos_solicitacao, "quesitos")
+            continue
+
         print()
-        pergunta = "< Selecione a quesitação entrando com o número de sequencia da lista acima (1 a " + str(
-            qtd_opcoes) + "): "
+        print("- Dica:  No nome da quesitação identifica-se também a unidade de origem (ex: cac, lda)")
+        print("- Escolha a quesitação que mais se aproxima da quesitação da solicitação.")
+        print('- Caso a quesitação da solicitação de exame não seja idêntica a nenhuma das quesitações padrões,')
+        print('  selecione a que possuir maior semelhança, efetue os ajustes diretamente no seu laudo')
+        print('  e posteriormente notique o gestor do GTPI (informando o número do laudo), para que este avalie')
+        print('  a necessidade de ampliação dos modelos de quesitação.')
+        print('- Em função de limitações da console,  é possível que alguns caracteres acentuados tenham ')
+        print('  sido substituídos por "?" no resumo. Não se preocupe, no laudo gerado ficará ok.')
 
-        seq = input(pergunta)
-        seq = seq.strip()
+        # Seleciona quesitação
+        while True:
+            print()
+            pergunta = "< Selecione a quesitação entrando com o número de sequencia da lista acima (1 a " + str(
+                qtd_seq) + "): "
 
-        # Verifica se número de sequencia é válido
-        if not seq.isdigit(): continue
-        seq = int(seq)
-        if (seq < 1): continue
-        if (seq > qtd_opcoes): continue
+            # Valida resposta
+            seq = input(pergunta)
+            seq = seq.strip()
+            if not seq.isdigit(): continue
+            seq = int(seq)
+            if (seq < 1): continue
+            if (seq > qtd_seq): continue
+            # Tudo certo
+            break
 
         # Retorna definição de  quesitos e respostas
+        ix = map_ix_para_seq[seq]
         nome_quesitacao = lista[seq - 1].split("^")[1]
         quesitacao_selecionada = quesitos_respostas[nome_quesitacao]
         return quesitacao_selecionada
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-def determina_quesitacao(quesitos_respostas, dblocos):
+def determina_quesitacao_old(quesitos_respostas, dblocos):
     # Usuário escolhe quesitação, em modo interativo
     quesitacao_selecionada = usuario_escolhe_quesitacao(quesitos_respostas)
+
+    if quesitacao_selecionada is None:
+        return None, None
 
     nome_bloco_quesitos = quesitacao_selecionada["nome_bloco_quesitos"]
     nome_bloco_respostas = quesitacao_selecionada["nome_bloco_respostas"]
@@ -1728,10 +1827,14 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     odt_remove_comentarios(odt_raiz)
 
     #var_dump(Gmodelo_configuracao)
-    print(Gmodelo_configuracao)
-    if ("MODELO_VERSAO_2_0" not in Gmodelo_configuracao):
+    #print(Gmodelo_configuracao)
+    modelo_versao="MODELO_VERSAO_3_0"
+    if (modelo_versao not in Gmodelo_configuracao):
         print_tela_log(
-            "ERRO => Este programa requer um modelo de laudo padrão SAPI com versão igual a 2.0. Gere o modelo correto no SisCrim")
+            texto("- ERRO: Este programa requer um laudo padrão SAPI",
+                  modelo_versao)
+        )
+        print_tela("- Retorne ao SisCrim e gere o modelo na versão mais atualizada.")
         return
 
     # odt_dump(odt_raiz)
@@ -1769,7 +1872,7 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     # Recupera blocos de parágrafos
     (sucesso, dblocos) = carrega_blocos(office_text)
     if (not sucesso):
-        erro_fatal("Falha no parse de blocos")
+        return
 
         # ------------------------------------------------------------------
         # Otimização....
@@ -1800,7 +1903,24 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     print("Passo 3: Escolha da quesitação")
     print("------------------------------")
 
-    lista_par_quesitos, lista_par_respostas = determina_quesitacao(quesitos_respostas, dblocos)
+    # Usuário escolhe quesitação, em modo interativo
+    quesitacao_selecionada = usuario_escolhe_quesitacao(quesitos_respostas)
+
+    if quesitacao_selecionada is None:
+        return
+
+    nome_bloco_quesitos = quesitacao_selecionada["nome_bloco_quesitos"]
+    nome_bloco_respostas = quesitacao_selecionada["nome_bloco_respostas"]
+
+    # Recupera listas de parágrafos das perguntas e respostas
+    lista_par_quesitos = odt_clonar_bloco(nome_bloco_quesitos, dblocos)
+    lista_par_respostas = odt_clonar_bloco(nome_bloco_respostas, dblocos)
+
+
+
+    #lista_par_quesitos, lista_par_respostas = determina_quesitacao(quesitos_respostas, dblocos)
+    #if lista_par_quesitos is None:
+    #    return
 
     # ------------------------------------------------------------------------------------------------------------------
     # Substitui sapiQuesitos
@@ -1815,7 +1935,7 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     # odt_dump(ancestral)
     # die('ponto1836')
     if (paragrafo_substituir_sapi_quesitos is None):
-        print_tela_log("ERRO: Não encontrado parágrafo onde se localiza 'sapiQuesitos'")
+        print_tela_log("ERRO 1938: Não encontrado parágrafo onde se localiza 'sapiQuesitos'")
         return
 
     odt_substituir_paragrafo_por_lista(paragrafo_substituir_sapi_quesitos, odt_raiz, lista_par_quesitos)
@@ -1832,7 +1952,7 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     paragrafo_substituir_sapi_respostas = odt_busca_ancestral_com_tipo(cv_sapi_respostas['pai'], raiz=odt_raiz,
                                                                        tipo='p')
     if (paragrafo_substituir_sapi_respostas is None):
-        print_tela_log("ERRO: Não encontrado parágrafo onde se localiza '" + GsapiRespostas + "'")
+        print_tela_log("ERRO 1955: Não encontrado parágrafo onde se localiza '" + GsapiRespostas + "'")
         return
 
     # Por fim, substitui os parágrafos das respostas aos quesitos
@@ -1841,22 +1961,153 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
 
     #var_dump(lista_par_respostas)
 
+    # ------------------------------------------------------------------------------------------------------------------
+    # Geração de tabela de materiais examinados
+    # ------------------------------------------------------------------------------------------------------------------
+    print()
+    print("Passo 4: Montagem de tabelas de materiais")
+    print("-----------------------------------------")
+
+    # Procura tabela de materiais
+    # ---------------------------
+    tabela_materiais = None
+    for table in office_text.findall('table:table', Gxml_ns):
+        # print(table)
+        # print(table.attrib)
+        # die('ponto643')
+        nome_tabela = obtem_atributo_xml(table, 'table:name')
+        # print(nome_tabela)
+        if (nome_tabela == 'tabela_materiais'):
+            print_log("- Localizada tabela de materiais")
+            tabela_materiais = table
+
+    if (tabela_materiais is None):
+        print_tela_log("- ERRO: Não foi localizada a tabela de materiais.")
+        print_tela_log("A tabela de materiais é caracterizada através da propriedade nome=tabela_materiais.")
+        print_tela_log("Verifique se o arquivo de modelo a partir do qual foir gerado o laudo atende este requisito.")
+        return None
+
+    # Isola linha de modelo da tabela de materiais
+    # ------------------------------------------------------------------
+    # Parte-se do princípio que a tabela de materiais terá um cabeçalho,
+    # e a linha de modelo.
+    # O cabeçalho pode ser formado por várias linhas,
+    # mas entende-se que a situação mais comum será ter um cabeçalho
+    # com uma única linha
+    # A linha de modelo DEVE SER ÚNICA, e será sempre a última linha
+    # da tabela.
+    # ------------------------------------------------------------------
+    tr_linhas = tabela_materiais.findall('table:table-row', Gxml_ns)
+    qtd_linhas = len(tr_linhas)
+    if (qtd_linhas != 2):
+        # Não é comum ter mais de duas linhas...então é melhor avisar
+        print_tela_log("- Tabela de materiais contém", qtd_linhas, " linhas, o que é incomum.")
+        print_tela_log("- Assumindo que a linha de modelo para substituição é a última linha da tabela de materiais")
+    tr_modelo = tabela_materiais.findall('table:table-row', Gxml_ns)[qtd_linhas - 1]
+
+    tab_materiais = filho_para_pai_map[tr_modelo]
+    posicao_inserir_tab_materiais = odt_determina_posicao_pai_filho(tab_materiais, tr_modelo)
+
+    # Recupera campos variáveis da linha de modelo da tabela de materiais
+    # ------------------------------------------------------------------
+    print_log("- Recuperando campos variáveis da tabela de materiais")
+    (sucesso, lista_cv_tabela_materiais) = odt_recupera_lista_campos_variaveis_sapi(tr_modelo)
+    if (len(lista_cv_tabela_materiais) == 0):
+        print_tela_log(
+            "ERRO: Não foi detectado nenhum campo variável na tabela de materiais. Assegure-se de utilizar um modelo de ODT sapi para a geração do laudo")
+        return
+
+    # ------------------------------------------------------------------
+    # Ordena lista de itens
+    # ------------------------------------------------------------------
+    # Por enquanto não vamos precisar disto, pois o servidor está
+    # retornando os itens ordenados por item...
+    # Mas talvez mais tarde precise deste código.
+    # dicItem={}
+    # ix=0
+    # for dadosItem in Gitens:
+    # 	dicItem[dadosItem["item"]]=ix
+    # 	ix=ix+1
+    #
+    # for d in sorted(dicItem):
+    # 	ix=dicItem[d]
+    # 	print(d,ix)
+    # #var_dump(keys(dicItem))
+    # die('ponto1565')
+
+
+    # ------------------------------------------------------------------
+    # Gera linhas na tabela de materiais para cada um dos itens
+    # ------------------------------------------------------------------
+    q = 0
+    for dados_item in Gitens:
+        q += 1
+
+        item = dados_item['item']
+        # Despreza materiais de destino
+        if item=='destino':
+            continue
+
+
+        #var_dump(dadosItem)
+        #die('ponto1863')
+        print_tela_log("- Tabela de materiais, processando item ", item)
+
+        # Processa item, criando nova linha na tabela de materiais
+        tr_nova_linha_item = criar_linha_para_item(tr_modelo, dados_item, dblocos)
+        if tr_nova_linha_item is None:
+            return
+
+        # Insere nova linha na tabela de materiais
+        tab_materiais.insert(posicao_inserir_tab_materiais, tr_nova_linha_item)
+        posicao_inserir_tab_materiais += 1
+
+    # --- Fim do loop de processamento dos itens da tabela de materiais
+    # Remove linha de modelo da tabela de materiais
+    tab_materiais.remove(tr_modelo)
+
+
+
     # --------------------------------------------------------------------
     # Substitui campos variáveis por blocos com mesmo nome
     # ------------------------------------------------------------------
     print()
-    print("Passo 3A: Substituição de variáveis por blocos de parágrafos")
-    print("------------------------------------------------------------")
+    print("Passo 5: Substituição de variáveis por blocos de parágrafos")
+    print("-----------------------------------------------------------")
+
+    # Monta lista de extensões de variáveis de laudo que devem ser consideradas
+    # As extensões tratadas atualmente são:
+    # paraCelular       => Relacionado com exame de celular em geral
+    # paraSim           => Relacionado com exame específico de Sim Card
+    # paraAparelho      => Relacionado com exame específico de aparelho Celular
+    # paraArmazenamento => Relacionado com dispositivo de armazenamento de dados
+    considerar=dict()
+    if 'sim' in Gtipos_componentes:
+        considerar['paraSim']=True
+        considerar['paraCelular']=True
+    if 'aparelho' in Gtipos_componentes:
+        considerar['paraAparelho'] = True
+        considerar['paraCelular'] = True
+    if 'armazenamento' in Gtipos_componentes:
+        considerar['paraArmazenamento'] = True
+
+    # Monta lista complementar, indicando quais variáveis devem ser desprezadas
+    todas=('paraSim', 'paraAparelho', 'paraCelular', 'paraArmazenamento')
+    desprezar=list()
+    for d in todas:
+        if considerar.get(d,None) is None:
+            desprezar.append(d)
 
     (sucesso, lista_cv) = odt_recupera_lista_campos_variaveis_sapi(odt_raiz)
     for campo in lista_cv:
         nome_campo_variavel = campo['name'].lower()
         # print(nome_campo_variavel)
 
-        # Verifica se existe bloco com nome igual à da variável
+        # Verifica se existe bloco com nome igual ao da variável
         if dblocos.get(nome_campo_variavel, None) is None:
             # Não existe bloco com o nome de campo variável. Despreza variável.
             continue
+
 
         # Recupera lista de blocos do parágrafo
         lista_par_bloco = odt_clonar_bloco(nome_campo_variavel, dblocos)
@@ -1867,15 +2118,34 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
         paragrafo_substituir = odt_busca_ancestral_com_tipo(campo['pai'], raiz=odt_raiz,
                                                                      tipo='p')
 
-        odt_substituir_paragrafo_por_lista(paragrafo_substituir, odt_raiz, lista_par_bloco)
+        # Recupera elemento pai do parágrafo aonde aparece variável
+        elemento_pai = odt_determinar_elemento_pai(paragrafo_substituir, odt_raiz)
 
-        print("- Substituido variável "+nome_campo_variavel+" por bloco correspondente")
+        #odt_dump_paragrafo(paragrafo_substituir)
+        #odt_dump_paragrafo(paragrafo_pai)
+        #die('ponto2001')
+
+        # Verifica se variável deve ser deprezada
+        ignorar_variavel=False
+        for d in desprezar:
+            if d in nome_campo_variavel:
+                ignorar_variavel=True
+                break
+
+        if ignorar_variavel:
+            # Elimina parágrafo que contém referência à variável
+            elemento_pai.remove(paragrafo_substituir)
+            print("- Desprezando parágrafo que continha " + nome_campo_variavel + " uma vez que laudo não contém material desta natureza")
+        else:
+            # Substitui a variável
+            odt_substituir_paragrafo_por_lista(paragrafo_substituir, odt_raiz, lista_par_bloco)
+            print("- Substituido variável " + nome_campo_variavel + " por bloco correspondente")
 
     # ------------------------------------------------------------------
     # Substitui textos gerais do corpo do laudo
     # ------------------------------------------------------------------
     print()
-    print("Passo 4: Substituição de textos gerais do laudo")
+    print("Passo 6: Substituição de textos gerais do laudo")
     print("-----------------------------------------------")
 
     # Processa auto
@@ -1966,10 +2236,11 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
                                                                            tipo='p')
         #var_dump(paragrafo_substituir_sapi_entrega)
         if (paragrafo_substituir_sapi_entrega is None):
-            print_tela_log("ERRO: Não encontrado parágrafo onde se localiza '" + GsapiEntrega + "'")
-            return
-
-        odt_substituir_paragrafo_por_lista(paragrafo_substituir_sapi_entrega, odt_raiz, lista_par_entrega)
+            print_tela_log("ERRO 2239: Não encontrado parágrafo onde se localiza '" + GsapiEntrega + "'")
+            # Não é um erro fatal....
+            #return
+        else:
+            odt_substituir_paragrafo_por_lista(paragrafo_substituir_sapi_entrega, odt_raiz, lista_par_entrega)
         # --- Fim substituição de sapiEntrega
 
     # ------------------------------------------------------------------------------------------------------------------
@@ -1979,8 +2250,8 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     # ------------------------------------------------------------------------------------------------------------------
     # ------------------------------------------------------------------------------------------------------------------
     print()
-    print("Passo 5 : Montagem de tabelas de materiais devolvidos")
-    print("-----------------------------------------------------")
+    print("Passo 7: Montagem de tabelas de materiais devolvidos")
+    print("----------------------------------------------------")
 
     # Procura tabela de materiais devolvidos
     # ---------------------------------------
@@ -1992,7 +2263,7 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
             tabela_matdevol = table
 
     if (tabela_matdevol is None):
-        print_tela_log("- ERRO: Não foi localizada a tabela de materiais devolvidos no modelo.")
+        print_tela_log("- ERRO 2265: Não foi localizada a tabela de materiais devolvidos no modelo.")
         print_tela_log("- Esta tabela é caracterizada através da propriedade nome=tabela_materiais_devolvidos.")
         print_tela_log("- Verifique se o arquivo de modelo possui esta tabela.")
         return None
@@ -2105,8 +2376,8 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     # ------------------------------------------------------------------------------------------------------------------
     # ------------------------------------------------------------------------------------------------------------------
     print()
-    print("Passo 6 : Montagem de tabelas de hashes")
-    print("---------------------------------------")
+    print("Passo 8: Montagem de tabelas de hashes")
+    print("--------------------------------------")
 
     # Procura tabela de hashes
     # ---------------------------
@@ -2181,117 +2452,12 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
 
     # ------------------------------------------------------------------------------------------------------------------
     # ------------------------------------------------------------------------------------------------------------------
-    # Geração de tabela de materiais examinados
-    # ------------------------------------------------------------------------------------------------------------------
-    # ------------------------------------------------------------------------------------------------------------------
-    print()
-    print("Passo 7 : Montagem de tabelas de materiais")
-    print("------------------------------------------")
-
-    # Procura tabela de materiais
-    # ---------------------------
-    tabela_materiais = None
-    for table in office_text.findall('table:table', Gxml_ns):
-        # print(table)
-        # print(table.attrib)
-        # die('ponto643')
-        nome_tabela = obtem_atributo_xml(table, 'table:name')
-        # print(nome_tabela)
-        if (nome_tabela == 'tabela_materiais'):
-            print_log("- Localizada tabela de materiais")
-            tabela_materiais = table
-
-    if (tabela_materiais is None):
-        print_tela_log("- ERRO: Não foi localizada a tabela de materiais.")
-        print_tela_log("A tabela de materiais é caracterizada através da propriedade nome=tabela_materiais.")
-        print_tela_log("Verifique se o arquivo de modelo a partir do qual foir gerado o laudo atende este requisito.")
-        return None
-
-    # Isola linha de modelo da tabela de materiais
-    # ------------------------------------------------------------------
-    # Parte-se do princípio que a tabela de materiais terá um cabeçalho,
-    # e a linha de modelo.
-    # O cabeçalho pode ser formado por várias linhas,
-    # mas entende-se que a situação mais comum será ter um cabeçalho
-    # com uma única linha
-    # A linha de modelo DEVE SER ÚNICA, e será sempre a última linha
-    # da tabela.
-    # ------------------------------------------------------------------
-    tr_linhas = tabela_materiais.findall('table:table-row', Gxml_ns)
-    qtd_linhas = len(tr_linhas)
-    if (qtd_linhas != 2):
-        # Não é comum ter mais de duas linhas...então é melhor avisar
-        print_tela_log("- Tabela de materiais contém", qtd_linhas, " linhas, o que é incomum.")
-        print_tela_log("- Assumindo que a linha de modelo para substituição é a última linha da tabela de materiais")
-    tr_modelo = tabela_materiais.findall('table:table-row', Gxml_ns)[qtd_linhas - 1]
-
-    tab_materiais = filho_para_pai_map[tr_modelo]
-    posicao_inserir_tab_materiais = odt_determina_posicao_pai_filho(tab_materiais, tr_modelo)
-
-    # Recupera campos variáveis da linha de modelo da tabela de materiais
-    # ------------------------------------------------------------------
-    print_log("- Recuperando campos variáveis da tabela de materiais")
-    (sucesso, lista_cv_tabela_materiais) = odt_recupera_lista_campos_variaveis_sapi(tr_modelo)
-    if (len(lista_cv_tabela_materiais) == 0):
-        print_tela_log(
-            "ERRO: Não foi detectado nenhum campo variável na tabela de materiais. Assegure-se de utilizar um modelo de ODT sapi para a geração do laudo")
-        return
-
-    # ------------------------------------------------------------------
-    # Ordena lista de itens
-    # ------------------------------------------------------------------
-    # Por enquanto não vamos precisar disto, pois o servidor está
-    # retornando os itens ordenados por item...
-    # Mas talvez mais tarde precise deste código.
-    # dicItem={}
-    # ix=0
-    # for dadosItem in Gitens:
-    # 	dicItem[dadosItem["item"]]=ix
-    # 	ix=ix+1
-    #
-    # for d in sorted(dicItem):
-    # 	ix=dicItem[d]
-    # 	print(d,ix)
-    # #var_dump(keys(dicItem))
-    # die('ponto1565')
-
-
-    # ------------------------------------------------------------------
-    # Gera linhas na tabela de materiais para cada um dos itens
-    # ------------------------------------------------------------------
-    q = 0
-    for dados_item in Gitens:
-        q += 1
-
-        item = dados_item['item']
-        # Despreza materiais de destino
-        if item=='destino':
-            continue
-
-
-        #var_dump(dadosItem)
-        #die('ponto1863')
-        print_tela_log("- Tabela de materiais, processando item ", item)
-
-        # Processa item, criando nova linha na tabela de materiais
-        tr_nova_linha_item = criar_linha_para_item(tr_modelo, dados_item, dblocos)
-
-        # Insere nova linha na tabela de materiais
-        tab_materiais.insert(posicao_inserir_tab_materiais, tr_nova_linha_item)
-        posicao_inserir_tab_materiais += 1
-
-    # --- Fim do loop de processamento dos itens da tabela de materiais
-    # Remove linha de modelo da tabela de materiais
-    tab_materiais.remove(tr_modelo)
-
-    # ------------------------------------------------------------------------------------------------------------------
-    # ------------------------------------------------------------------------------------------------------------------
     # Procedimentos finais
     # ------------------------------------------------------------------------------------------------------------------
     # ------------------------------------------------------------------------------------------------------------------
     print()
-    print("Passo 8 : Procedimentos finais")
-    print("------------------------------")
+    print("Passo 9: Procedimentos finais")
+    print("-----------------------------")
 
     # Gera novo documento e encerra
     gera_novo_odt(odt_raiz, caminho_arquivo_saida_odt)
@@ -2502,7 +2668,7 @@ def _gerar_laudo():
     metodo_entrega = Gsolicitacao_exame['dados_exame']['metodo_entrega']
     if metodo_entrega=='indefinido':
         print_centralizado(" ERRO ")
-        print("- Antes de gerar o laudo você deve definir o método de entrega (mídia óptica, cópia storage, etc).")
+        print("- Para gerar o laudo você deve primeiramente definir o método de entrega (mídia óptica, cópia storage, etc).")
         print("- Configure no SETEC3 e em seguida retorne a esta opção.")
         return
 
@@ -2718,61 +2884,10 @@ def exibir_situacao():
     return
 
 
-# Salva situação atual para arquivo
-# ----------------------------------------------------------------------
-def salvar_estado():
-
-    # Desativado
-    return
-    # Monta dicionario de estado
-    estado = dict()
-    estado["Gitens"] = Gitens
-    estado["GdadosGerais"] = GdadosGerais
-
-    # Abre arquivo de estado para gravação
-    nome_arquivo = Garquivo_estado
-    arquivo_estado = open(nome_arquivo, "w")
-
-    # Grava e encerra
-    json.dump(estado, arquivo_estado, indent=4)
-    arquivo_estado.close()
-
-
-# Carrega situação de arquivo
-# ----------------------------------------------------------------------
-def carregar_estado():
-
-    return
-
-    # Irá atualizar as duas variáveis relacionadas com estado
-    global Gitens
-    global GdadosGerais
-
-    # Por enquanto, não vamos habilitar a carga de estado
-    return
-
-    # Se estiver em ambiente de produção, não efetua o carregamento do estado
-    if not ambiente_desenvolvimento():
-        return
-
-    # Não tem arquivo de estado
-    if (not os.path.isfile(Garquivo_estado)):
-        return
-
-    # Le dados do arquivo e fecha
-    arq_estado = open(Garquivo_estado, "r")
-    estado = json.load(arq_estado)
-    arq_estado.close()
-
-    # Recupera variaveis do estado
-    Gitens = estado["Gitens"]
-    GdadosGerais = estado["GdadosGerais"]
-
 
 # Avisa que dados vieram do estado
 # print("Dados carregados do estado.sapi")
 # sprint("Isto so deve acontecer em ambiente de desenvolvimento")
-
 
 # Inicia procedimento de obtenção de laudo, cancelando com CTR-C
 # Retorna: Verdadeiro se foi selecionado um laudo
@@ -2783,7 +2898,7 @@ def obter_laudo_ok():
         return obter_laudo_parte2(matricula)
     except KeyboardInterrupt:
         print()
-        print("- Operação interrompida pelo usuário <CTR><C>s")
+        print("- Operação interrompida pelo usuário <CTR><C>")
         return False
 
 
@@ -3177,11 +3292,11 @@ def refresh_itens():
     Gitens = dados["itens"]
     Gstorages_laudo = dados["storages"]
 
-    #var_dump(Gitens)
-    #var_dump(Gstorages_laudo)
-    #die('ponto3029')
-
     GdadosGerais["data_hora_ultima_atualizacao_status"] = datetime.datetime.now().strftime('%H:%M:%S')
+
+    # Verifica se o laudo é parcial, ou seja, se existem itens na solicitação de exame
+    # que não fazem parte do laudo
+    carregar_solicitacao_exame()
 
     return True
 
@@ -3494,30 +3609,11 @@ def main():
     print_log('Iniciando ', Gprograma, ' - ', Gversao)
     sapisrv_inicializar_ok(Gprograma, Gversao, auto_atualizar=True)
 
-    # Carrega o estado anterior, se houver. Caso contrário, solicita dados para utilização do programa
-    # -----------------------------------------------------------------------------------------------------------------
-    carregar_estado()
-    if len(Gitens) > 0:
-        print("- Retomando último laudo. Para trocar de laudo, utilize opção *tt")
-        refresh_itens()
-    else:
-        # Obtem lista de itens, solicitando o memorando
-        if not obter_laudo_ok():
-            # Se usuário interromper seleção de itens
-            print("- Execução finalizada.")
-            return
-    # Salva estado atual
-    salvar_estado()
-
-    carregar_estado()
-    if (len(Gitens) == 0):
-        # Se não carregou nada, solicita laudo
-        if not obter_laudo_ok():
-            print()
-            print("- Encerrado por solicitação do usuário")
-            sys.exit(0)
-    # Salva estado atual
-    salvar_estado()
+    # Obtem lista de itens, solicitando o memorando
+    if not obter_laudo_ok():
+        # Se usuário interromper seleção de itens
+        print("- Execução finalizada.")
+        return
 
     # Processamento
     # ---------------------------
@@ -3583,7 +3679,6 @@ def main():
             continue
         elif (comando == '*tt'):
             obter_laudo_ok()
-            #salvar_estado()
             exibir_situacao()
             continue
         elif (comando == '*db'):
