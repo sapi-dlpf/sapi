@@ -364,6 +364,14 @@ def criar_pasta_tableau(codigo_tarefa):
             # Pode ter alguma condição temporária impedindo. Continuar tentando.
             return False
 
+    # Se a pasta final (que fica sob o memorando tiver conteúdo),
+    # transfere o conteúdo para a pasta temporária do tableau
+    # para ser reprocessada
+    # Esta é uma atividade executada apenas em ambiente de desenvolvimento
+    if ambiente_desenvolvimento():
+        recupera_dados_pasta_destino(tarefa)
+
+
     # Se pasta de destino existe, atualiza a situação de tarefa para GAguardandoPCF
     if os.path.exists(pasta_tableau):
         sapisrv_troca_situacao_tarefa_loop(
@@ -378,11 +386,104 @@ def criar_pasta_tableau(codigo_tarefa):
     # Tudo certo
     return True
 
+# Se pasta de destino contém dados que foram originários do sapi_tableau
+# move dados novamente para pasta do tableau, para novo processamento
+def recupera_dados_pasta_destino(tarefa):
+
+    caminho_destino = tarefa["caminho_destino"]
+    (pasta_destino, pasta_item, nome_base) = decompor_caminho_destino(caminho_destino)
+
+    # Se pasta de destino não contém dados, nada a fazer
+    if obter_tamanho_pasta_ok(pasta_destino) == 0:
+        return
+
+    print_log("Pasta de destino", pasta_destino, "contém dados")
+
+    # Recupera sapi_tableau armazenados no sapi.info
+    sapi_info = sapi_info_carregar(pasta_destino)
+    if sapi_info is None:
+        return
+    sapi_tableau = sapi_info.get('sapi_tableau', None)
+    if sapi_tableau is None:
+        print_log("Dados da pasta destino NÃO são provenientes do tableau")
+        return
+
+    #var_dump(sapi_tableau)
+    #die('ponto410')
+
+    #
+    pasta_origem = sapi_tableau["pasta_origem"]
+    base_nome_original = sapi_tableau["base_nome_original"]
+    base_nome_novo = sapi_tableau["base_nome_novo"]
+    print_log("Dados da pasta de destino são provenientes do tableau")
+
+    try:
+        print_log("Movendo dados da pasta", pasta_destino, "para", pasta_origem)
+        #die('ponto422')
+        mover_pasta_storage(pasta_destino, pasta_origem)
+        print_log("Movimentado com sucesso")
+    except Exception as e:
+        erro = "Não foi possível mover: " + str(e)
+        print_log(erro)
+        return
+
+    print_log("Renomeando arquivos recuperados")
+    try:
+        # Ajusta nomes dos arquivos na pasta de destino
+        for nome_arquivo in os.listdir(pasta_origem):
+            nome_arquivo=montar_caminho(pasta_origem, nome_arquivo)
+            if not os.path.isfile(nome_arquivo):
+                continue
+            # Volta ao nome original
+            if base_nome_novo in nome_arquivo:
+                nome_novo = nome_arquivo.replace(base_nome_novo, base_nome_original)
+                print_log("Renomeando",nome_arquivo, "para", nome_novo)
+                os.rename(nome_arquivo, nome_novo)
+
+    except Exception as e:
+        # Isto não deveria acontecer nunca
+        erro = "Não foi possível ajustar nomes dos arquivos: " + str(e)
+        print_log(erro)
+        return
+
+    print_log("Recuperação de dados da pasta de destino efetuada com sucesso")
+    return
+
+
+
+# Desmonta o caminho de destino em vários elementos
+# -----------------------------------------------------------------------------------
+def decompor_caminho_destino(caminho_destino):
+    # O caminho de destino para o arquivo E01 vem completo,
+    # e tem que ser desmontado nos componentes:
+    # caminho_destino     =
+    #   "Memorando_1880-17_CF_PR-26/item01Arrecadacao01a/item01Arrecadacao01a_imagem/item01Arrecadacao01a.E01"
+    # pasta_destino       =
+    #   "Memorando_1880-17_CF_PR-26/item01Arrecadacao01a/item01Arrecadacao01a_imagem"
+    # nome_arquivo_imagem = "item01Arrecadacao01a"
+    partes = caminho_destino.split('/')
+    # var_dump(partes)
+
+    # Nome base do arquivo de imagem
+    # Exemplo: item01Arrecadacao01a
+    # Na pasta do tableau, existirão vários aquivos .E01 .E02 .Exx .log
+    # Todos estes serão renomeado para este nome base
+    nome_base = partes.pop()
+    nome_base = nome_base.replace(".E01", "")
+
+    # A pasta de destino é a pasta onde serão armazenados os arquivos .E01 .E02 etc
+    pasta_destino = "/".join(partes)
+    pasta_item = "/".join(partes[:-1])
+    # Adiciona caminho relativo (uma vez que está sendo executado na pasta /sistema)
+    pasta_destino = montar_caminho(get_parini('raiz_storage'), pasta_destino)
+    pasta_item = montar_caminho(get_parini('raiz_storage'), pasta_item)
+
+    return (pasta_destino, pasta_item, nome_base)
+
 
 # Retorna verdadeiro se a tarefa já está sendo acompanhada
 def tarefa_sendo_acompanhada(codigo_tarefa):
     return False
-
 
 def monitorar_tarefa(codigo_tarefa):
     # Se tarefa já iniciou e está sendo acompanhada,
@@ -448,28 +549,7 @@ def monitorar_tarefa(codigo_tarefa):
         item = tarefa["item"]
         caminho_destino = tarefa["caminho_destino"]
 
-        # Desmonta o caminho para pasta o arquivo de imagem da tarefa
-        # -----------------------------------------------------------
-        # O caminho de destino para o arquivo E01 vem completo, e tem que ser desmontado nos componentes
-        # caminho_destino     = "Memorando_1880-17_CF_PR-26/item01Arrecadacao01a/item01Arrecadacao01a_imagem/item01Arrecadacao01a.E01"
-        # pasta_destino       = "Memorando_1880-17_CF_PR-26/item01Arrecadacao01a/item01Arrecadacao01a_imagem"
-        # nome_arquivo_imagem = "item01Arrecadacao01a"
-        partes = caminho_destino.split('/')
-        # var_dump(partes)
-
-        # Nome base do arquivo de imagem
-        # Exemplo: item01Arrecadacao01a
-        # Na pasta do tableau, existirão vários aquivos .E01 .E02 .Exx .log
-        # Todos estes serão renomeado para este nome base
-        nome_base = partes.pop()
-        nome_base = nome_base.replace(".E01", "")
-
-        # A pasta de destino é a pasta onde serão armazenados os arquivos .E01 .E02 etc
-        pasta_destino = "/".join(partes)
-        pasta_item = "/".join(partes[:-1])
-        # Adiciona caminho relativo (uma vez que está sendo executado na pasta /sistema)
-        pasta_destino = montar_caminho(get_parini('raiz_storage'), pasta_destino)
-        pasta_item = montar_caminho(get_parini('raiz_storage'), pasta_item)
+        (pasta_destino, pasta_item, nome_base)=decompor_caminho_destino(caminho_destino)
 
         # Inicia tarefa em background
         # ----------------------------
@@ -510,8 +590,6 @@ def monitorar_tarefa(codigo_tarefa):
     return True
 
 
-
-
 # Acompanha a execução do Tableau e atualiza o status da tarefa
 def background_acompanhar_tableau(
         codigo_tarefa,
@@ -523,6 +601,7 @@ def background_acompanhar_tableau(
         nome_arquivo_log,
         label_processo,
         dados_pai_para_filho):
+
     # Restaura dados herdados do processo pai
     restaura_dados_no_processo_filho(dados_pai_para_filho)
 
@@ -790,6 +869,15 @@ def background_acompanhar_tableau(
         )
         mover_pasta_storage(subpasta, pasta_destino)
 
+        # Adiciona no arquivo sapi.info a pasta de origem
+        sapi_tableau=dict()
+        sapi_tableau['pasta_origem']=subpasta
+        sapi_tableau['base_nome_original']=Gtableau_imagem
+        sapi_tableau['base_nome_novo']=nome_base
+        sapi_info_set(pasta_destino, 'sapi_tableau', sapi_tableau)
+        print_log("Registrado situação em sapi.info")
+
+        # Movimentação concluída
         sapisrv_atualizar_status_tarefa_informativo(
             codigo_tarefa=codigo_tarefa,
             texto_status="Pasta temporária movida para pasta definitiva"
@@ -1385,6 +1473,27 @@ def finalizar_programa():
 # Chamada para rotina principal
 # ----------------------------------------------------------------------------------
 if __name__ == '__main__':
+    pasta_sapi_info= "H:\\sapi_simulacao_storage\\Memorando_1880-17_CF_PR-26"
+
+    #variavel="sub_pasta"
+    #valor="c:\\tempr\\testexxx"
+    #sapi_info_set(pasta_sapi_info, variavel, valor)
+
+    #complexo=dict()
+    #complexo["xxx"]="teste"
+    #complexo["yyy"]="abc"
+    #sapi_info_set(pasta_sapi_info, "complexo1", complexo)
+    #die('ponto1403')
+
+    #sapi_info=sapi_info_carregar(pasta_sapi_info)
+    #var_dump(sapi_info)
+    #die('ponto1407')
+
+    #xxx=sapi_info_get(pasta_sapi_info, "sub_pasta")
+    #var_dump(xxx)
+    #die('ponto1397')
+
+
     # # Parse de um arquivo
     # ret=parse_arquivo_log("tableau_imagem.log", "item01Arrecadacao01")
     # var_dump(ret)

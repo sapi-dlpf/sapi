@@ -2326,6 +2326,15 @@ def obter_caracteristicas_pasta_ok(start_path):
     return carac
 
 
+def obter_tamanho_pasta_ok(path):
+    carac = obter_caracteristicas_pasta_ok(path)
+    if carac is None:
+        return 0
+
+    tamanho = carac.get("tamanho_total", 0)
+    return tamanho
+
+
 # Converte Bytes para formato Humano
 def converte_bytes_humano(size, precision=1, utilizar_base_mil=False):
     suffixes = ['B', 'KB', 'MB', 'GB', 'TB', "PB", "EB", "ZB", "YB"]
@@ -3276,6 +3285,96 @@ def recupera_tarefa_do_setec3(codigo_tarefa):
     return tarefa
 
 
+
+# -----------------------------------------------------------------------------------
+# Armazenamento de dados em arquivo sapi.info
+# -----------------------------------------------------------------------------------
+
+# Guarda variavel com valor no arquivo sapi.info da pasta indicada
+# Se variável já existir, adiciona, caso contrário, atualiza
+# Retorna True/False
+# ----------------------------------------------------------------------
+def sapi_info_set(pasta_sapi_info, variavel, valor):
+
+    # Le situaçao atual, se existir
+    sapi_info = sapi_info_carregar(pasta_sapi_info)
+    if sapi_info is None:
+        # Se não conseguir carregar, inicializa variável para armazenamento
+        sapi_info=dict()
+
+    # Atualiza variável
+    sapi_info[variavel]=valor
+
+    # Grava
+    return sapi_info_gravar(pasta_sapi_info, sapi_info)
+
+# Recupera valor da variável de sapi.info da pasta indicada
+# Se não existir, retorna None
+# ----------------------------------------------------------------------
+def sapi_info_get(pasta_sapi_info, variavel):
+
+    # Le situaçao atual, se existir
+    sapi_info = sapi_info_carregar(pasta_sapi_info)
+    if sapi_info is None:
+        return None
+
+    valor = sapi_info.get(variavel, None)
+    return valor
+
+
+# Grava sapi.info na pasta indicada com o conteúdo fornecido (sapi_info)
+# Retorna True/False
+def sapi_info_gravar(pasta_sapi_info, sapi_info):
+
+    # Monta caminho completo para arquivo
+    caminho_sapi_info=montar_caminho(pasta_sapi_info,'sapi.info')
+
+    try:
+        # Grava em sapi_info
+        arq = open(caminho_sapi_info, "w")
+        json.dump(sapi_info, arq, indent=4)
+        arq.close()
+    except BaseException as e:
+        texto_erro = texto("Gravação de arquivo sapi_info",
+                           caminho_sapi_info,
+                           "falhou, erro: ",
+                           str(e)
+                           )
+        print_log(texto_erro)
+        return False
+
+    # Tudo certo
+    return True
+
+
+
+# Carrega dados (json) do arquivo sapi.info
+# ----------------------------------------------------------------------
+def sapi_info_carregar(caminho_sapi_info):
+
+    if "sapi.info" not in caminho_sapi_info:
+        caminho_sapi_info = montar_caminho(caminho_sapi_info, 'sapi.info')
+
+    # Não tem arquivo de estado
+    if (not os.path.isfile(caminho_sapi_info)):
+        return None
+
+    # Le dados do arquivo e fecha
+    try:
+        arq = open(caminho_sapi_info, "r")
+        sapi_info = json.load(arq)
+        arq.close()
+    except BaseException as e:
+        texto_erro=texto("Leitura de arquivo sapi_info",
+                         caminho_sapi_info,
+                         "falhou, erro: ",
+                         str(e)
+                         )
+        print_log(texto_erro)
+        return None
+
+    # Tudo certo
+    return sapi_info
 
 
 # *********************************************************************************************************************

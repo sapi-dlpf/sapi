@@ -347,7 +347,7 @@ def odt_dump_todos_paragrafos(elemento):
         print("========================================================")
 
 
-def odt_busca_ancestral_com_tipo(elemento, raiz, tipo):
+def odt_busca_ancestral_com_tipo(elemento, raiz, tipo, debug=False):
     # mapeamento de pai filho, para poder subir para o ancestral
     filho_para_pai = {
         c: p for p in raiz.iter() for c in p
@@ -356,13 +356,19 @@ def odt_busca_ancestral_com_tipo(elemento, raiz, tipo):
     ancestral = elemento
     while (True):
         tipo_ancestral = odt_get_tipo(ancestral)
+
+        if debug:
+            print("odt_busca_ancestral_com_tipo => ancestral: ", ancestral, "tipo: ", tipo_ancestral)
+
         if (tipo_ancestral == tipo):
+            if debug: print("odt_busca_ancestral_com_tipo =>: Achou : ", ancestral)
             return ancestral
 
         # Sobe para pai
         ancestral = filho_para_pai.get(ancestral, None)
         if (ancestral is None):
             # Chegou no topo, e não encontrou sapiCampoVar
+            if debug: print("odt_busca_ancestral_com_tipo =>: Não tem pai")
             return None
 
 
@@ -1145,6 +1151,7 @@ def criar_linha_para_item(tr_modelo, dados_item, dblocos):
 
             # Armazena o tipo de componente detectado
             Gtipos_componentes[tipo]=1
+            print_log("Adicionado tipo de componente: ", tipo)
 
             # Recupera bloco de identificação específico
             # para o tipo de componente
@@ -1416,7 +1423,7 @@ def parse_quesitos_respostas(dblocos):
                 "- ERRO: Quesitação '" + q + "' não possui seção de respostas. Defina bloco '" + GsapiRespostas + q + "'")
             sucesso = False
         else:
-            print_tela_log("- Encontrada quesitação e resposta com label '" + q + "'")
+            print_log("Encontrada quesitação e resposta com label '" + q + "'")
     # Alguma resposta sem quesito?
     for r in respostas:
         if (r not in quesitos):
@@ -1592,7 +1599,7 @@ def _usuario_escolhe_quesitacao(quesitos_respostas):
 
         # Solicita que usuário informe a quantidade de quesitos da solicitação
         while True:
-            pergunta = "< Quantos quesitos tem na solicitação de exame (n, ou * para listar todos)?  "
+            pergunta = "< Informe a quantidade de quesitos da quesitação (ou * para listar todas): "
             # Valida resposta
             qtd_quesitos_solicitacao = input(pergunta)
             qtd_quesitos_solicitacao = qtd_quesitos_solicitacao.strip()
@@ -1607,7 +1614,8 @@ def _usuario_escolhe_quesitacao(quesitos_respostas):
                 qtd_quesitos_solicitacao=1
             break
 
-        # Exibe opções de quesitos com quantidade selecionada
+        # Exibe lista de quesitação que atendem requisito de quantidade
+        # -------------------------------------------------------------
         map_ix_para_seq=dict()
         qtd_seq = 0
         for ix in range(0, len(lista)):
@@ -1637,7 +1645,12 @@ def _usuario_escolhe_quesitacao(quesitos_respostas):
             map_ix_para_seq[qtd_seq]=ix
 
             print_centralizado("")
-            print(qtd_seq, "=> ", "Qtd. quesitos:", int(quantidade_quesitos), "  Nome da quesitação:", nome_quesito)
+            print(qtd_seq,
+                  "=> ",
+                  "Qtd. quesitos:", int(quantidade_quesitos),
+                  "  Nome da quesitação:", nome_quesito
+                  #, "[",ix,"]"
+                  )
             print_centralizado("")
             # Imprime o resumo de três quesitos por linha
             # tam_linha = 105
@@ -1661,7 +1674,8 @@ def _usuario_escolhe_quesitacao(quesitos_respostas):
         print('- Em função de limitações da console,  é possível que alguns caracteres acentuados tenham ')
         print('  sido substituídos por "?" no resumo. Não se preocupe, no laudo gerado ficará ok.')
 
-        # Seleciona quesitação
+        # Solicita que usuário seleciona a quesitação da lista
+        # ----------------------------------------------------
         while True:
             print()
             pergunta = "< Selecione a quesitação entrando com o número de sequencia da lista acima (1 a " + str(
@@ -1674,14 +1688,27 @@ def _usuario_escolhe_quesitacao(quesitos_respostas):
             seq = int(seq)
             if (seq < 1): continue
             if (seq > qtd_seq): continue
-            # Tudo certo
+
+            #Ok, usuário selecionou uma quesitação da lista
             break
 
-        # Retorna definição de  quesitos e respostas
-        ix = map_ix_para_seq[seq]
-        nome_quesitacao = lista[seq - 1].split("^")[1]
+        # Confirma se a quesitação selecionada é realmente a desejada
+        # -----------------------------------------------------------
+        #var_dump(map_ix_para_seq)
+        ix_selecionada = map_ix_para_seq[seq]
+        nome_quesitacao = lista[ix_selecionada].split("^")[1]
         quesitacao_selecionada = quesitos_respostas[nome_quesitacao]
-        return quesitacao_selecionada
+
+        # Separa o nome da chave de ordenação e recupera quesitação
+        resumo_quesitos = quesitacao_selecionada["resumo_quesitos"]
+        print()
+        print("Quesitação selecionada:")
+        print("=======================")
+        print(resumo_quesitos)
+        print()
+        if pergunta_sim_nao("< Confirma quesitação selecionada?", default="s"):
+            # Tudo certo, usuário selecionou quesitação
+            return quesitacao_selecionada
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -1856,6 +1883,8 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
 
     print_log("- Recuperando e validando referência a campos variáveis")
     (sucesso, lista_cv_office_text) = odt_recupera_lista_campos_variaveis_sapi(office_text)
+    #var_dump(lista_cv_office_text)
+    #die('ponto1881')
     if (not sucesso):
         print_tela_log(
             "ERRO => Campos variáveis inválidos: Providencie o ajuste dos campos variáveis no modelo (consulte o gestor do GTPI)")
@@ -1916,8 +1945,6 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     lista_par_quesitos = odt_clonar_bloco(nome_bloco_quesitos, dblocos)
     lista_par_respostas = odt_clonar_bloco(nome_bloco_respostas, dblocos)
 
-
-
     #lista_par_quesitos, lista_par_respostas = determina_quesitacao(quesitos_respostas, dblocos)
     #if lista_par_quesitos is None:
     #    return
@@ -1958,8 +1985,9 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     # Por fim, substitui os parágrafos das respostas aos quesitos
     odt_substituir_paragrafo_por_lista(paragrafo_substituir_sapi_respostas, odt_raiz, lista_par_respostas)
 
-
-    #var_dump(lista_par_respostas)
+    #for p in lista_par_respostas:
+    #    odt_dump_paragrafo(p)
+    #die('ponto1960')
 
     # ------------------------------------------------------------------------------------------------------------------
     # Geração de tabela de materiais examinados
@@ -2068,84 +2096,12 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
 
 
 
-    # --------------------------------------------------------------------
-    # Substitui campos variáveis por blocos com mesmo nome
-    # ------------------------------------------------------------------
-    print()
-    print("Passo 5: Substituição de variáveis por blocos de parágrafos")
-    print("-----------------------------------------------------------")
-
-    # Monta lista de extensões de variáveis de laudo que devem ser consideradas
-    # As extensões tratadas atualmente são:
-    # paraCelular       => Relacionado com exame de celular em geral
-    # paraSim           => Relacionado com exame específico de Sim Card
-    # paraAparelho      => Relacionado com exame específico de aparelho Celular
-    # paraArmazenamento => Relacionado com dispositivo de armazenamento de dados
-    considerar=dict()
-    if 'sim' in Gtipos_componentes:
-        considerar['paraSim']=True
-        considerar['paraCelular']=True
-    if 'aparelho' in Gtipos_componentes:
-        considerar['paraAparelho'] = True
-        considerar['paraCelular'] = True
-    if 'armazenamento' in Gtipos_componentes:
-        considerar['paraArmazenamento'] = True
-
-    # Monta lista complementar, indicando quais variáveis devem ser desprezadas
-    todas=('paraSim', 'paraAparelho', 'paraCelular', 'paraArmazenamento')
-    desprezar=list()
-    for d in todas:
-        if considerar.get(d,None) is None:
-            desprezar.append(d)
-
-    (sucesso, lista_cv) = odt_recupera_lista_campos_variaveis_sapi(odt_raiz)
-    for campo in lista_cv:
-        nome_campo_variavel = campo['name'].lower()
-        # print(nome_campo_variavel)
-
-        # Verifica se existe bloco com nome igual ao da variável
-        if dblocos.get(nome_campo_variavel, None) is None:
-            # Não existe bloco com o nome de campo variável. Despreza variável.
-            continue
-
-
-        # Recupera lista de blocos do parágrafo
-        lista_par_bloco = odt_clonar_bloco(nome_campo_variavel, dblocos)
-
-        # Localiza parágrafo pai onde está localizado a variável
-        # uma vez que o parágrafo (inteiro) será substituido pelo conjunto de parágrafos do bloco
-        # Atenção: Isto impede que um parágrafo contenha mais de uma variável
-        paragrafo_substituir = odt_busca_ancestral_com_tipo(campo['pai'], raiz=odt_raiz,
-                                                                     tipo='p')
-
-        # Recupera elemento pai do parágrafo aonde aparece variável
-        elemento_pai = odt_determinar_elemento_pai(paragrafo_substituir, odt_raiz)
-
-        #odt_dump_paragrafo(paragrafo_substituir)
-        #odt_dump_paragrafo(paragrafo_pai)
-        #die('ponto2001')
-
-        # Verifica se variável deve ser deprezada
-        ignorar_variavel=False
-        for d in desprezar:
-            if d in nome_campo_variavel:
-                ignorar_variavel=True
-                break
-
-        if ignorar_variavel:
-            # Elimina parágrafo que contém referência à variável
-            elemento_pai.remove(paragrafo_substituir)
-            print("- Desprezando parágrafo que continha " + nome_campo_variavel + " uma vez que laudo não contém material desta natureza")
-        else:
-            # Substitui a variável
-            odt_substituir_paragrafo_por_lista(paragrafo_substituir, odt_raiz, lista_par_bloco)
-            print("- Substituido variável " + nome_campo_variavel + " por bloco correspondente")
-
     # ------------------------------------------------------------------
     # Substitui textos gerais do corpo do laudo
+    # Não é texto que está em blocos
     # ------------------------------------------------------------------
     print()
-    print("Passo 6: Substituição de textos gerais do laudo")
+    print("Passo 5: Substituição de textos gerais do laudo")
     print("-----------------------------------------------")
 
     # Processa auto
@@ -2164,13 +2120,13 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
     # Recupera dados gerais que estão armazenados em tarefas
     # ------------------------------------------------------------------
     dict_software = dict()
+    print_tela_log("- Recuperando dados gerais armazenados nas tarefas")
     for dados_item in Gitens:
         item = dados_item['item']
         # Despreza materiais de destino
         if item=='destino':
             continue
 
-        print_tela_log("- Recuperando dados gerais de tarefas do item", item)
         recupera_dados_gerais_tarefas(dados_item, dict_software)
 
     # Ajuste em sapiSoftwareVersao
@@ -2193,22 +2149,27 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
         if (qtd_substituicoes == 0):
             print("Falhou na substituição de '" + substituir + "'")
             return
+        else:
+            print("- Substituído", substituir)
 
     # ------------------------------------------------------------------------------------------------------------------
     # Substitui sapiEntrega
     # ------------------------------------------------------------------------------------------------------------------
 
+    nome_bloco_entrega=None
     cv_sapi_entrega = odt_localiza_campo_variavel(lista_cv_office_text, GsapiEntrega)
     if (cv_sapi_entrega is None):
         print_tela_log(
             "AVISO: No modelo não existe campo (", + GsapiEntrega + "). Substituição não será efetuada.")
     else:
+        print_tela_log("- Localizada variável", GsapiEntrega)
         # --- Início substituição de sapiEntrega
         # var_dump(solicitacao)
         #die('ponto1636')
 
         # Ajusta metodo_entrega
         metodo_entrega = Gsolicitacao_exame['dados_exame']['metodo_entrega']
+        print_tela_log("- Método de entrega definido (SETEC3): ", metodo_entrega)
         # O método do banco vem no seguinte formato:
         # entrega_DVD
         # entrega_BLURAY
@@ -2221,27 +2182,144 @@ def ajustar_laudo_odt(caminho_arquivo_entrada_odt):
         metodo_entrega=partes[0]
         # Remove o prefixo "entrega_"
         metodo_entrega = metodo_entrega.replace("entrega_", "")
-        #var_dump(metodo_entrega)
 
-        # Recupera bloco de parágrafos do método de entrega selecionado
         nome_bloco_entrega = GsapiEntrega + metodo_entrega
-        #var_dump(nome_bloco_entrega)
+        nome_bloco_entrega = nome_bloco_entrega.lower()
+        print_tela_log("- Bloco para substituição de ", GsapiEntrega, ": ",nome_bloco_entrega)
 
-        # Recupera listas de parágrafos das perguntas e respostas
-        lista_par_entrega = odt_clonar_bloco(nome_bloco_entrega, dblocos)
-        #var_dump(lista_par_entrega)
+        # A substituição será feita no próximo passo, uma
+        # vez que agora o campo sapiEntrega está dentro de um bloco variável
 
-        # Substitui bloco de parágrafo
-        paragrafo_substituir_sapi_entrega = odt_busca_ancestral_com_tipo(cv_sapi_entrega['pai'], raiz=odt_raiz,
-                                                                           tipo='p')
-        #var_dump(paragrafo_substituir_sapi_entrega)
-        if (paragrafo_substituir_sapi_entrega is None):
-            print_tela_log("ERRO 2239: Não encontrado parágrafo onde se localiza '" + GsapiEntrega + "'")
-            # Não é um erro fatal....
-            #return
-        else:
-            odt_substituir_paragrafo_por_lista(paragrafo_substituir_sapi_entrega, odt_raiz, lista_par_entrega)
+        ## Recupera bloco de parágrafos do método de entrega selecionado
+
+        ## Recupera listas de parágrafos do bloco de substituição
+        # lista_par_entrega = odt_clonar_bloco(nome_bloco_entrega, dblocos)
+        # # Substitui bloco de parágrafo
+        # # Procurar parágrafo que será substituido
+        # paragrafo_substituir_sapi_entrega = odt_busca_ancestral_com_tipo(
+        #     cv_sapi_entrega['pai'],
+        #     raiz=odt_raiz,
+        #     tipo='p',
+        #     debug=True)
+        #
+        # #var_dump(cv_sapi_entrega)
+        # var_dump(paragrafo_substituir_sapi_entrega)
+        # odt_dump_paragrafo(paragrafo_substituir_sapi_entrega)
+        # die('ponto2187')
+        # if (paragrafo_substituir_sapi_entrega is None):
+        #     print_tela_log("ERRO 2239: Não encontrado parágrafo onde se localiza '" + GsapiEntrega + "'")
+        #     # Não é um erro fatal....
+        #     #return
+        #
+        # odt_substituir_paragrafo_por_lista(paragrafo_substituir_sapi_entrega, odt_raiz, lista_par_entrega)
         # --- Fim substituição de sapiEntrega
+
+
+
+    # --------------------------------------------------------------------
+    # Substitui campos variáveis por blocos com mesmo nome
+    # ------------------------------------------------------------------
+    print()
+    print("Passo 6: Substituição de variáveis por blocos de parágrafos")
+    print("-----------------------------------------------------------")
+
+    # Monta lista de extensões de variáveis de laudo que devem ser consideradas
+    # As extensões tratadas atualmente são:
+    # paraCelular       => Relacionado com exame de celular em geral
+    # paraSim           => Relacionado com exame específico de Sim Card
+    # paraAparelho      => Relacionado com exame específico de aparelho Celular
+    # paraArmazenamento => Relacionado com dispositivo de armazenamento de dados
+    print("- Tipos de componentes a serem considerados: ", list(Gtipos_componentes.keys()))
+    considerar=dict()
+    if 'sim' in Gtipos_componentes:
+        considerar['paraSim']=True
+        considerar['paraCelular']=True
+    if 'aparelho' in Gtipos_componentes:
+        considerar['paraAparelho'] = True
+        considerar['paraCelular'] = True
+    if 'armazenamento' in Gtipos_componentes:
+        considerar['paraArmazenamento'] = True
+    print("- Considerando parágrafos com os seguintes sufixos: ", list(considerar.keys()))
+
+    # Monta lista complementar, indicando quais variáveis devem ser desprezadas
+    todas=('paraSim', 'paraAparelho', 'paraCelular', 'paraArmazenamento')
+    desprezar=list()
+    for d in todas:
+        if considerar.get(d,None) is None:
+            desprezar.append(d)
+    print("- Eliminando parágrafos com variáveis contendo os seguintes sufixos: ", desprezar)
+
+    # Em cada passada (iteração) efetua a substituição de um conjunto de variáveis
+    # Nos novos parágrafos podem surgir novas variáveis, que por sua vez
+    # devem ser substituidas (se houver algo para substituir)
+    lista_variaveis_processadas=list()
+    passada=0
+    nova_variavel=True
+    while nova_variavel:
+
+        passada += 1
+        # Será alterado para True, se alguma nova variável for encontrada
+        nova_variavel=False
+
+        # Substitui todas as variáveis disponíveis nesta passada
+        # ------------------------------------------------------
+        (sucesso, lista_cv) = odt_recupera_lista_campos_variaveis_sapi(odt_raiz)
+        for campo in lista_cv:
+            nome_campo_variavel = campo['name'].lower()
+            # print(nome_campo_variavel)
+
+            # Despreza, se variável já foi processada
+            if nome_campo_variavel in lista_variaveis_processadas:
+                continue
+
+            lista_variaveis_processadas.append(nome_campo_variavel)
+            nova_variavel=True
+
+            # Verifica se existe bloco com nome igual ao da variável
+            nome_bloco_substituir=nome_campo_variavel
+            # Variável sapiEntrega é uma exceção,
+            # pois pode ser substituida por blocos diferentes,
+            # dependendo do método de entrega (ex: sapiEntregaDVD)
+            if nome_campo_variavel.lower()==GsapiEntrega.lower():
+                nome_bloco_substituir=nome_bloco_entrega
+
+            if dblocos.get(nome_bloco_substituir, None) is None:
+                # Não existe bloco com o nome de campo variável. Despreza variável.
+                print_log(passada, "Não foi encontrado bloco ", nome_bloco_substituir, "para substituir variável " + nome_campo_variavel)
+                continue
+
+            # Recupera lista de blocos do parágrafo
+            lista_par_bloco = odt_clonar_bloco(nome_bloco_substituir, dblocos)
+
+            # Localiza parágrafo pai onde está localizado a variável
+            # uma vez que o parágrafo (inteiro) será substituido pelo conjunto de parágrafos do bloco
+            # Atenção: Isto impede que um parágrafo contenha mais de uma variável
+            paragrafo_substituir = odt_busca_ancestral_com_tipo(campo['pai'], raiz=odt_raiz,
+                                                                         tipo='p')
+
+            # Recupera elemento pai do parágrafo aonde aparece variável
+            elemento_pai = odt_determinar_elemento_pai(paragrafo_substituir, odt_raiz)
+
+            #odt_dump_paragrafo(paragrafo_substituir)
+            #odt_dump_paragrafo(paragrafo_pai)
+            #die('ponto2001')
+
+            # Verifica se variável deve ser deprezada
+            ignorar_variavel=False
+            for d in desprezar:
+                if str(d).lower() in str(nome_campo_variavel).lower():
+                    ignorar_variavel=True
+                    break
+
+            if ignorar_variavel:
+                # Elimina parágrafo que contém referência à variável
+                elemento_pai.remove(paragrafo_substituir)
+                print_log(passada, "Eliminado parágrafo que continha " + nome_campo_variavel + " uma vez que laudo não contém material desta natureza")
+            else:
+                # Substitui a variável
+                odt_substituir_paragrafo_por_lista(paragrafo_substituir, odt_raiz, lista_par_bloco)
+                print_log(passada,"Substituída variável " + nome_campo_variavel + " por bloco correspondente")
+
 
     # ------------------------------------------------------------------------------------------------------------------
     # ------------------------------------------------------------------------------------------------------------------
