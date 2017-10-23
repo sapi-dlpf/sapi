@@ -57,10 +57,6 @@ Gconfiguracao = dict()
 Gcaminho_pid = "sapi_tableau_pid.txt"
 
 
-# Configuração de limites para avisos
-# Irá gerar mensagem de aviso,
-# caso este percencutal de erros de leitura seja ultrapassado
-GlimitePercentualErroLeitura = 1
 
 # Cache de tarefas, para evitar releitura
 Gcache_tarefa = dict()
@@ -72,8 +68,6 @@ Gpasta_raiz_tableau = None
 # os nomes dos arquivos (.E01, .E02, .log, etc)
 Gtableau_imagem = "image"
 
-# Tipo de componente, para que laudo possa montar descrição adequada
-Gsapi_tipo_componente = 'armazenamento'
 
 # **********************************************************************
 # PRODUCAO DEPLOYMENT AJUSTAR
@@ -247,6 +241,9 @@ def executar():
         elif codigo_situacao_tarefa == GTableauExecutando:
             # Se já está executando, monitora tarefa
             monitorar_tarefa(codigo_tarefa)
+        elif codigo_situacao_tarefa == GFilaExclusao:
+            # Se já está executando, monitora tarefa
+            excluir_tarefa(codigo_tarefa)
         else:
             # Nada a fazer para as demais situações
             print_log("Nenhuma ação tomada para tarefa", codigo_tarefa, "que está com situação", codigo_situacao_tarefa)
@@ -494,7 +491,7 @@ def monitorar_tarefa(codigo_tarefa):
         return True
 
 
-    print_log("Inicio de monitaramento da tarefa", codigo_tarefa)
+    print_log("Inicio de monitoramento da tarefa", codigo_tarefa)
 
     # Recupera dados da tarefa do cache,
     # para evitar sobrecarregar o servidor com requisições
@@ -764,7 +761,7 @@ def background_acompanhar_tableau(
 
     # Processa log do tableau, extraindo dados da tarefa para utilização no laudo
     # -------------------------------------------------------------------------------
-    (sucesso, erro, dados_relevantes) = parse_arquivo_log_tableau(caminho_arquivo_log, item)
+    (sucesso, erro, dados_relevantes) = tableau_parse_arquivo_log(caminho_arquivo_log, item)
 
     if sucesso:
         print_log("Tudo certo no log")
@@ -902,536 +899,112 @@ def background_acompanhar_tableau(
     print_log("Tarefa de imagem do tableau finalizada com sucesso")
 
 
-# Faz parse no arquivo de log do Tableau e extrai informações relevantes para laudo
-# Recebe o arquivo de log, e o item correspondente
-def parse_arquivo_log_tableau(caminho_arquivo_log, item):
-    try:
-        return _parse_arquivo_log_tableau(caminho_arquivo_log, item)
 
+def excluir_tarefa(codigo_tarefa):
+
+    print_log("Exclusão da tarefa da tarefa", codigo_tarefa)
+
+    # Recupera dados da tarefa do cache,
+    # para evitar sobrecarregar o servidor com requisições
+    tarefa = obter_tarefa_cache(codigo_tarefa)
+
+    # Pasta para a tarefa
+    (pasta_tableau, pasta_material) = obter_caminho_pasta_tableau(tarefa)
+    print_log("Pasta de tableau da tarefa: ", pasta_tableau)
+
+    # Se pasta não existe, tem algo erro aqui
+    if not os.path.exists(pasta_tableau):
+        # Isto aqui não deveria acontecer nunca...foi feita exclusão manual?
+        erro = texto("Pasta do tableau não existe")
+        sapisrv_reportar_erro_tarefa(codigo_tarefa, erro)
+        return False
+
+    # Se pasta da tarefa está vazia,
+    # ou seja, ainda não foi iniciado o upload,
+    # então não tem nada a fazer
+    # Recupera tamanho da pasta
+    carac = obter_caracteristicas_pasta_ok(pasta_tableau)
+    if carac is None:
+        return False
+
+    if carac["tamanho_total"] == 0:
+        # Pasta está zerada (tamanho zero)
+        # Logo, ainda não tem nada a fazer
+        print_log("Tarefa ainda sem dados na pasta de temporária. Aguardar início do tableau")
+        return False
+
+    # Acompanha execução da tarefa de cópia
+    deu_erro = False
+    erro_exception = None
+    try:
+
+        if int(tarefa["codigo_situacao_tarefa"]) != GTableauExecutando:
+            # Registra comando de execução do IPED
+            sapisrv_troca_situacao_tarefa_loop(
+                codigo_tarefa=codigo_tarefa,
+                codigo_situacao_tarefa=GTableauExecutando,
+                texto_status="Pasta do tableau contém dados"
+            )
+
+        # Inicia processo para acompanhamento em background
+        print_log("Tarefa: ", codigo_tarefa, "Pasta do tableau tem conteúdo. Iniciando acompanhamento")
+
+        # Inicia subprocesso para acompanhamento do Tableau
+        # ------------------------------------------------
+        nome_arquivo_log = obter_nome_arquivo_log()
+        dados_pai_para_filho = obter_dados_para_processo_filho()
+        label_processo = "acompanhar:" + str(codigo_tarefa)
+        item = tarefa["item"]
+        caminho_destino = tarefa["caminho_destino"]
+
+        (pasta_destino, pasta_item, nome_base)=decompor_caminho_destino(caminho_destino)
+
+        # Inicia tarefa em background
+        # ----------------------------
+        p_acompanhar = multiprocessing.Process(
+            target=background_acompanhar_tableau,
+            args=(codigo_tarefa,
+                  item,
+                  pasta_tableau,
+                  pasta_item,
+                  pasta_destino,
+                  nome_base,
+                  nome_arquivo_log,
+                  label_processo,
+                  dados_pai_para_filho
+                  )
+        )
+        p_acompanhar.start()
+        registra_processo_filho(label_processo, p_acompanhar)
+
+    except subprocess.CalledProcessError as e:
+        # Se der algum erro, não volta nada acima, mas tem como capturar pegando o output da exception
+        erro_exception = str(e.output)
+        deu_erro = True
     except Exception as e:
-        erro = "Parse de log do Tableau falhou: " + str(e)
-        return (False, erro, {})
+        # Alguma outra coisa aconteceu...
+        erro_exception = str(e)
+        deu_erro = True
 
+    if deu_erro:
+        print_log("Erro na chamada do acompanhamento de tarefa: ", erro_exception)
+        return False
 
-def _parse_arquivo_log_tableau(caminho_arquivo_log, item):
-    # Lista de avisos
-    avisos = list()
+    #time.sleep(100)
+    #print("Interrompendo principal para iniciar apenas uma tarefa")
+    #die('ponto1784')
 
-    # Exemplo de log do tableau
-    '''
-    -----------------------------Start of TD3 Log Entry-----------------------------
+    # Ok, tudo certo. O resto é com o processo em background
+    return True
 
-    Task: Disk Image
-    Status: Ok
-    Created: Thu Sep 21 14:31:53 2017
-    Started: Thu Sep 21 14:31:53 2017
-    Closed: Thu Sep 21 14:42:49 2017
-    Elapsed: 11 min
-    User: <<not entered>>
-    Case ID: <<not entered>>
-    Case Notes: <<not entered>>
 
-    Imager App: TD3
-    Imager Ver: 2.0.0
-    TD3 S/N: 000ecc11d370f2
 
-    ------------------------------Source Disk-------------------------------
 
-    Interface: USB
-    Model: Kingston DataTraveler 108
-    Firmware revision: PMAP
-    USB Serial number: 0060E049DF71EBB100005893
-    Capacity in bytes: 3,926,949,888 (3.9 GB)
-    Block Size: 512 bytes
-    Block Count: 7,669,824
 
-    ----------------------------Destination CIFS----------------------------
 
-    Share Name: //10.41.87.235/tableau
 
-    --------------------------Disk Imaging Results--------------------------
 
-    Output file format: E01 - EnCase format
-    Chunk size in bytes: 2,147,483,648 (2.1 GB)
-    Chunks written: 2
-    Filename of first chunk: 1023_17_parte_1/2017-09-21_14-31-52/temporario.E01
-    Total errors: 3
-    Acquisition MD5:   cfdd6b92b8599309bbc8901d05ec2927
-    Acquisition SHA-1: bb6bc7a155d22e748148b7f6100d50edabdb324c
 
-    -----------------------------List of Errors-----------------------------
-
-    Error # 1: Read error (source), byte offset=2123809280, byte length=512
-    Error # 2: Read error (source), byte offset=2123810304, byte length=512
-    Error # 3: Read error (source), byte offset=2123811328, byte length=512
-
-    ---------------------Readback Verification Results----------------------
-
-    Verification MD5:   cfdd6b92b8599309bbc8901d05ec2927
-    Verification SHA-1: bb6bc7a155d22e748148b7f6100d50edabdb324c
-    Status: Verified
-
-    ------------------------------End of TD3 Log Entry------------------------------
-    '''
-
-    # Definição de identificadores de blocos
-    blocos = dict()
-    blocos["start"] = "-----Start of TD3"
-    blocos["source"] = "----Source"
-    blocos["destination"] = "---Destination"
-    blocos["result"] = "---Disk Imaging Results"
-    blocos["erros"] = "----List of Errors"
-    blocos["verification"] = "---Readback Verification Results"
-    blocos["fim"] = "----End of TD3"
-
-    # Definição de tags de campos
-    tags = dict()
-    tags["erro_geral"] = "<<< CAUTION: "
-    tags["task"] = "Task: "
-    tags["status"] = "Status: "
-    tags["created"] = "Created: "
-    tags["started"] = "Started: "
-    tags["closed"] = "Closed: "
-    tags["elapsed"] = "Elapsed: "
-    tags["user"] = "User: "
-    tags["case"] = "Case ID:"
-    tags["notes"] = "Case Notes:"
-    tags["imager_app"] = "Imager App:"
-    tags["imager_ver"] = "Imager Ver:"
-    tags["td3_sn"] = "TD3 S/N:"
-    tags["interface"] = "Interface: "
-    tags["modelo"] = "Model: "
-    tags["firmware_revision"] = "Firmware revision:"
-    tags["0_usb_serial_number"] = "USB Serial number:"
-    tags["1_serial_number"] = "Serial number:"
-    tags["capacity"] = "Capacity in bytes:"
-    tags["block_size"] = "Block Size:"
-    tags["block_count"] = "Block Count:"
-    tags["share_name"] = "Share Name:"
-    tags["output_file_format"] = "Output file format:"
-    tags["chunk_bytes"] = "Chunk size in bytes:"
-    tags["chunks_written"] = "Chunks written:"
-    tags["first_chunk"] = "Filename of first chunk:"
-    tags["total_erros"] = "Total errors:"
-    tags["aquisition_md5"] = "Acquisition MD5:"
-    tags["aquisition_sha1"] = "Acquisition SHA-1:"
-    #tags["verification_md5"] = "Verification MD5: "
-    #tags["verification_sha1"] = "Verification SHA-1:"
-
-    # Processa o arquivo de log
-    with open(caminho_arquivo_log, "r") as fentrada:
-
-        id_bloco = None
-        valores = dict()
-        for linha in fentrada:
-
-            # Sanitiza
-            # Troca tabulação por espaço
-            # linha=linha.replace('\t',' ')
-
-            processado = True
-
-            # Verifica se é uma linha de início de bloco
-            for b in blocos:
-                if blocos[b] in linha:
-                    id_bloco = b
-                    break
-
-            # Verifica se é linha de tag conhecido
-            for t in sorted(tags):
-                if tags[t] in linha:
-                    id_tag = t
-                    # Separa valor
-                    # Task: Disk Image
-                    partes = linha.split(':')
-                    v = partes[1].strip()
-                    # Armazena valor
-                    chave = id_bloco + ":" + id_tag
-                    valores[chave] = v
-                    #
-                    break
-
-            # Ok, prossegue para a proxima linha
-            continue
-
-    # var_dump(valores)
-    # die('ponto756')
-
-    # -----------------------------------------------------------------------------
-    # O código acima irá produzir um dicionário sendo:
-    # Chave: concatenação do bloco com o tag identificador do campo (ex: start:elapsed)
-    # Valor: O que vem depois do tag
-    # -----------------------------------------------------------------------------
-    # Exemplo:
-    '''
-     valores={
-     'start:erro_geral': 'THE OPERATION RECORDED IN THIS LOG DID NOT COMPLETE NORMALLY >>>'
-     'start:case': '<<not entered>>',
-     'start:closed': 'Thu Sep 21 14',
-     'start:created': 'Thu Sep 21 14',
-     'start:elapsed': '11 min',
-     'start:imager_app': 'TD3',
-     'start:imager_ver': '2.0.0',
-     'start:notes': '<<not entered>>',
-     'start:started': 'Thu Sep 21 14',
-     'start:status': 'Ok',
-     'start:task': 'Disk Image',
-     'start:td3_sn': '000ecc11d370f2',
-     'start:user': '<<not entered>>',
-     'source:block_count': '7,669,824',
-     'source:block_size': '512 bytes',
-     'source:capacity': '3,926,949,888 (3.9 GB)',
-     'source:firmware_revision': 'PMAP',
-     'source:interface': 'USB',
-     'source:modelo': 'Kingston DataTraveler 108',
-     'source:0_usb_serial_number': '0060E049DF71EBB100005893',
-     'source:1_serial_number': 'NA8NMGTN',
-     'destination:share_name': '//10.41.87.235/tableau',
-     'result:aquisition_md5': 'cfdd6b92b8599309bbc8901d05ec2927',
-     'result:aquisition_sha1': 'bb6bc7a155d22e748148b7f6100d50edabdb324c',
-     'result:chunk_bytes': '2,147,483,648 (2.1 GB)',
-     'result:chunks_written': '2',
-     'result:first_chunk': '1023_17_parte_1/2017-09-21_14-31-52/temporario.E01',
-     'result:output_file_format': 'E01 - EnCase format',
-     'result:total_erros': '0'
-     }
-    '''
-
-    # Não exigem mais verificação
-    # Isto será feito no servidor
-    #'verification:status': 'Verified',
-    #'verification:verification_md5': 'cfdd6b92b8599309bbc8901d05ec2927',
-    #'verification:verification_sha1': 'bb6bc7a155d22e748148b7f6100d50edabdb324c'
-
-    # Duplicação não foi finalizada
-    erro_geral = valores.get('start:erro_geral', None)
-    if erro_geral is not None:
-        erro = texto("Erro:", erro_geral,
-                     " Consulte o log do tableau que foi carregado para o SAPI",
-                     " para mais detalhes")
-        return (False, erro, {})
-
-    # Verificação não deveria estar ligada
-    # Se estiver ligada, acusa um erro, para evitar que a lentidão afete outros
-    # procedimentos
-    # Verifica se o resultado é sucesso
-    # Se não for sucesso, não tem por que prosseguir,
-    # pois operação terá que ser refeita
-    resultado = valores.get('verification:status', None)
-    # No início, exigia verificação. Agora, não pode ter verificação
-    # if resultado is None:
-    #     erro = texto("Não foi possível identificar resultado final da imagem",
-    #                  "(não encontrado Bloco Readback Verification Results ",
-    #                  "com campo Status: Verified). ",
-    #                  "Confirme se opção de verificação está ativa.")
-    #     return (False, erro, {})
-    if resultado is not None:
-        erro = texto("A verificação do Tableau está ligada.",
-                     " Isto dobra o tempo de imagem.",
-                     " Desligue a verificação"
-                     );
-        return (False, erro, {})
-
-
-    # -----------------------------------------------------------------------------
-    # Duplicação efetuada com SUCESSO
-    # -----------------------------------------------------------------------------
-
-    # Dicionário para armazenamento de dados do componente que foi duplicado
-    dlaudo = dict()
-    dcomp = dict()
-
-    # -----------------------------------------------------------------------------
-    # Versão do tableau
-    # -----------------------------------------------------------------------------
-    # start:imager_ver': '2.0.0'
-    versao = valores.get('start:imager_ver', None)
-    if versao is None:
-        erro = texto("Não foi possível identificar a versão do Tableau.")
-        return (False, erro, {})
-
-    if versao != '2.0.0':
-        erro = texto("Versão do Tableau utilizado: ",
-                     versao,
-                     " é diferente da versão esperada (2.0.0)")
-        return (False, erro, {})
-
-    tableau_versao = valores.get('start:imager_app', "?") + " " + versao
-    dlaudo["sapiSoftwareVersao"] = "Tableau " + tableau_versao
-
-    # Separa outros elementos relevantes para utilização em laudo
-    # A chave é o nome no tableau
-    # O texto é o nome no SAPI
-    relevantes = {
-        # Elapsed: 11 min
-        'start:elapsed': 'sapiTempoExecucaoSegundos',
-
-        # TD3 S/N: 000ecc11d370f2
-        'start:td3_sn': 'sapiTableauSN',
-
-        # Share Name: //10.41.87.235/tableau
-        'destination:share_name': 'sapiStorageDestino',
-
-        # Model: Seagate Expansion
-        'source:modelo': 'sapiModelo',
-
-        # Tem duas informações serial: da USB e do dispositivo
-        # Aparentemente, todos os dispositivos tem uma identificação serial USB
-        # Contudo, nem todos também disponibilizam a sua identificação serial
-        # do dispositivo interno
-        # Por exemplo: Um hd externo terial o serial da USB e também o serial do próprio HD
-        # que está dentro do case USB.
-
-        # USB Serial number: 0060E049DF71EBB100005893
-        'source:0_usb_serial_number': 'sapiSerialUSB',
-
-        # Serial number: NA8NMGTN
-        'source:1_serial_number': 'sapiSerialDispositivo',
-
-        # Capacity in bytes: 3,926,949,888 (3.9 GB)
-        'source:capacity': 'sapiTamanhoBytes',
-
-        # Output file format: E01 - EnCase format
-        'result:output_file_format': 'sapiFormatoArquivo',
-
-        # Filename of first chunk: 1023_17_parte_1/2017-09-21_14-31-52/temporario.E01
-        'result:first_chunk': 'sapiCaminhoImagemTemporario',
-
-        # Total errors: 0
-        'result:total_erros': 'sapiErrosLeituraQuantidade'
-    }
-
-    for r in relevantes:
-        if (r in valores):
-            chave_sapi = relevantes[r]
-            dcomp[chave_sapi] = valores[r]
-
-    #
-    # var_dump(dcomp)
-
-
-    # ------------------------------------------------------------------------------
-    # Ajuste no tamanho da mídia
-    # ------------------------------------------------------------------------------
-    tamanho = dcomp.get('sapiTamanhoBytes', None)
-    if tamanho is None:
-        erro = texto("Não foi possível identificar o tamanho da mídia de origem (source:capacity)")
-        return (False, erro, {})
-
-    # 3,926,949,888(3.9 GB)
-    partes = tamanho.split("(")
-    t = partes[0].strip()
-    t = t.replace(",", "")
-    try:
-        tamanho = int(t)
-    except:
-        erro = "Não foi possível converter tamanho da mídia para inteiro:" + t
-        return (False, erro, {})
-
-    dcomp['sapiTipoComponente'] = Gsapi_tipo_componente
-    dcomp['sapiTamanhoBytes'] = tamanho
-    dcomp['sapiTamanhoBytesHumano'] = converte_bytes_humano(tamanho)
-    dcomp['sapiTamanhoBytesHumanoMil'] = converte_bytes_humano(tamanho,
-                                                            utilizar_base_mil=True)
-
-    # ------------------------------------------------------------------------------
-    # Ajuste no tempo
-    # ------------------------------------------------------------------------------
-    tempo = dcomp.get('sapiTempoExecucaoSegundos', None)
-    if tempo is None:
-        erro = "Não foi possível identificar o tempo de execução da duplicação (start:elapsed)"
-        return (False, erro, {})
-
-    # Elapsed: 1 hour 28 min 15 sec
-    tempo_orginal = tempo
-    tempo = tempo.replace(' ', '')
-    tempo = tempo.replace('day', ':d ')
-    tempo = tempo.replace('hour', ':h ')
-    tempo = tempo.replace('min', ':m ')
-    tempo = tempo.replace('sec', ':s ')
-    tempo = tempo.strip()
-    partes_tempo = tempo.split(' ')
-
-    tempo_segundos = 0
-    erro = None
-    for p in partes_tempo:
-        # var_dump(p)
-        # die('ponto983')
-
-        x = p.split(':')
-        if len(x) < 2:
-            erro = "Formato de unidade de medida inesperado (" + p + ")"
-            break
-        valor = int(x[0])
-        unidade = x[1]
-        if unidade == 'd':
-            valor *= 24 * 3600
-        elif unidade == 'h':
-            valor = 3600 * valor
-        elif unidade == 'm':
-            valor = 60 * valor
-        elif unidade == 's':
-            valor = valor
-        else:
-            erro = "Unidade de medida (" + unidade + ") inesperada"
-
-        tempo_segundos = tempo_segundos + valor
-        # var_dump(tempo_segundos)
-
-    if erro is not None:
-        erro = "Fomato de elapsed (" + tempo_orginal + ") inesperado : " + erro
-        return (False, erro, {})
-
-    # Tudo certo
-    dcomp['sapiTempoExecucaoSegundos'] = tempo_segundos
-    dcomp['sapiTempoExecucaoHumano'] = converte_segundos_humano(tempo_segundos)
-    # die('ponto1029')
-
-
-    # Todo: Detectar o tipo de dispositivo de origem (HD normal, HD externo: USB com tamanho grande, pendrive...Indeterminado)
-
-    # ------------------------------------------------------------------------------
-    # Calculo do percentual de erro
-    # ------------------------------------------------------------------------------
-    qtd_erros_reportados = int(dcomp['sapiErrosLeituraQuantidade'])
-    if qtd_erros_reportados == 0:
-        # Nenhum erro reportado pelo Tableau
-        dcomp['sapiErrosLeituraPercentualHumano'] = "Nenhum erro de leitura"
-    else:
-        # Le arquivo integralmente, procurando por linhas que indicam setores defeituosos
-        # Exemplo de formato de linha de erro
-        # Error  # 1: Read error (source), byte offset=2123809280, byte length=512
-        # Processa o arquivo de log
-        qtd_linhas_erro = 0
-        total_bytes_erro = 0
-        with open(caminho_arquivo_log, "r") as fentrada:
-
-            for linha in fentrada:
-
-                linha = linha.strip()
-
-                # Trata apenas linhas de erro de origem
-                if "Read error (source)" not in linha \
-                        or "byte length=" not in linha:
-                    continue
-
-                # Separa tamanho do erro
-                # byte length=512
-                partes = linha.split("byte length=")
-                if len(partes) != 2:
-                    erro = "Linha de erro em formato desconhecido: " + linha
-                    return (False, erro, {})
-
-                # Soma quantidade de bytes com erro
-                bytes_erro = int(partes[1])
-                total_bytes_erro += bytes_erro
-
-                # var_dump(bytes_erro)
-                # var_dump(total_bytes_erro)
-
-                # Contador de linhas de erro
-                qtd_linhas_erro += 1
-
-                # Ok, prossegue para a proxima linha
-                continue
-
-        # Verifica se a quantidade de erros reportados
-        # bate com o total de linhas encontradas no log
-        if qtd_linhas_erro != qtd_erros_reportados:
-            erro = "Quantidade de linhas de erro (" + \
-                   str(qtd_linhas_erro) \
-                   + ") diferente do esperado (" \
-                   + str(qtd_erros_reportados) \
-                   + ")"
-            return (False, erro, {})
-
-        # Valida e armazena quantidade total de bytes com erro de leitura
-        if total_bytes_erro == 0:
-            erro = "Situação inconsistente: total de bytes com erro=0, mas foi reportando " \
-                   + str(qtd_erros_reportados) \
-                   + " erros"
-            return (False, erro, {})
-        dcomp['sapiErrosLeituraTotalBytes'] = total_bytes_erro
-
-        # Calcula o percentual de erro de leitura
-        tamanho_bytes = int(dcomp['sapiTamanhoBytes'])
-        # Para simular % de erro
-        # total_bytes_erro = tamanho_bytes/5
-        percentual_erro = (total_bytes_erro / tamanho_bytes) * 100
-        dcomp['sapiErrosLeituraPercentual'] = percentual_erro
-        if percentual_erro < 0.01:
-            dcomp['sapiErrosLeituraPercentualHumano'] = "<0.01%"
-        else:
-            formatado = '{0:.2f}%'.format(percentual_erro)
-            formatado = formatado.replace('.', ',')
-            dcomp['sapiErrosLeituraPercentualHumano'] = formatado
-
-        # Se o limite de erro ultrapassar um certo limite gera um aviso
-        if percentual_erro > GlimitePercentualErroLeitura:
-            avisos.append("Total de erros (" + dcomp['sapiErrosLeituraPercentualHumano']
-                          + ") excede limite (" + str(GlimitePercentualErroLeitura) + "%)")
-            texto_resultado_duplicao = ''
-
-        # Resultado resumido da duplicação
-        texto_resultado_duplicacao = ''
-        if total_bytes_erro==0:
-            texto_resultado_duplicacao = 'Dispositivo duplicado com sucesso'
-        else:
-            texto_resultado_duplicacao = 'Dispositivo duplicado, porém ocorreram erros de leitura.'
-        dcomp['sapiResultadoDuplicacao'] = texto_resultado_duplicacao
-
-    # ------------------------------------------------------------------------------
-    # Tratamento para hashes
-    # ------------------------------------------------------------------------------
-    #Acquisition MD5:   cfdd6b92b8599309bbc8901d05ec2927
-    #'result:aquisition_md5': 'cfdd6b92b8599309bbc8901d05ec2927',
-
-    #Acquisition SHA-1: bb6bc7a155d22e748148b7f6100d50edabdb324c
-    #'result:aquisition_sha1': 'bb6bc7a155d22e748148b7f6100d50edabdb324c',
-
-    '''
-    sapiHashes =>
-        0 =>
-        sapiHashAlgoritmo => sha256
-        sapiHashDescricao => Hash do arquivo item03Arrecadacao03_extracao_iped/listaArquivos.csv
-        sapiHashValor => 17a074d5608f35cdfc1f7cb5701f292da2597a1bc34533a7dc975fb8c01f878d
-    '''
-
-    # Armazena dados de hash
-    hashes = list()
-
-    # Processa os hashes
-    ix_hash = 0
-    for tipo_hash in ('md5', 'sha1'):
-        h = dict()
-        valor_hash = valores.get('result:aquisition_' + tipo_hash, None)
-        if valor_hash is not None:
-            h["sapiHashDescricao"] = "Hash " + tipo_hash.upper() + " de leitura do item " + item
-            h["sapiHashValor"] = valor_hash
-            h["sapiHashAlgoritmo"] = tipo_hash
-        else:
-            erro = "Não foi localizado o hash " + tipo_hash
-            return (False, erro, {})
-
-        # Armazena na lista de hashes
-        hashes.append(h)
-        ix_hash += 1
-
-    # Finalizado com sucesso
-    finalizado_sucesso = True
-
-    # conclui dados para laudo
-    dlaudo["comp1"] = dcomp
-    dlaudo["sapiQuantidadeComponentes"] = 1  # Só tem um componente
-    dlaudo["sapiHashes"] = hashes
-    dlaudo["sapiTipoAquisicao"] = "imagem"
-
-    # Monta dados relevantes para tarefa
-    dados_relevantes = dict()
-    dados_relevantes['laudo'] = dlaudo
-    dados_relevantes['avisos'] = avisos
-
-    return (True, None, dados_relevantes)
 
 # Abortar execução do programa
 # Esta rotina é invocada quando alguma situação exige que para a restauração da ordem

@@ -1,6 +1,12 @@
 TODO - Lista de pendências do projeto SAPI
 ============================================
 
+BUG urgente: Brunori
+sapi_laudo.py
+matricula: 17652
+https://10.41.84.5/setec3/sapisrv_obter_itens_laudo.php?codigo_solicitacao_exame_siscrim=35994980&token=token_fixo_v0_7&execucao_programa=sapi_laudo&execucao_programa_versao=1.8.2&execucao_nome_agente=pcf-ronaldo&codigo_laudo=36858555
+- Está trazendo linha de materiais adicionais, contendo apenas o campo {pronto_para_laudo}
+
 Ajustes diversos:
 * GTPI-STO-02:
   * Fundos de tela: Padronizar
@@ -19,6 +25,10 @@ Ajustes diversos:
 
 Versão 2.0:
 Bugs:
+* Quando for exibir o log na console, invocar rotina de sanitização
+  console_sanitiza_utf8 para cada linha (indicar com *sanitizado no final se houve algum ajuste para exibição)
+* Exibir progresso de operações demoradas (por exemplo, validação do arquivo XML...
+  Uma linha, com sem lf (ou retornado para o início da linha....para mostrar o andamento)
 * Tarefa de imagem já iniciada (já tem pasta de destino). Para excluir, tem que colocar na fila.
   - Pode reiniciar? Se puder reiniciar, irá deixar excluir direto (sem colocar na fila)....
   - O conceito tem que ser o mesmo do IPED....revisar
@@ -45,8 +55,17 @@ Bugs:
   significa que pegou o número de série do USB. Neste caso, deixa em branco o número de série do
   dispositivo, pois não reconheceu esta informação.
 * Testar deployment do sapi_tableau direto do setec3
+* Quando roda o *CS no sapi_cellebrite, tem que atualizar o tamanho da pasta de destino no banco também.
+
 
 Próxima:
+- Quando desabilitar um storage, colocar explicação na lista [Desabilitado....]
+- sapi_exame web: Não permitir alterar um item que já tem tarefas.
+  - Quando usuário clicar no item (para ir ao Siscrim), avisar
+    que é necessário que ele primeiro exclua as tarefas existentes,
+    para em seguida alterar o item.
+
+
 - sapi_laudo: Para contas de usuário (aparelho), separar por linha (uma conta em cada linha)...talvez se a conta for muito grande (testar...)
 - Quando tarefa foi abortada, tem que mostrar um icone mais significativo (ou cor) em sapi_exame.php
 - sapi_tarefa: Quando uma tarefa for reiniciada, ou alguma coisa assim, se deu tudo certo, retonar para sapi_exame e exibir mensagem de feedback lá. Se der erro, fica na mesma tela e exibe mensagem de erro.
@@ -62,7 +81,7 @@ Próxima:
 - Dicas de como cadastrar material de destino...incluir link ao lado da opção que seleciona o material de destino, apontando para o wiki.
 - Para material que deve ser subdivido, melhorar interface. Alerar ser o material não foi subdivido, e mostra um ponto de exclamação ao lado do material.
 - Incluir na pasta um leia_me.txt
-
+- Fila de tarefas: Considerar como critério de fila a término da tarefa pai (ou seja, desde quando está disponível para fila...ajustar na view...)
 
 Futuro:
 http://www.forensicswiki.org/wiki/Libewf

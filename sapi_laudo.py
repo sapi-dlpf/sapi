@@ -2616,8 +2616,8 @@ def gera_novo_odt(odt_raiz, caminho_arquivo_saida_odt):
     print("- Laudo SAPI ajustado gravado em: ", caminho_arquivo_saida_odt)
     if pergunta_sim_nao("< Deseja abrir o arquivo de laudo para edição?"):
         webbrowser.open(caminho_arquivo_saida_odt)
-    print("- Arquivo de destino foi aberto em programa compatível (normalmente libreoffice)")
-    print("- Recomenda-se utilizar o LIBREOFFICE com versão superior a 5.2")
+        print("- Laudo SAPI foi aberto em programa compatível (normalmente libreoffice)")
+        print("- Recomenda-se utilizar o LIBREOFFICE com versão superior a 5.2")
 
     return
 
@@ -3110,12 +3110,26 @@ def obter_laudo_parte2(matricula):
         # --------------------------------------------------------------
         codigo_solicitacao_exame_siscrim = GdadosGerais["codigo_solicitacao_exame_siscrim"]
         codigo_laudo = GdadosGerais["codigo_laudo"]
-        dados = sapisrv_chamar_programa_sucesso_ok(
-            programa="sapisrv_obter_itens_laudo.php",
-            parametros={'codigo_solicitacao_exame_siscrim': codigo_solicitacao_exame_siscrim,
-                        'codigo_laudo': codigo_laudo}
-            #,registrar_log = True
-        )
+        try:
+            print_log("Recuperando solicitações de exame para matrícula: ", matricula)
+            (sucesso, msg_erro, dados) = sapisrv_chamar_programa(
+                programa="sapisrv_obter_itens_laudo.php",
+                parametros={'codigo_solicitacao_exame_siscrim': codigo_solicitacao_exame_siscrim,
+                            'codigo_laudo': codigo_laudo}
+            )
+
+            # Insucesso. Servidor retorna mensagem de erro (exemplo: matricula incorreta)
+            if (not sucesso):
+                # Exibe mensagem de erro reportada pelo servidor e continua no loop
+                print_erro()
+                print("",msg_erro)
+                print()
+                continue
+
+        except BaseException as e:
+            # Provavel falha de comunicação
+            print_falha_comunicacao()
+            return False
 
         # Itens e storages associados ao laudo
         Gitens = dados["itens"]

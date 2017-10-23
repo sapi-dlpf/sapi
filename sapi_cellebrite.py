@@ -60,7 +60,7 @@ if platform.system() != "Windows":
 # GLOBAIS
 # =======================================================================
 Gprograma = "sapi_cellebrite"
-Gversao = "1.8.1"
+Gversao = "1.9"
 
 # Para gravação de estado
 Garquivo_estado = Gprograma + "v" + Gversao.replace('.', '_') + ".sapi"
@@ -122,7 +122,7 @@ Gmenu_comandos['cmd_diagnostico'] = ["*db", "*lg"]
 
 # Para código produtivo, o comando abaixo deve ser substituído pelo
 # código integral de sapi_lib_xxx.py, para evitar dependência
-from sapilib_0_8 import *
+from sapilib_0_8_1 import *
 
 # **********************************************************************
 # PRODUCAO 
@@ -303,6 +303,20 @@ def sintetizar_arquivo_xml(arquivo, caminho_arquivo_temporario):
 # Validar arquivo XML do cellebrite
 # ----------------------------------------------------------------------
 def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
+    try:
+        return _validar_arquivo_xml(caminho_arquivo, numero_item, explicar)
+    except BaseException as e:
+        trc_string=traceback.format_exc()
+        erro=texto("[310]: Erro inesperado validação de arquivo XML: ",
+                   trc_string)
+        print_log(erro)
+        return (False, {}, [erro], [])
+
+
+
+# Validar arquivo XML do cellebrite
+# ----------------------------------------------------------------------
+def _validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
     # Dados para retorno
     # ------------------------------------------------------------------
     dados = {}
@@ -442,20 +456,27 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
     p = ns + 'metadata' + '[@section="Extraction Data"]'
     secao = root.find(p)
     # print(secao)
-    for item in secao:
-        # Armazena todos os valores
-        name = item.get('name', None)
-        source_extraction = item.get('sourceExtraction', None)
-        if (source_extraction is None):
-            # Tem que ser associado a alguma extração
-            continue
+    if secao is None:
+        mensagem=texto("Não foi encontrada seção Extraction Data.",
+                       "Isto é incomum e pode ocasionar falha na recuperação de informações para o laudo. Confira se resultado está ok"
+                       )
+        avisos += [mensagem]
+        if_print(explicar, "- AVISO: ", mensagem)
+    else:
+        for item in secao:
+            # Armazena todos os valores
+            name = item.get('name', None)
+            source_extraction = item.get('sourceExtraction', None)
+            if (source_extraction is None):
+                # Tem que ser associado a alguma extração
+                continue
 
-        valor = item.text
-        # print('name=',name,' sourceExtraction = ',sourceExtraction, " valor=",valor)
-        if (source_extraction is not None):
-            if (source_extraction not in dext):
-                dext[source_extraction] = {}
-            dext[source_extraction][name] = valor
+            valor = item.text
+            # print('name=',name,' sourceExtraction = ',sourceExtraction, " valor=",valor)
+            if (source_extraction is not None):
+                if (source_extraction not in dext):
+                    dext[source_extraction] = {}
+                dext[source_extraction][name] = valor
 
     # Infere o tipo de componente baseado no fabricante DeviceInfoSelectedManufacturer
     # Todo: Melhorar esta inferência de componente. Tem que ver o backup...mais alguma coisa que o cellebrite processa?
@@ -540,15 +561,23 @@ def validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
     p = ns + 'metadata' + '[@section="Device Info"]'
     secao = root.find(p)
     # print(secao)
-    for item in secao:
-        name = item.get('name', None)
-        source_extraction = item.get('sourceExtraction', None)
-        valor = item.text
-        # print('name=',name,' sourceExtraction = ',sourceExtraction, " valor=",valor)
-        if (source_extraction is not None):
-            if (source_extraction not in dext):
-                dext[source_extraction] = {}
-            dext[source_extraction][name] = valor
+    if secao is None:
+        mensagem=texto("Não foi encontrada seção Device Info.",
+                       "Isto significa que reconhecimento do dispositivo não foi efetuado"
+                       )
+        avisos += [mensagem]
+        if_print(explicar, "- AVISO: ", mensagem)
+    else:
+        # Existe secao
+        for item in secao:
+            name = item.get('name', None)
+            source_extraction = item.get('sourceExtraction', None)
+            valor = item.text
+            # print('name=',name,' sourceExtraction = ',sourceExtraction, " valor=",valor)
+            if (source_extraction is not None):
+                if (source_extraction not in dext):
+                    dext[source_extraction] = {}
+                dext[source_extraction][name] = valor
 
     # ------------------------------------------------------------------
     # Recupera dados ds Seção ModelType SIMDATA
@@ -1046,13 +1075,6 @@ def recupera_tarefa_do_setec3(codigo_tarefa):
 
     return tarefa
 
-
-
-def print_falha_comunicacao():
-    print("- Consulte o log para entender melhor o problema(*LG)")
-    print("- Se você suspeita de falha de comunicação (rede), ")
-    print("  tente acessar o SETEC3 utilizando um browser computador para conferira se a conexão está ok")
-
 def print_comando_cancelado():
     print("- Comando cancelado")
     print()
@@ -1098,7 +1120,9 @@ def pode_abortar(tarefa):
     # Considerando que o tempo normal entre atualizações de status é de 3 minutos
     # vamos bloquear se estiver a menos tempo que isto
     minimo_minutos = 3  # minutos
-    if tempo_ultimo_status_segundos > 0 and tempo_ultimo_status_segundos < (minimo_minutos * 60):
+    if ambiente_desenvolvimento():
+        print("- Abortando tarefa imediatamente pois está em ambiente de desenvolvimento (não precisa aguardar)")
+    elif tempo_ultimo_status_segundos > 0 and tempo_ultimo_status_segundos < (minimo_minutos * 60):
         print()
         print_atencao()
         print("- Esta tarefa foi atualizada faz apenas ", tempo_ultimo_status_segundos, "segundos.")
@@ -1211,7 +1235,6 @@ def _abortar_tarefa():
     print()
     print("- Situação da tarefa alterada para'Abortada'")
     print("- Esta tarefa está disponível para ser refeita.")
-    exibir_situacao_apos_comando()
     return
 
 
@@ -1957,10 +1980,6 @@ def troca_situacao_tarefa_ok(codigo_tarefa, codigo_nova_situacao, texto_status='
     return True
 
 
-
-
-
-
 # ======================================================================================================================
 # @*sto - Exibe pasta da tarefa no storage invocando o File Explorer
 # ======================================================================================================================
@@ -2259,6 +2278,15 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
     print("- Os seguintes dados foram extraídos do relatório xml e serão utilizados no laudo:")
     exibir_dados_laudo(dados_relevantes['laudo'])
 
+    # Exibir dados
+    # kkkk
+    print()
+    print("──── ","Dados do material no Siscrim (para confronto)"," ────")
+    print_formulario(label="Item", valor=tarefa["dados_item"]["item_apreensao"])
+    print_formulario(label="Material", valor=tarefa["dados_item"]["material"])
+    print_formulario(label="Descrição", valor=tarefa["dados_item"]["descricao"])
+
+
     # Exibe avisos, se houver
     if len(avisos) > 0:
         print()
@@ -2276,11 +2304,42 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
     if not prosseguir:
         return
 
+
+    # ------------------------------------------------------------------------------------------------------------------
+    # Método de cópia
+    # ------------------------------------------------------------------------------------------------------------------
+    print()
+    print("4) Método de cópia")
+    print("==================")
+    print(" 1 - Copiar com Robocopy (recomendável):")
+    print("     Excelente robustez e velocidade, mas não oferece boa medição de progresso")
+    print()
+    print(" 2 - Copiar com Python+Windows:")
+    print("     Medição de progresso precisa, mas é mais lento e pode falhar para caminhos contendo caracteres exóticos")
+    print()
+    while True:
+        metodo_copia = input("< Escolha o método de cópia (Default 1 - Robocopy): ")
+        metodo_copia = metodo_copia.strip()
+        if metodo_copia=='':
+            metodo_copia=1
+        if (not metodo_copia.isdigit()):
+            continue
+
+        metodo_copia = int(metodo_copia)
+        if metodo_copia==1:
+            texto_metodo_copia='robocopy'
+            break
+        if metodo_copia==2:
+            texto_metodo_copia = 'python/windows'
+            break
+
+    print_log("Opção para cópia escolhida = ", metodo_copia, texto_metodo_copia)
+
     # -----------------------------------------------------------------
     # Pasta de destino
     # -----------------------------------------------------------------
     print()
-    print("4) Verificando pasta de destino")
+    print("5) Verificando pasta de destino")
     print("================================")
 
     print("- Storage da tarefa: ", tarefa["dados_storage"]["maquina_netbios"])
@@ -2301,12 +2360,13 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
 
     # Verifica se pasta de destino já existe
     limpar_pasta_destino_antes_copiar = False
-    if os.path.exists(caminho_destino):
+    # Para cópia tradicional, verifica se pasta de destino deve ser apagada
+    if os.path.exists(caminho_destino) and metodo_copia==2:
         print_log("Pasta de destino contém arquivos")
         print()
         print("- IMPORTANTE: A pasta de destino JÁ EXISTE")
         print()
-        print("- Não é possível iniciar a cópia nesta situação.")
+        print("- Não é possível iniciar a cópia nesta situação para o método de copia python/windows.")
         print("- Se o conteúdo atual da pasta de destino não tem utilidade,",
               "autorize a limpeza da pasta (opção abaixo).")
         print(
@@ -2337,23 +2397,29 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
         if not prosseguir:
             return
 
-    # ------------------------------------------------------------------------------------------------------------------
-    # Efetuar cópia
-    # ------------------------------------------------------------------------------------------------------------------
-    print()
-    print("5) Efetuar cópia")
-    print("================")
-    print()
-    print("- Está tudo pronto para iniciar cópia.")
-    prosseguir = pergunta_sim_nao("< Iniciar cópia? ", default="n")
-    if not prosseguir:
-        return
+
+    # -----------------------------------------------------------------
+    # Confirmação final
+    # -----------------------------------------------------------------
+    #print()
+    #print("- Ok, está tudo pronto para iniciar.")
+    #prosseguir = pergunta_sim_nao("< Iniciar cópia ok? ", default="n")
+    #if not prosseguir:
+    #    return
+
 
     print_log("Iniciando execução de comando de cópia (*cr)")
 
     # Troca situação da tarefa
     # ------------------------
-    texto_status = "Preparando para copiar " + caminho_origem + " para " + caminho_destino
+    texto_status = texto(
+        "Preparando para copiar",
+        caminho_origem,
+        "para",
+        caminho_destino,
+        "utilizando",
+        texto_metodo_copia)
+
     print_log(texto_status)
     if not troca_situacao_tarefa_ok(codigo_tarefa=codigo_tarefa,
                                     codigo_nova_situacao=GEmAndamento,
@@ -2369,16 +2435,26 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
     # Os processo filhos irão atualizar o mesmo arquivo log do processo pai
     nome_arquivo_log_para_processos_filhos = obter_nome_arquivo_log()
 
+    #print("caminho_origem=", caminho_origem)
+    #print("caminho_destino=", caminho_destino)
+    #die('ponto2415')
+
     # Inicia processo filho para execução da cópia
     # ------------------------------------------------------------------------------------------------------------------
     label_processo = "executar:" + str(codigo_tarefa)
     dados_pai_para_filho=obter_dados_para_processo_filho()
     p_executar = multiprocessing.Process(
         target=background_executar_copia,
-        args=(codigo_tarefa, caminho_origem, caminho_destino,
-              dados_relevantes, limpar_pasta_destino_antes_copiar,
-              nome_arquivo_log_para_processos_filhos, label_processo,
-              dados_pai_para_filho)
+        args=(codigo_tarefa,
+              caminho_origem,
+              caminho_destino,
+              dados_relevantes,
+              limpar_pasta_destino_antes_copiar,
+              nome_arquivo_log_para_processos_filhos,
+              label_processo,
+              dados_pai_para_filho,
+              metodo_copia
+              )
     )
     p_executar.start()
 
@@ -2410,10 +2486,16 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
 
 
 # Efetua a cópia de uma pasta
-def background_executar_copia(codigo_tarefa, caminho_origem, caminho_destino,
-                              dados_relevantes, limpar_pasta_destino_antes_copiar,
-                              nome_arquivo_log, label_processo,
-                              dados_pai_para_filho):
+def background_executar_copia(codigo_tarefa,
+                              caminho_origem,
+                              caminho_destino,
+                              dados_relevantes,
+                              limpar_pasta_destino_antes_copiar,
+                              nome_arquivo_log,
+                              label_processo,
+                              dados_pai_para_filho,
+                              metodo_copia
+                              ):
 
     # Impede interrupção por sigint
     signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -2487,7 +2569,16 @@ def background_executar_copia(codigo_tarefa, caminho_origem, caminho_destino,
         sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status)
         print_log("Copiando de:", caminho_origem)
         print_log("Copiando para:", caminho_destino)
-        shutil.copytree(caminho_origem, caminho_destino)
+        if metodo_copia==1: #Robocopy
+            (copiado_com_sucesso, erro) = background_copiar_robocopy(caminho_origem, caminho_destino, carac_origem, codigo_tarefa)
+            if not copiado_com_sucesso:
+                # Se falhou, gera exceção
+                raise erro
+        elif metodo_copia==2: # Cópia tradicional
+            shutil.copytree(caminho_origem, caminho_destino)
+        else:
+            raise Exception("Opção de cópia com valor inválido" + str(metodo_copia))
+
         texto_status = "Cópia finalizada"
         sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status)
 
@@ -2596,6 +2687,7 @@ def background_executar_copia(codigo_tarefa, caminho_origem, caminho_destino,
     print("- Utilize comando *SG para conferir a situação atual da tarefa")
     print_log("Fim da cópia em background para tarefa", codigo_tarefa)
     sys.exit(0)
+
 
 # Acompanhamento de copia em background
 def background_acompanhar_copia(codigo_tarefa, caminho_origem, caminho_destino, nome_arquivo_log, label_processo):
@@ -2710,6 +2802,124 @@ def _background_acompanhar_copia(codigo_tarefa, caminho_origem, caminho_destino,
 
         # Guarda tamanho atual
         tamanho_anterior=tamanho_copiado
+
+# Retorna tupla
+# - sucesso: verdadeiro/falto
+# - mensagem de erro, se não houve sucesso
+def background_copiar_robocopy(caminho_origem, caminho_destino, carac_origem, codigo_tarefa):
+
+    # Início
+    print_log("Iniciando copia via robocopy em background")
+
+    # Antes de iniciar a cópia, determina características da pasta de origem
+    # caso isto não tenha sido informado
+    if carac_origem is None:
+        print_log("Determinando características da pasta de origem")
+        carac_origem = obter_caracteristicas_pasta(caminho_origem)
+        print_log("Pasta de origem",
+                  "com ", carac_origem["quantidade_arquivos"],
+                  "arquivos, totalizando",
+                  converte_bytes_humano(carac_origem["tamanho_total"])
+                  )
+
+    #caminho_origem='I:/desenvolvimento/sapi/dados_para_testes/relatorios_cellebrite/00_pequeno_XML_danificado'
+    #caminho_destino='\\\\10.41.87.235\\storage\\Memorando_5917-17_XXX_YYY\\item1a\\item1a_extracao'
+
+    # Monta comando
+    # -------------
+    # Ajusta caminho de destino
+    # Troca prefixo para caminho longo
+    # \\\\?\\UNC\\" => \\
+    caminho_destino=caminho_destino.replace("\\\\?\\UNC\\", "\\\\")
+    # Adiciona aspas nos caminhos para atender sintaxa do robocopy
+    comando_caminho_origem='"'+caminho_origem+'"'
+    comando_caminho_destino='"'+caminho_destino+'"'
+    # Demais parâmetros
+    opcoes_robocopy="/MT /mir /v /np"
+    caminho_log = "log_sapi_robocopy_"+str(codigo_tarefa)+".log"
+    saida = ">"+caminho_log + " 2>&1 "
+    comando=' '.join(['robocopy',
+                      comando_caminho_origem,
+                      comando_caminho_destino,
+                      opcoes_robocopy,
+                      saida])
+
+    # Para comparar a formação do documento
+    # O comando_teste abaixo tem a sintaxe correta
+    #comando_teste='robocopy "I:/desenvolvimento/sapi/dados_para_testes/relatorios_cellebrite/00_pequeno_XML_danificado" "\\\\10.41.87.235\storage\Memorando_5917-17_XXX_YYY\item1a\item1a_extracao" /MT /mir /v /np >sapi_robocopy.log 2>&1'
+    #var_dump(comando)
+    #var_dump(comando_teste)
+    #die('ponto2794')
+
+    # Simula um erro
+    #comando_erro='robocopy I:/desenvolvimento/sapi/dados_para_testes/relatorios_cellebrite/00_pequeno_XML_danificado" "\\\\10.41.87.235\storage\Memorando_5917-17_XXX_YYY\item1a\item1a_extracao" /MT /mir /v /np >sapi_robocopy.log 2>&1'
+    #comando=comando_erro
+
+    #comando = comando_teste
+
+    # Executa comando de disparo do robocopy
+    deu_erro=False
+    try:
+        print_log("Executando comando robocopy")
+        print_log(comando)
+        resultado = subprocess.check_output(comando, shell=True, stderr=subprocess.STDOUT, universal_newlines=True)
+        print_log("Comando robocopy finalizado sem erro")
+    except subprocess.CalledProcessError as e:
+        # Se der algum erro, não volta nada acima,
+        # mas tem como capturar pegando o output da exception
+        erro_exception = str(e.output)
+        deu_erro = True
+    except Exception as e:
+        # Alguma outra coisa aconteceu...
+        erro_exception = str(e)
+        deu_erro = True
+
+    if deu_erro:
+        erro = "Execução de robocopy falhou"
+        if erro_exception!="":
+            erro = erro + ": " + erro_exception
+        return (False, erro)
+
+    # Simula falta de arquivos, alterando tamanho da origem
+    #carac_origem["tamanho_total"]=carac_origem["tamanho_total"]+100
+    #carac_origem["quantidade_arquivos"]=carac_origem["quantidade_arquivos"]+1
+
+    # Determina características da pasta de destino
+    # Antes de iniciar a cópia, determina características da pasta de origem
+    # caso isto não tenha sido informado
+    print_log("Determinando características da pasta de destino")
+    carac_destino = obter_caracteristicas_pasta(caminho_destino)
+    print_log("Pasta de destino",
+              "com ", carac_destino["quantidade_arquivos"],
+              "arquivos, totalizando",
+              converte_bytes_humano(carac_destino["tamanho_total"])
+              )
+
+    # Compara características da pasta no final de execução,
+    # para garantir que está compatível com a pasta de origem
+    if carac_origem["tamanho_total"]!=carac_destino["tamanho_total"]:
+        erro=("Cópia finalizada mas com divergência no tamanho total.",
+               "Origem=", carac_origem["tamanho_total"],
+               "destino", carac_destino["tamanho_total"])
+        return (False, erro)
+
+    if carac_origem["quantidade_arquivos"] != carac_destino["quantidade_arquivos"]:
+        erro = ("Cópia finalizada mas com divergência na quantidade de arquivos.",
+                 "Origem=", carac_origem["quantidade_arquivos"],
+                 "destino", carac_destino["quantidade_arquivos"])
+        return(False, erro)
+
+    # Faz upload da tela de resultado do IPED (mensagens que seriam exibidas na tela)
+    #conteudo_tela=""
+    # Upload do resultado do IPED
+    #with open(caminho_tela_iped, "r") as fentrada:
+    #    for linha in fentrada:
+    #        conteudo_tela = conteudo_tela + linha
+
+    # Tudo certo
+    print_log("Cópia executa e conferida com sucesso")
+    return (True, "")
+
 
 # *cr - fim ----------------------------------------------------------------
 
@@ -3571,6 +3781,16 @@ def main():
     sapisrv_inicializar_ok(Gprograma, Gversao, auto_atualizar=True, nome_arquivo_log=nome_arquivo_log)
     print_log('Inicializado com sucesso', Gprograma, ' - ', Gversao)
 
+    # Teste de copia via Robocopy
+    #caminho_origem = "I:/desenvolvimento/sapi/dados_para_testes/relatorios_cellebrite/00_pequeno_XML_danificado"
+    #caminho_destino = "\\\\?\\UNC\\10.41.87.235\\storage\\Memorando_5917-17_XXX_YYY\\item1a\\item1a_extracao"
+    #carac_origem = None
+    #codigo_tarefa = 1234
+    #(copiado_sucesso, erro)=background_copiar_robocopy(caminho_origem, caminho_destino, carac_origem, codigo_tarefa)
+    #var_dump(copiado_sucesso)
+    #var_dump_console(erro)
+    #die('ponto3814')
+
 
     # Teste
     #atualizar_status_tarefa_andamento(465, 'bla, bla')
@@ -3709,6 +3929,7 @@ def main():
 
 if __name__ == '__main__':
 
+
     # # Teste de problema de codificação para console
     # # Não remova isto aqui, pois não tenho certeza se este assunto foi definitivamente resolvido
     # outro=dict()
@@ -3727,6 +3948,7 @@ if __name__ == '__main__':
     #
     # GdadosGerais["data_hora_ultima_atualizacao_status"] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     # var_dump(GdadosGerais["data_hora_ultima_atualizacao_status"])
+
 
 
     main()
