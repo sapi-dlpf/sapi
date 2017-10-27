@@ -8,6 +8,7 @@ https://10.41.84.5/setec3/sapisrv_obter_itens_laudo.php?codigo_solicitacao_exame
 - Está trazendo linha de materiais adicionais, contendo apenas o campo {pronto_para_laudo}
 
 Ajustes diversos:
+* Não permitir gerar tarefas se houver tarefas órfãs
 * GTPI-STO-02:
   * Fundos de tela: Padronizar
   * Screen saver (ajustar mensagem) para todos os usuários

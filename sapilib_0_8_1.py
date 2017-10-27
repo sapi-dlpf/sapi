@@ -77,7 +77,7 @@ import ssl
 import shutil
 from optparse import OptionParser
 import webbrowser
-
+import tempfile
 
 # Desativa a verificação de certificado no SSL
 ssl._create_default_https_context = ssl._create_unverified_context
@@ -189,6 +189,55 @@ Glargura_tela = 129
 # ------------------------------------
 # Percentual máximo de erros de leitura considerado aceitável. Acima disso gerará aviso
 GlimitePercentualErroLeitura = 1
+
+# ================================================================================
+# Robocopy
+# Resultado do Robocopy
+# ================================================================================
+'''
+Fonte: https://ss64.com/nt/robocopy-exit.html
+exit code      Significado
+================================================================================
+0×00   0       No errors occurred, and no copying was done.
+               The source and destination directory trees are completely synchronized.
+
+0×01   1       One or more files were copied successfully (that is, new files have arrived).
+
+0×02   2       Some Extra files or directories were detected. No files were copied
+               Examine the output log for details.
+
+0×03   3       (2+1) Some files were copied. Additional files were present. No failure was encountered.
+
+0×04   4       Some Mismatched files or directories were detected.
+               Examine the output log. Housekeeping might be required.
+
+0×05   5       (4+1) Some files were copied. Some files were mismatched. No failure was encountered.
+
+0×06   6       (4+2) Additional files and mismatched files exist. No files were copied and no failures were encountered.
+               This means that the files already exist in the destination directory
+
+0×07   7       (4+1+2) Files were copied, a file mismatch was present, and additional files were present.
+
+0×08   8       Some files or directories could not be copied
+               (copy errors occurred and the retry limit was exceeded).
+               Check these errors further.
+
+0×10  16       Serious error. Robocopy did not copy any files.
+               Either a usage error or an error due to insufficient access privileges
+               on the source or destination directories.
+'''
+
+Grobocopy_texto_return_code = dict()
+Grobocopy_texto_return_code[0] = "Robocopy finalizado com sucesso. Nenhum arquivo foi copiado (mas está sincronizado)."
+Grobocopy_texto_return_code[1] = "Robocopy finalizado com sucesso. Arquivos foram copiados."
+Grobocopy_texto_return_code[2] = "Some Extra files or directories were detected. No files were copied. Examine the output log for details."
+Grobocopy_texto_return_code[3] = "(2+1) Some files were copied. Additional files were present. No failure was encountered."
+Grobocopy_texto_return_code[4] = "Some Mismatched files or directories were detected. Examine the output log. Housekeeping might be required."
+Grobocopy_texto_return_code[5] = "(4+1) Some files were copied. Some files were mismatched. No failure was encountered."
+Grobocopy_texto_return_code[6] = "(4+2) Additional files and mismatched files exist. No files were copied and no failures were encountered. This means that the files already exist in the destination directory."
+Grobocopy_texto_return_code[7] = "(4+2+1) Files were copied, a file mismatch was present, and additional files were present."
+Grobocopy_texto_return_code[8] = "Some files or directories could not be copied (copy errors occurred and the retry limit was exceeded)."
+Grobocopy_texto_return_code[16] = "Serious error. Robocopy did not copy any files. Either a usage error or an error due to insufficient access privileges on the source or destination directories."
 
 
 # =====================================================================================================================
@@ -2036,6 +2085,10 @@ def _print_log_apenas(*arg):
 
     linha = concatena_args(*arg)
 
+    # Remove quebra de linhas
+    linha = linha.replace("\r", "")
+    linha = linha.replace("\n", "")
+
     # Se começar ou terminar por "-" ou " " ou qualquer combinação destes, remove, pois no log o texto é direto
     # Isto serve para que mensagens que são para tela, que tem formato "- xxxx", fiquem no log apenas como "xxxx"
     linha=linha.strip(" ")
@@ -2307,17 +2360,11 @@ def cria_pasta_se_nao_existe(pasta):
     erro_fatal("Criação de pasta [", pasta, "] falhou")
 
 
-# Determina tamanho da pasta
-def tamanho_pasta(start_path):
-    total_size = 0
-    for dirpath, dirnames, filenames in os.walk(start_path):
-        for f in filenames:
-            fp = os.path.join(dirpath, f)
-            total_size += os.path.getsize(fp)
-    return total_size
-
-# Características de pasta
-def obter_caracteristicas_pasta(start_path):
+# -----------------------------------------------------------------------------------
+# Determina características de uma pasta
+# -----------------------------------------------------------------------------------
+# Características de pasta via python (Lento)
+def obter_caracteristicas_pasta_python(start_path):
     total_size = 0
     qtd=0
     qtd_pastas=0
@@ -2338,9 +2385,9 @@ def obter_caracteristicas_pasta(start_path):
 
 
 # Características de pasta
-def obter_caracteristicas_pasta_ok(start_path):
+def obter_caracteristicas_pasta_python_ok(start_path):
     try:
-        carac = obter_caracteristicas_pasta(start_path)
+        carac = obter_caracteristicas_pasta_python(start_path)
     except OSError as e:
         print_log("[2197] obter_caracteristicas_pasta_ok falhou para pasta",start_path," erro: ",str(e))
         return None
@@ -2352,6 +2399,196 @@ def obter_caracteristicas_pasta_ok(start_path):
     return carac
 
 
+# Retorna tamanho da pasta calculada através do Robocopy, e se ocorrer erro retorna None
+def obter_caracteristicas_pasta_via_robocopy_ok(caminho_origem):
+
+    try:
+        return (obter_caracteristicas_pasta_via_robocopy(caminho_origem))
+    except Exception as e:
+        erro = texto("Execução de robocopy falhou para determinação de tamanho falhou:", str(e))
+        print_log(erro)
+        return None
+
+# Retorna características da pasta utilizando robocopy
+# Atenção:
+# ESTA ROTINA NÃO DEVE SER UTILIZADA EM CONJUNTO COM UMA OPERAÇÃO
+# DE CÓPIA VIA ROBOCOPY
+# POIS OS DOIS ROBOCOPYS ENTRARÃO EM CONFLITO, E FICARÁ TUDO MUITO LENTO
+def obter_caracteristicas_pasta_via_robocopy(pasta):
+
+    # Monta comando robocopy para determinar o tamanho da pasta
+    # ---------------------------------------------------------
+    # Será gerado um comando como este:
+    #comando_teste='robocopy /l /nfl /ndl /bytes /e "I:/desenvolvimento/sapi/dados_para_testes/relatorios_cellebrite/00_pequeno_XML_danificado"  "I:/desenvolvimento/sapi/dados_para_testes/relatorios_cellebrite/00_pequeno_XML_danificado"
+    # A pasta tem que ser repetida (origem e destino)
+
+    # Remove notação de caminho longo: \\UNC\\...
+    pasta=remove_unc(pasta)
+    # Adiciona aspas para atender sintaxe
+    comando_caminho_origem='"' + pasta + '"'
+
+    # Confere se pasta existe
+    if not os.path.exists(pasta):
+        raise Exception(texto('[3862] Pasta não encontrada: ',
+                    pasta))
+
+    # Cria um arquivo temporario para armazenar a versão sintética do arquivo XML
+    arquivo_temporario = tempfile.NamedTemporaryFile(delete=False)
+    caminho_log_temporario = arquivo_temporario.name
+    arquivo_temporario.close()
+
+    # Para depurar, mono-usuário, é melhor deixar em um arquivo fixo
+    caminho_log_temporario = "debug_obter_caracteristicas_pasta_via_robocopy.txt"
+
+    # Parâmetros para efetuar calculo do tamanho (o mais importante é o /l)
+    # /l     : Specifies that files are to be listed only (and not copied, deleted, or time stamped).
+    # /e     : Copies subdirectories. Note that this option includes empty directories.
+    # /bytes : Prints sizes, as bytes.
+    # /nfl   : Specifies that file names are not to be logged.
+    # /ndl   : Specifies that directory names are not to be logged.
+    # /R:0 /W:0: Evita que o robocopy fique esperando por arquivos que estão em processo de copia
+    opcoes_robocopy="/l /e /bytes /nfl /ndl /R:0 /W:0"
+    saida = ">"+caminho_log_temporario + " 2>&1 "
+    comando=' '.join(['robocopy',
+                      opcoes_robocopy,
+                      comando_caminho_origem,
+                      comando_caminho_origem,
+                      saida])
+
+    #if modo_debug():
+    #    print_log(comando)
+    print_log(comando)
+
+    # Executa Robocopy
+    debug("Executando comando robocopy para calculo de tamanho")
+    debug("Arquivo temporário de log:", caminho_log_temporario)
+
+    # Executa robocopy
+    try:
+        print_log("Invocando comando robocopy para determinar características da pasta")
+        debug(comando)
+        subprocess.check_output(comando, shell=True, stderr=subprocess.STDOUT, universal_newlines=True)
+        # Ok, tudo certo
+        print_log("Comando robocopy de verificação de tamanho finalizado sem erro")
+    except subprocess.CalledProcessError as execucao:
+        # Quando o robocopy finaliza com sucesso (ou seja, copiou arquivos)
+        # retorna um exit code de 1
+        return_code=execucao.returncode
+        texto_return_code = Grobocopy_texto_return_code.get(return_code, None)
+        if texto_return_code is not None:
+            texto_resultado = texto(
+                "Verificação de pasta via robocopy finalizado com",
+                "exit code",
+                return_code,
+                ":",
+                texto_return_code)
+        print_log(texto_resultado)
+        # Para erros sérios (>8), gera exceção
+        if (return_code>8):
+            raise Exception("Erro sério no robocopy", texto_resultado)
+
+    debug("Comando Robocopy para calculo de tamanho foi finalizado")
+
+    #print_sanitizado(resultado)
+    #die('ponto3924')
+
+    # Procurar por linha que contem tamanho
+    tamanho_total = None
+    quantidade_arquivos = None
+    quantidade_pastas = None
+    achou_total=False
+    with open(caminho_log_temporario, "r") as fentrada:
+        for linha in fentrada:
+            #print_sanitizado(linha)
+
+            # Procura linha de cabeçalho do total, para evitar falsos positivos
+            # Total   Copiada  IgnoradaIncompatibilidade     FALHA    Extras
+            if "Total" in linha:
+                achou_total=True
+
+            # Se não achou total, não adianta nem prosseguir
+            if not achou_total:
+                continue
+
+
+            # A linha de tamanho tem o seguinte formato
+            #     Bytes: 174597050         0 174597050         0         0         0
+            # print_sanitizado(linha)
+            if "Bytes:" in linha:
+                tamanho_total=robocopy_log_parse_total(linha)
+                # Manipula linha para simular erro
+                # linha = "Bytes: xxx"
+
+            if "Arquivos:" in linha or "Files:" in linha:
+                quantidade_arquivos = robocopy_log_parse_total(linha)
+
+            # Diretórios
+            if "rios:" in linha or "Folders:" in linha:
+                quantidade_pastas = robocopy_log_parse_total(linha)
+
+    # Parse falhou
+    if tamanho_total is None:
+        raise Exception('[2445] Não foi reconhecido tamanho da pasta')
+
+    if quantidade_arquivos is None:
+        raise Exception('[2448] Não foi reconhecida a quantidade de arquivos')
+
+    if quantidade_pastas is None:
+        raise Exception('[2448] Não foi reconhecida a quantidade de pastas')
+
+    # Elimina arquivo temporário, pois não é mais necessário
+    if modo_debug():
+        debug("Arquivo de log temporario mantido em", caminho_log_temporario)
+    else:
+        # Excluir arquivo que não é mais necessário
+        os.unlink(caminho_log_temporario)
+
+    # Dicionário de retorno
+    ret = dict()
+    ret["quantidade_arquivos"] = quantidade_arquivos
+    ret["quantidade_pastas"] = quantidade_pastas
+    ret["tamanho_total"] = tamanho_total
+    return ret
+
+
+# Parse de uma linha de total do robocopy
+def robocopy_log_parse_total(linha):
+
+    try:
+        partes = linha.split(':')
+        # var_dump(partes)
+        if len(partes) < 2:
+            raise Exception('[2465] Não localizado separador ":"')
+        parte_tamanho = str(partes[1]).strip()
+        # 174597050         0 174597050         0         0         0
+        # var_dump(parte_tamanho)
+        partes = parte_tamanho.split(' ')
+        # 174597050
+        total = str(partes[0])
+        total = total.strip()
+        if not total.isdigit():
+            raise Exception(texto('[2474] Parse no campo de total falhou: ', total))
+
+        # Tudo certo
+        return int(total)
+
+    except Exception as e:
+        erro = texto("Linha de mal formada <<", linha, ">> erro: ", str(e))
+        raise Exception(erro)
+
+#
+def obter_caracteristicas_pasta(pasta):
+    return obter_caracteristicas_pasta_via_robocopy(pasta)
+
+# Retorna tamanho da pasta calculada através do Robocopy, e se ocorrer erro retorna None
+# Retorna dicionário com chaves:
+#  quantidade_arquivos: Total de arquivos
+#  quantidade_pastas: Total de pasta
+#  tamanho_total: Tamanho em bytes
+def obter_caracteristicas_pasta_ok(pasta):
+    return obter_caracteristicas_pasta_via_robocopy_ok(pasta)
+
+# Retorna apenas o tamanho da pasta
 def obter_tamanho_pasta_ok(path):
     carac = obter_caracteristicas_pasta_ok(path)
     if carac is None:
@@ -2360,9 +2597,13 @@ def obter_tamanho_pasta_ok(path):
     tamanho = carac.get("tamanho_total", 0)
     return tamanho
 
-
 # Converte Bytes para formato Humano
 def converte_bytes_humano(size, precision=1, utilizar_base_mil=False):
+    # Converte para numérico, caso tenha recebido string
+    if not str(size).isdigit():
+        return None
+    size=int(size)
+
     suffixes = ['B', 'KB', 'MB', 'GB', 'TB', "PB", "EB", "ZB", "YB"]
     suffix_index = 0
     base = 1024.0
@@ -2373,29 +2614,140 @@ def converte_bytes_humano(size, precision=1, utilizar_base_mil=False):
         size /= base  # apply the division
     return "%.*f%s" % (precision, size, suffixes[suffix_index])
 
-# Converte segundo para formato humano, para previsão de conclusão de tarefa
-def converte_segundos_humano(sec):
-    m, s = divmod(sec, 60)
-    h, m = divmod(m, 60)
-    d, h = divmod(h, 24)
+# ===================================================================================
+# Cópia via Robocopy
+# ===================================================================================
 
-    # Se só tem segundo
-    if sec<60:
-        return ('%s seg') % (s)
+# Copiar pasta via robocopy
+# Retorna:
+#  - sucesso: True/False
+#  - explicacao: Tanto para sucesso como para erro
+def copiar_pasta_via_robocopy(pasta_origem, pasta_destino, caminho_log):
 
-    # Menor que uma hora, mostra apenas os minutos
-    if (sec<3600):
-        return ('%s min') % (m)
+    # Executa comando de disparo do robocopy
+    try:
+        print_log("Executando comando robocopy")
+        print_log("Log de execução será gravado em", caminho_log)
+        (sucesso, explicacao) = _copiar_pasta_via_robocopy(pasta_origem, pasta_destino, caminho_log)
+        return (sucesso, explicacao)
+    except Exception as e:
+        erro = texto("Execução de robocopy falhou :", str(e))
+        return (False, erro)
 
-    formato = r'%d h %02d min'
 
-    # Zero dias
-    if d == 0:
-        return formato % (h, m)
+def _copiar_pasta_via_robocopy(pasta_origem, pasta_destino, caminho_log):
+    # Para teste
+    #caminho_origem='I:/desenvolvimento/sapi/dados_para_testes/relatorios_cellebrite/00_pequeno_XML_danificado'
+    #caminho_destino='\\\\10.41.87.235\\storage\\Memorando_5917-17_XXX_YYY\\item1a\\item1a_extracao'
 
-    # Mais de um dia
-    return ('%d dia %d h') % (d, h)
+    # Verifica se pasta de origem existe
+    if not os.path.exists(pasta_origem):
+        raise Exception("Pasta de origem não existe:", pasta_origem)
 
+    # Se pasta de destino não existe, cria
+    if not os.path.exists(pasta_destino):
+        os.makedirs(pasta_destino)
+
+    # Monta comando
+    # -------------
+    # Ajusta caminho de destino
+    # Troca prefixo para caminho longo
+    # \\\\?\\UNC\\" => \\
+    pasta_destino=pasta_destino.replace("\\\\?\\UNC\\", "\\\\")
+    # Adiciona aspas nos caminhos para atender sintaxa do robocopy
+    comando_caminho_origem='"' + pasta_origem + '"'
+    comando_caminho_destino='"' + pasta_destino + '"'
+    # Demais parâmetros
+    '''
+    Fonte: https://technet.microsoft.com/en-us/library/cc733145(v=ws.11).aspx
+    /MT[:N]  Creates multi-threaded copies with N threads.
+             N must be an integer between 1 and 128. The default value for N is 8.
+
+    /mir     Mirrors a directory tree (equivalent to /e plus /purge).
+    /v       Produces verbose output, and shows all skipped files.
+    /np      Specifies that the progress of the copying operation
+             (the number of files or directories copied so far) will not be displayed.
+    /r:<N>   Specifies the number of retries on failed copies. The default value of N is 1,000,000 (one million retries).
+    /w:<N>   Specifies the wait time between retries, in seconds. The default value of N is 30 (wait time 30 seconds).
+
+    '''
+    opcoes_robocopy="/MT /mir /np /r:20 /w:60"
+    # Para debug
+    opcoes_robocopy+=" /v" #Verbose
+
+    saida = ">"+caminho_log + " 2>&1 "
+    comando=' '.join(['robocopy',
+                      comando_caminho_origem,
+                      comando_caminho_destino,
+                      opcoes_robocopy,
+                      saida])
+
+    # Para comparar a formação do documento
+    # O comando_teste abaixo tem a sintaxe correta
+    #comando_teste='robocopy "I:/desenvolvimento/sapi/dados_para_testes/relatorios_cellebrite/00_pequeno_XML_danificado" "\\\\10.41.87.235\storage\Memorando_5917-17_XXX_YYY\item1a\item1a_extracao" /MT /mir /v /np >sapi_robocopy.log 2>&1'
+    #var_dump(comando)
+    #var_dump(comando_teste)
+    #die('ponto2794')
+
+    # Simula um erro
+    #comando_erro='robocopy "I:/desenvolvimento/sapi/dados_para_testes/relatorios_cellebrite/00_pequeno_XML_danificado" "\\10.41.87.235\storage\Memorando_5917-17_XXX_YYY\item1a\item1a_extracao" /MT /mir /v /np >sapi_robocopy.log 2>&1'
+    #comando=comando_erro
+
+    #comando = comando_teste
+    # Executa robocopy
+    try:
+        print_log("Invocando comando robocopy")
+        debug(comando)
+        resultado = subprocess.check_output(comando, shell=True, stderr=subprocess.STDOUT, universal_newlines=True)
+        # Ok, tudo certo
+        print_log("Comando robocopy finalizado sem erro")
+        # Tudo certo
+        texto_resultado=texto(
+            "Robocopy finalizado com sucesso, mas nenhum arquivo foi copiado:",
+            "exit code 0 - The source and destination directory trees are completely synchronized.")
+        return (True, texto_resultado)
+    except subprocess.CalledProcessError as execucao:
+        # Quando o robocopy finaliza com sucesso (ou seja, copiou arquivos)
+        # retorna um exit code de 1
+        return_code=execucao.returncode
+
+        #var_dump(return_code)
+        #die('ponto2952')
+        # Simula falha para teste
+        # return_code=17
+
+        # Verifica qual o error code do robocopy
+        if (return_code==1):
+            # Este é o exit_code quando o robocopy executou, finalizou com sucesso
+            # E COPIOU ARQUIVOS (o exit_code 0 é quando não copiou arquivos)
+            texto_resultado="Cópia via Robocopy finalizada com arquivos copiados"
+            return (True, texto_resultado)
+        else:
+            texto_return_code=Grobocopy_texto_return_code.get(return_code, None)
+            if texto_return_code is not None:
+                texto_resultado=texto(
+                    "Cópia via Robocopy finalizada com anomalia",
+                    "exit code",
+                    return_code,
+                    ":",
+                    texto_return_code)
+            else:
+                texto_resultado=texto(
+                    "Cópia via Robocopy finalizada com resultado desconhecido:",
+                    return_code,
+                    "Consulte o log da cópia do Robocopy para maiores informações")
+            # Alguns destes "erros" podem ser somente anomalias
+            # Terá que analisar na prática
+            # Por enquanto, vamos considerar como erro apenas algo maior que 8
+            sucesso=True
+            if return_code>8:
+                sucesso=False
+        return (sucesso, texto_resultado)
+
+
+# ===================================================================================
+# Ajuste de caminho
+# ===================================================================================
 
 # Navega em uma pasta até o nível (level) de profundidade definido
 def os_walklevel(some_dir, level=1):
@@ -2464,6 +2816,11 @@ def montar_caminho_longo(*arg):
     # Efetua ajuste para path longo
     caminho=ajustar_para_path_longo(caminho)
 
+    return caminho
+
+def remove_unc(caminho):
+    # Remove notação UNC (para caminho longo)
+    caminho=caminho.replace("\\\\?\\UNC\\", "\\\\")
     return caminho
 
 
@@ -2928,10 +3285,22 @@ def conectar_storage_atualizacao_ok(dados_storage):
 # Movimentação de pastas no storage
 # =======================================================================================================
 
+#
+def mover_pasta_storage(pasta_origem, pasta_destino):
+    print_log("Movendo pasta ", pasta_origem, "para", pasta_destino)
+    os.rename(pasta_origem, pasta_destino)
+    print_log("Movido com sucesso")
 
+
+# =======================================================================================================
+# LIXEIRA
+# =======================================================================================================
+
+# Esta rotina deve ser utiliza por programas rodando no servidor
+# Para programas rodando no cliente, utilizar mover_lixeira_UNC
 def mover_lixeira(pasta_mover):
 
-    print_log("Movendo para lixeira: ", pasta_mover)
+    print_log("Movendo para lixeira/servidor: ", pasta_mover)
 
     data_hora = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
 
@@ -2972,13 +3341,58 @@ def mover_lixeira(pasta_mover):
     os.rename(pasta_mover, pasta_lixeira)
     print_log("Movido com sucesso para lixeira em: ", pasta_lixeira)
 
-
-def mover_pasta_storage(pasta_origem, pasta_destino):
-    print_log("Movendo pasta ", pasta_origem, "para", pasta_destino)
-    os.rename(pasta_origem, pasta_destino)
-    print_log("Movido com sucesso")
+    return (True, pasta_lixeira)
 
 
+def mover_lixeira_UNC(pasta_mover):
+
+    erro="[3321] Erro indeterminado"
+    try:
+        return _mover_lixeira_UNC(pasta_mover)
+    except OSError as error:
+        print_log("Mover para lixeira falhou: ", str(error))
+        erro=str(error)
+        # Tratamento especial para erros mais comuns
+        if error.errno==13:
+            # Erro Windows para Acesso Negado
+            erro="Acesso negado: Normalmente isto ocorre quando a pasta está aberta no explorer ou algum arquivo da pasta está em uso"
+    except BaseException as e:
+        erro=traceback.format_exc()
+
+    # Ocorreu um erro
+    return (False, None, erro)
+
+
+def _mover_lixeira_UNC(pasta_mover):
+
+    print_log("Movendo para lixeira via SMB: ", pasta_mover)
+
+    # Verifica se pasta de origem existe
+    if not os.path.exists(pasta_mover):
+        erro=texto("Pasta de origem não existe", pasta_mover)
+        return (False, None, erro)
+
+    # Prepara pasta de destino
+    data_hora = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    if "storage" not in pasta_mover:
+        erro="Não foi encontrado string 'storage' no caminho"
+        return (False, None, erro)
+
+    componente_lixeira = "\\lixeira\\"+data_hora+"\\"
+    pasta_lixeira = str(pasta_mover).replace("storage\\", "storage" + componente_lixeira)
+
+    # Criar a pasta pai na lixeira
+    partes=pasta_lixeira.split('\\')
+    pasta_pai='/'.join(partes[:-1])
+    if not os.path.exists(pasta_pai):
+        os.makedirs(pasta_pai)
+
+    # Move, através de rename
+    os.rename(pasta_mover, pasta_lixeira)
+    print_log("Movido com sucesso para lixeira em: ", pasta_lixeira)
+
+    # Tudo certo
+    return (True, componente_lixeira, None)
 
 # =======================================================================================================
 # Controle de execução concorrente
@@ -3218,7 +3632,11 @@ def console_sanitiza_utf8_ok(dado):
     # Ignora se teve ou não alterações
     return texto
 
-
+def print_sanitizado(dado):
+    (texto, qtd_alteracoes) = console_sanitiza_utf8(dado)
+    print(texto)
+    if qtd_alteracoes>0:
+        print(qtd_alteracoes, "para santizacao de uft8")
 
 # Faz dump formatado de um objeto qualquer na console
 # --------------------------------------------------------------------------------
@@ -3957,6 +4375,33 @@ def exec_tableau_parse_arquivo_log(caminho_arquivo_log, item):
     dados_relevantes['avisos'] = avisos
 
     return (True, None, dados_relevantes)
+
+
+# ===================================================================================
+# Tempo
+# ===================================================================================
+# Converte segundo para formato humano, para previsão de conclusão de tarefa
+def converte_segundos_humano(sec):
+    m, s = divmod(sec, 60)
+    h, m = divmod(m, 60)
+    d, h = divmod(h, 24)
+
+    # Se só tem segundo
+    if sec<60:
+        return ('%s seg') % (s)
+
+    # Menor que uma hora, mostra apenas os minutos
+    if (sec<3600):
+        return ('%s min') % (m)
+
+    formato = r'%d h %02d min'
+
+    # Zero dias
+    if d == 0:
+        return formato % (h, m)
+
+    # Mais de um dia
+    return ('%d dia %d h') % (d, h)
 
 
 
