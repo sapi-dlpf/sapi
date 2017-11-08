@@ -10,7 +10,7 @@
 # Funcionalidades:
 #  - Conexão com o servidor SAPI para obter lista de tarefas
 #    de imagem e reportar situação de execução das imagens
-#  - Criação de pasta para aramazenamento da extração no storage
+#  - Criação de pasta para armazenamento da extração no storage
 #  - Validação dos dados do Cellebrite
 #  - Cópia para pasta do storage
 #  - Atualização do servidor da situação da tarefa
@@ -18,17 +18,11 @@
 #  - v1.0 : Inicial
 #  - v1.7: Ajuste para versão de sapilib_0_7_1 que trata https
 #  - v1.8: Ajustes para sapilib (controle de timeout e retentativas)
-#          Diversas pequenas melhorias no funcionamento do programa (ver release.txt)
+#  - v1.9: Utilização do robocopy para cópia e implementação da lixeira
 # ======================================================================================================================
-# Todo:
-# - Se memorando já foi concluido, desprezar o que está em cache (caso contrário da erro)
-#
-# TODO: Como garantir que a cópia foi efetuada com sucesso? Hashes?
 # TODO: XML está quase do tamanho do PDF (em alguns casos, fica bem grande).
-#       Criar opção para excluir do destino? Excluir sempre?
-# TODO: Reportar ao servidor a versão do programa quando for solicitar tarefas. Se a versão não for mais suportada,
-#       servidor deve negar fornecer tarefas para o agente
-# TODO: Quando agente atualizar status, reportar o nome do programa e versão (ajustar servidor antes para armazenar)
+#       IPED deve desprezar este arquivo, além do UFDR....
+#       Criar na tarefa uma lista de arquivos pastas a serem desprezados
 # ======================================================================================================================
 
 # Módulos utilizados
@@ -36,10 +30,7 @@
 from __future__ import print_function
 import platform
 import sys
-import time
 import xml.etree.ElementTree as ElementTree
-import shutil
-import tempfile
 import multiprocessing
 import signal
 
@@ -128,42 +119,9 @@ from sapilib_0_8_1 import *
 # PRODUCAO 
 # **********************************************************************
 
-
 # ======================================================================
 # Funções Auxiliares específicas deste programa
 # ======================================================================
-
-
-# ======================================================================
-# Funções Auxiliares específicas deste programa
-# ======================================================================
-
-# ======================================================================
-# Funções Auxiliares com janelas (Tkinter) - Para  W I N D O W S
-# Posteriormente jogar isto aqui para um módulo também
-# Como foi feito para o sapi
-# ======================================================================
-
-# # Interface gráfica (tk)
-# # from tkinter import Tk
-# import tkinter
-# from tkinter import filedialog
-#
-# class Janela(tkinter.Frame):
-#     def __init__(self, master=None):
-#         super().__init__(master)
-#         self.pack()
-#
-#     def selecionar_arquivo(self):
-#         self.file_name = tkinter.filedialog.askopenfilename(filetypes=([('All files', '*.*'),
-#                                                                         ('ODT files', '*.odt'),
-#                                                                         ('CSV files', '*.csv')]))
-#         return self.file_name
-#
-#     def selecionar_pasta(self):
-#         directory = tkinter.filedialog.askdirectory()
-#         return directory
-
 
 # Recupera os componentes da tarefa correntes e retorna em tupla
 # ----------------------------------------------------------------------
@@ -176,42 +134,41 @@ def obter_tarefa_item_corrente():
     return (x.get("tarefa"), x.get("item"))
 
 
-# Retorna True se existe storage montado no ponto_montagem
-# =============================================================
-def storage_montado(ponto_montagem):
-    # Não existe ponto de montagem
-    if not os.path.exists(ponto_montagem):
-        return False
+# # Retorna True se existe storage montado no ponto_montagem
+# # =============================================================
+# def storage_montado(ponto_montagem):
+#     # Não existe ponto de montagem
+#     if not os.path.exists(ponto_montagem):
+#         return False
+#
+#     # Verifica se storage está montando
+#     # Para ter certeza que o storage está montado, será verificado
+#     # se o arquivo storage_sapi_nao_excluir.txt
+#     # existe na pasta
+#     # Todo storage do sapi deve conter este arquivo na raiz
+#     arquivo_controle = ponto_montagem + 'storage_sapi_nao_excluir.txt'
+#     if not os.path.isfile(arquivo_controle):
+#         # Não existe arquivo de controle
+#         return False
+#
+#     # Ok, tudo certo
+#     return True
 
-    # Verifica se storage está montando
-    # Para ter certeza que o storage está montado, será verificado
-    # se o arquivo storage_sapi_nao_excluir.txt
-    # existe na pasta
-    # Todo storage do sapi deve conter este arquivo na raiz
-    arquivo_controle = ponto_montagem + 'storage_sapi_nao_excluir.txt'
-    if not os.path.isfile(arquivo_controle):
-        # Não existe arquivo de controle
-        return False
 
-    # Ok, tudo certo
-    return True
-
-
-
-# Separa pasta do nome do arquivo em um caminho
-# Entrada:
-#  Memorando_19317-16_Lava_Jato_RJ-12/item04Arrecadacao06/item04Arrecadacao06_imagem/item04Arrecadacao06.E01
-# Saída:
-#  - pasta: Memorando_19317-16_Lava_Jato_RJ-12/item04Arrecadacao06/item04Arrecadacao06_imagem
-#  - nome_arquivo: item04Arrecadacao06.E01
-# ----------------------------------------------------------------------
-def decompoe_caminho(caminho):
-    partes = caminho.split("/")
-
-    nome_arquivo = partes.pop()
-    pasta = "/".join(partes)
-
-    return (pasta, nome_arquivo)
+# # Separa pasta do nome do arquivo em um caminho
+# # Entrada:
+# #  Memorando_19317-16_Lava_Jato_RJ-12/item04Arrecadacao06/item04Arrecadacao06_imagem/item04Arrecadacao06.E01
+# # Saída:
+# #  - pasta: Memorando_19317-16_Lava_Jato_RJ-12/item04Arrecadacao06/item04Arrecadacao06_imagem
+# #  - nome_arquivo: item04Arrecadacao06.E01
+# # ----------------------------------------------------------------------
+# def decompoe_caminho(caminho):
+#     partes = caminho.split("/")
+#
+#     nome_arquivo = partes.pop()
+#     pasta = "/".join(partes)
+#
+#     return (pasta, nome_arquivo)
 
 
 # Processa arquivo XML, retornando erros e avisos
@@ -373,13 +330,19 @@ def _validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
 
     # Versão do relatório
     report_version = a.get('reportVersion', None)
-    if report_version not in ['5.2.0.0']:
+    versoes_homologadas=['5.2.0.0', '5.5.2.1']
+    if report_version not in versoes_homologadas:
         # Apenas um aviso. Continua
-        mensagem = ("Relatório com esta versão (" +
-                    report_version +
-                    ") não foi testada com este validador. Pode haver incompatibilidade.")
+        mensagem = texto("Esta versão do relatório do cellebrite",
+                    report_version,
+                    "não faz parte das versões homologadas:",
+                    versoes_homologadas,
+                    "Pode haver incompatibilidade",
+                    "e talvez alguns campos não sejam recuperados.",
+                    "Se você observar que faltam campos, compare com o PDF, e se"
+                    "realmente estiver faltando, comunique o desenvolvedor")
         avisos += [mensagem]
-        if_print(explicar, "- AVISO:", mensagem)
+        if_print(explicar, ">>> AVISO:", mensagem)
     d_aquis_geral['reportVersion'] = report_version
 
     # # Nome do projeto
@@ -632,9 +595,18 @@ def _validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
                     valor = value.text
                     m[nome] = valor
 
-            # Se for MSIDN, e contiver algo válido, armazena
-            if 'MSISDN' in m['Name'] and m['Value'] != 'N/A':
-                dext[extraction_id]['MSISDN'] = m['Value']
+            # MSIDN: número da linha armazenada no simcard
+            # Pode ter mais de um campo com esta informação, por exemplo: MSISDN 1
+            if 'MSISDN' in m['Name']:
+                # Se contiver algo válido, armazena
+                msisdn=m['Value']
+                msisdn=msisdn.strip()
+                if msisdn != 'N/A' and msisdn!="":
+                    dext[extraction_id]['MSISDN'] = m['Value']
+                # Valor default, caso não encontre nada
+                if dext.get(extraction_id, None) is None or dext[extraction_id].get('MSISDN',None) is None:
+                    dext[extraction_id]['MSISDN'] = 'Não disponível'
+
 
     # Recupera dados da seção "UserAccount"
     # -----------------------------------------------------------------------------------------------------------------
@@ -737,8 +709,8 @@ def _validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
     # ------------------------------------------------------------------
 
     proplaudo_aparelho = {
-        # Dados gerais
-        # -------------
+        # Dados gerais para 'reportVersion': '5.2.0.0'
+        # ------------------------------------------
         # Fabricante do aparelho detectado durante exame
         'DeviceInfoDetectedManufacturer': 'sapiAparelhoMarca',
         # Modelo do aparelho detectado durante exame
@@ -750,11 +722,40 @@ def _validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
         # IMEI do aparelho (Ex: '351972070993501')
         'IMEI': 'sapiAparelhoIMEI',
         # Foi extraído de <modelType type="UserAccount">
-        'UserAccount': 'sapiUserAccount'
+        'UserAccount': 'sapiUserAccount',
         # A princípio vamos pegar apenas o dado do SimCard...será que precisar o que está no seção do aparelho?
         # ,
         # Número telefonico associado ao aparelho (deve valer para quando tem apenas um SimCard?)
         # 'MSISDN': 'sapiMSISDN'
+
+        # Nomes de campos para reportVersion="5.3.2.1
+        # Dados da extração
+        'DeviceInfoDetectedPhoneVendor':    'sapiAparelhoMarca',
+        'DeviceInfoModelNumber':            'sapiAparelhoModelo',
+        'DeviceInfoDetectedPhoneModel':     'sapiAparelhoModelo',
+        'DeviceInfoOSType':                 'sapiAparelhoTipoSistemaOperacional',
+        'DeviceInfoOSVersion':              'sapiAparelhoSistemaOperacional',
+        'DeviceInfoSerial':                 'sapiAparelhoNumeroSerie',
+        'DeviceInfoStorageCapacity':        'sapiAparelhoMemoriaTotal',
+
+        # Dados sobre proprietário, mesclados em um único campo
+        'DeviceInfoOwnerName':              'sapiAparelhoProprietario',
+        'DeviblceInfoAppleID':              'sapiAparelhoProprietario'
+
+        # No momento sem interesse...quem sabe no futuro
+        # ----------------------------------------------
+
+        #'DeviceInfoBackupPassword':         'sapiAparelhoSenhaBackup',
+        #'DeviceInfoIsEncrypted':            'sapiAparelhoEncriptado',
+
+        # Sobre icloud
+        #'DeviceInfoiCloudAccountPresent':   'sapiAparelhoContaICloudPresente',
+        #'DeviceInfoCloudBackupEnabled':     'sapiAparelhoContaBackupICloudHabilitado',
+        #'DeviceInfoFindMyiPhoneEnabled':    'sapiAparelhoFindMyiPhoneEnabled'
+
+        # 'DeviceInfoStorageAvailable':       'sapiAparelhoMemoriaLivre',
+        #'Hora da última ativação':          'sapiAparelhoDataHoraUltimaAtivacao',
+
     }
 
     proplaudo_sim = {
@@ -788,7 +789,7 @@ def _validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
                 if (j == 'ExtractionType'):
                     # Como pode haver vária extrações, colocamos em uma lista
                     lista_extracoes.append(dext[i][j])
-                elif j == 'UserAccount':
+                elif 'UserAccount' in j:
                     # Fazer um lista com a junção de todas as listas de contas
                     lista_contas += dext[i][j]
                 else:
@@ -851,6 +852,8 @@ def _validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
     # TODO: Outros dispositivos...cartões SD, por exemplo
     # Tem que ter um exemplo....
 
+
+
     # Finaliza dados para laudo
     # -----------------------------------------------------------------
     dlaudo['sapiQuantidadeComponentes'] = quantidade_componentes
@@ -869,48 +872,48 @@ def _validar_arquivo_xml(caminho_arquivo, numero_item, explicar=True):
     return (True, dados, erros, avisos)
 
 
-# Sanitiza strings em UTF8, substituindo caracteres não suportados pela codepage da console do Windows por '?'
-# Normalmente a codepage é a cp850 (Western Latin)
-# Retorna a string sanitizada e a quantidade de elementos que forma recodificados
-def sanitiza_utf8_console(dado):
-    #
-    codepage = sys.stdout.encoding
-
-    # String => ajusta, trocando caracteres não suportados por '?'
-    if isinstance(dado, str):
-        # Isto aqui é um truque sujo, para resolver o problema de exibir caracteres UTF8 em console do Windows
-        # com configuração cp850
-        saida = dado.encode(codepage, 'replace').decode(codepage)
-        # Verifica se a recodificação introduziu alguma diferença
-        qtd = 0
-        if saida != dado:
-            qtd = 1
-        return (saida, qtd)
-
-    # Dicionário,
-    if isinstance(dado, dict):
-        saida = dict()
-        qtd = 0
-        for k in dado:
-            (saida[k], q) = sanitiza_utf8_console(dado[k])
-            qtd += q
-        return (saida, qtd)
-
-    # Lista
-    if isinstance(dado, list):
-        saida = list()
-        qtd = 0
-        for v in dado:
-            (novo_valor, q) = sanitiza_utf8_console(v)
-            saida.append(q)
-            qtd += q
-        return (saida, qtd)
-
-    # Qualquer outro tipo de dado (numérico por exemplo), retorna o próprio valor
-    # Todo: Será que tem algum outro tipo de dado que precisa tratamento!?...esperar dar erro
-    saida = dado
-    return (saida, 0)
-
+# # Sanitiza strings em UTF8, substituindo caracteres não suportados pela codepage da console do Windows por '?'
+# # Normalmente a codepage é a cp850 (Western Latin)
+# # Retorna a string sanitizada e a quantidade de elementos que forma recodificados
+# def sanitiza_utf8_console(dado):
+#     #
+#     codepage = sys.stdout.encoding
+#
+#     # String => ajusta, trocando caracteres não suportados por '?'
+#     if isinstance(dado, str):
+#         # Isto aqui é um truque sujo, para resolver o problema de exibir caracteres UTF8 em console do Windows
+#         # com configuração cp850
+#         saida = dado.encode(codepage, 'replace').decode(codepage)
+#         # Verifica se a recodificação introduziu alguma diferença
+#         qtd = 0
+#         if saida != dado:
+#             qtd = 1
+#         return (saida, qtd)
+#
+#     # Dicionário,
+#     if isinstance(dado, dict):
+#         saida = dict()
+#         qtd = 0
+#         for k in dado:
+#             (saida[k], q) = sanitiza_utf8_console(dado[k])
+#             qtd += q
+#         return (saida, qtd)
+#
+#     # Lista
+#     if isinstance(dado, list):
+#         saida = list()
+#         qtd = 0
+#         for v in dado:
+#             (novo_valor, q) = sanitiza_utf8_console(v)
+#             saida.append(q)
+#             qtd += q
+#         return (saida, qtd)
+#
+#     # Qualquer outro tipo de dado (numérico por exemplo), retorna o próprio valor
+#     # Todo: Será que tem algum outro tipo de dado que precisa tratamento!?...esperar dar erro
+#     saida = dado
+#     return (saida, 0)
+#
 
 # Exibe dados para laudo, com uma pequena formatação para facilitar a visualização
 # --------------------------------------------------------------------------------
@@ -918,7 +921,7 @@ def exibir_dados_laudo(d):
     print_centralizado(" Dados para laudo ")
 
     # Sanitiza, para exibição na console
-    (d_sanitizado, qtd_alteracoes) = sanitiza_utf8_console(d)
+    (d_sanitizado, qtd_alteracoes) = console_sanitiza_utf8(d)
 
     # Exibe formatado
     pp = pprint.PrettyPrinter(indent=4, width=Glargura_tela)
@@ -955,21 +958,21 @@ def valida_pasta_relatorio_cellebrite(pasta, explicar=False):
     # PDF
     arquivo = "Relatório.pdf"
     if not arquivo_existente(pasta, arquivo):
-        erros += ["Não foi encontrado " + arquivo]
+        erros.append(texto("Não foi encontrado", arquivo, "na pasta", pasta))
 
     # HTML
     arquivo = "Relatório.html"
     if not arquivo_existente(pasta, arquivo):
-        erros += ["Não foi encontrado " + arquivo]
+        erros.append(texto("Não foi encontrado", arquivo, "na pasta", pasta))
 
     # Relatório em formato excel (pode ser xls ou xlsx)
     if not arquivo_existente(pasta, "Relatório.xlsx") and not arquivo_existente(pasta, "Relatório.xls"):
-        erros += ["Não foi encontrado Relatório compatível com excel (Relatório.xls ou Relatório.xlsx)"]
+        erros.append(texto("Não foi encontrado Relatório compatível com excel (Relatório.xls ou Relatório.xlsx), na pasta", pasta))
 
     # XML tem que existir, para poder extrair dados para laudo
     arquivo = "Relatório.xml"
     if not arquivo_existente(pasta, arquivo):
-        erros += ["Não foi encontrado " + arquivo]
+        erros.append(texto("Não foi encontrado", arquivo, "na pasta", pasta))
 
     # xml_em_copia não deve existir...
     arquivo = "Relatório.xml_em_copia"
@@ -1168,6 +1171,7 @@ def pode_abortar(tarefa):
     # Ok, vamos abortar
     return True
 
+
 def _abortar_tarefa():
     print()
     print("- Abortar tarefa.")
@@ -1219,8 +1223,12 @@ def _abortar_tarefa():
 
         if Gpfilhos[ix].is_alive():
             # Se está rodando, finaliza
-            Gpfilhos[ix].terminate()
-            print_log("Finalizado processo", ix, "[", Gpfilhos[ix].pid, "]")
+            # Troquei por kill recursivo
+            #Gpfilhos[ix].terminate()
+            pid = Gpfilhos[ix].pid
+            print_log("Finalizando processo", ix, "[", pid, "]")
+            kill_processo_completo(pid)
+            print_log("Finalizado com sucesso processo", ix, "[", pid, "]")
 
     # Troca situação da tarefa
     # ------------------------
@@ -1550,66 +1558,79 @@ def _excluir_tarefa():
     # Verifica se pasta de destino já existe
     limpar_pasta_destino = False
     if os.path.exists(caminho_destino):
-        entradas = os.listdir(caminho_destino)
+        limpar_pasta_destino = True
         print_atencao()
         print()
-        print("- A pasta de destino da tarefa já existe e contém ", len(entradas)," arquivos/pastas.")
-        #print("- A exclusão da tarefa irá apagar definitivamente todos os dados desta pasta.")
-        print("- Esta pasta será movida para a lixeira do sistema, sendo posteriormente excluída.")
-        print("- Se você precisa dos dados da pasta, conecte no servidor (*sto) ")
-        print("  e efetue uma cópia dos dados antes de prosseguir.")
-        print()
-        prosseguir = pergunta_sim_nao(
-            "< Você concorda que a pasta de destino da tarefa seja excluída?",
-            default="n")
-        if not prosseguir:
-            # Encerra
-            print("- Cancelado pelo usuário.")
-            return
-        print_log("Usuário solicitou exclusão da pasta de destino: ", caminho_destino)
-        limpar_pasta_destino = True
+        entradas = os.listdir(caminho_destino)
+        print("- A pasta de destino da tarefa contém", len(entradas),"arquivos/subpastas.")
+        # Vamos deixar isto aqui desabilitado,
+        # pois se abrir a possibilidade dos PCFs criarem dados e deixarem dados em pastas do storage
+        # em breve
+        #print("- Esta pasta pode ser excluída (lixeira) ou movida para área de trabalho no storage.")
+        #salvar_area_trabalho = pergunta_sim_nao("< Você gostaria de salvar esta pasta na área de trabalho? ", default="n")
+        salvar_area_trabalho=False
+        if not salvar_area_trabalho:
+            print("- Esta pasta será movida imediatamente para a lixeira do SAPI.")
+            print("- Posteriormente esta pasta será fisicamente excluída (garbage colector).")
+            print()
     else:
         print("- Situação incomum: Não existe pasta de destino no storage para esta tarefa")
+
+
+    # ------------------------------------------------------------------------------------------------------------------
+    # Destino na área de trabalho
+    # ------------------------------------------------------------------------------------------------------------------
+    pasta_trabalho_destino=None
+    if salvar_area_trabalho:
+        exibir_pasta_tarefa_file_explorer("trabalho")
+        pasta_trabalho_destino = _selecionar_pasta_trabalho()
+        if (pasta_trabalho_destino == ''):
+            print("- Pasta de destino não informada.")
+            print("- Comando cancelado.")
+            return
 
     # ------------------------------------------------------------------------------------------------------------------
     # Efetuar exclusão da tarefa
     # ------------------------------------------------------------------------------------------------------------------
     print()
-    print("Efetuar exclusão")
-    print("================")
+    print("Confirmação final")
+    print("=================")
     print()
     print("- A exclusão de uma tarefa é um procedimento IRREVERSÍVEL.")
-    print("- Sugestão: Confira pela última vez se você selecionou a tarefa correta!!!")
+    print("- Sugestão: Confira pela última vez se você está excluindo a tarefa desejada!!!")
     print()
-    print("- Está tudo pronto para excluir tarefa.")
     prosseguir = pergunta_sim_nao("< Excluir tarefa? ", default="n")
     if not prosseguir:
         return
     print()
+    print("- Iniciando exclusão da tarefa")
+
+    # Troca situação da tarefa
+    # ------------------------
+    if not troca_situacao_tarefa_ok(codigo_tarefa=codigo_tarefa,
+                                    codigo_nova_situacao=GEmAndamento,
+                                    texto_status="Excluindo tarefa por comando de usuário (*EX)"
+                                    ):
+        # Se falhar, encerra. Mensagens já foram dadas na função chamada
+        return
 
 
-    # Decide o método a utilizar.
-    # Se houver pasta da tarefa, efetua exclusão em background. Caso contrário, faz exclusão em foreground
+    # Se houver pasta de dados da tarefa, efetua a exclusão
     if limpar_pasta_destino:
-        # Método antigo, que fazia exclusão em background
-        # efetuar_exclusao_background(tarefa, ponto_montagem)
-        # return
-        # Agora jogamos para a lixeira
-        pasta_tarefa=montar_caminho_longo(ponto_montagem, tarefa["caminho_destino"])
-        (sucesso, pasta_lixeira, erro)=mover_lixeira_UNC(pasta_tarefa)
+        # Move para lixeira ou pasta de trabalho de destino
+        print_tela("- Excluindo pasta da tarefa. Aguarde...")
+        (sucesso, pasta_destino) = _excluir_pasta_dados_tarefa(tarefa, ponto_montagem, pasta_trabalho_destino)
         if not sucesso:
-           print("- Movimentação da pasta da tarefa para a lixeira falhou")
-           print("-", erro)
-           print("- Comando cancelado")
-           return
-        # Tudo certo
-        print("- Pasta da tarefa foi movida para lixeira no storage:", pasta_lixeira)
+            print("- Comando cancelado")
+            return
+        texto_status = texto("Dados da pasta movidos para lixeira:", pasta_destino)
+        sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status)
 
-    # Efetua exclusão em foreground
-    # ------------------------------------------------------
+    # Ajusta no SETEC3
     try:
         # Exclui tarefa no SETEC3
         # -----------------------
+        print_tela("- Excluindo tarefa no SETEC3...")
         sapisrv_excluir_tarefa(codigo_tarefa=codigo_tarefa)
     except BaseException as e:
         print_tela_log("- Não foi possível excluir tarefa: ", str(e))
@@ -1619,145 +1640,74 @@ def _excluir_tarefa():
 
     # Ok, exclusão finalizada
     print("- Tarefa excluída com sucesso")
-    print()
-    pausa()
-    refresh_exibir_situacao()
+    print("- A pasta de dados de extração foi movida para a lixeira em", pasta_destino)
+    print("- A lixeira é de uso temporário, sendo apagada (garbage coletor) quando houver necessidade de espaço.")
+    print("- Desta forma, se for necessitar destes dados, utilize-os o quanto antes.")
+
+    exibir_situacao_apos_comando()
     return
 
 
-def efetuar_exclusao_background(tarefa, ponto_montagem):
+
+def _selecionar_pasta_trabalho():
+
+    print()
+    print("Pasta de trabalho")
+    print("=================")
+    print("- Na janela gráfica que foi aberta, selecione a pasta de trabalho.")
+    print("- Preferencialmente selecione uma pasta que contenha o seu nome, para evitar confusão entre os diversos peritos.")
+
+    # Solicita a pasta de origem
+    root = tkinter.Tk()
+    j = JanelaTk(master=root)
+    pasta_trabalho = j.selecionar_pasta()
+    root.quit()
+    root.destroy()
+
+    # Verifica se a pasta realmente está na área de trabalho
+    #var_dump(pasta_trabalho)
+
+    return pasta_trabalho
+
+
+
+# Retorna True (se conseguiu excluir), False em caso contrário
+def _excluir_pasta_dados_tarefa(tarefa, ponto_montagem, pasta_trabalho_destino=None):
 
     codigo_tarefa = tarefa["codigo_tarefa"]
 
-    # Caminhos para cada um dos componente
+    # Caminhos para cada um dos componentes
     pasta_memorando = montar_caminho_longo(ponto_montagem, tarefa["dados_solicitacao_exame"]["pasta_memorando"])
     pasta_item = montar_caminho_longo(pasta_memorando, tarefa["pasta_item"])
     pasta_tarefa = montar_caminho_longo(ponto_montagem, tarefa["caminho_destino"])
-    pasta_lixo_tarefa=montar_caminho_longo(ponto_montagem, "lixo", tarefa["caminho_destino"])
 
-    # Troca situação da tarefa
-    # ------------------------
-    texto_status = "Excluindo tarefa"
-    if not troca_situacao_tarefa_ok(codigo_tarefa=codigo_tarefa,
-                                    codigo_nova_situacao=GEmExclusao,
-                                    texto_status=texto_status
-                                    ):
-        # Se falhar, encerra. Mensagens já foram dadas na função chamada
-        return
-
-    # ------------------------------------
-    # Inicia procedimentos em background
-    # ------------------------------------
-    print_log("Iniciando exclusão em background")
-    # Os processo filhos irão atualizar o mesmo arquivo log do processo pai
-    nome_arquivo_log_para_processos_filhos = obter_nome_arquivo_log()
-
-    # Inicia processo filho para excluir tarefa
-    # ------------------------------------------------------------------------------------------------------------------
-    label_processo = "executar:" + str(codigo_tarefa)
-    dados_pai_para_filho=obter_dados_para_processo_filho()
-    p_executar = multiprocessing.Process(
-        target=background_executar_exclusao,
-        args=(codigo_tarefa, pasta_memorando, pasta_item, pasta_tarefa, pasta_lixo_tarefa,
-              nome_arquivo_log_para_processos_filhos, label_processo, dados_pai_para_filho)
-    )
-    p_executar.start()
-
-    registra_processo_filho(label_processo, p_executar)
-
-    # Inicia processo filho para acompanhar exclusão
-    # ------------------------------------------------------------------------------------------------------------------
-    label_processo = "acompanhar:" + str(codigo_tarefa)
-    p_acompanhar = multiprocessing.Process(
-        target=background_acompanhar_exclusao,
-        args=(codigo_tarefa, pasta_tarefa, nome_arquivo_log_para_processos_filhos, label_processo))
-    p_acompanhar.start()
-
-    registra_processo_filho(label_processo, p_acompanhar)
-
-    # Tudo certo, agora é só aguardar
-    print()
-    print("- Ok, procedimento de exclusão foi iniciado em background.")
-    print("- IMPORTANTE: Não encerre este programa enquanto houver tarefas em andamento, ")
-    print("  pois as mesmas serão interrompidas e terão que ser reprocessadas")
-    print("- Você pode continuar trabalhando, inclusive efetuar outras tarefas simultaneamente.")
-    print("- Para acompanhar a situação da exclusão, utilize o comando *SG ou então *SGR (repetitivo).")
-    print("- Também é possível acompanhar a situação através do SETEC3, de qualquer máquina.")
-    print("- Em caso de problema/dúvida, utilize *LG para visualizar o log.")
-    print("- Quando a exclusão for finalizada, a tarefa desaparecerá da lista de tarefas")
-
-    exibir_situacao_apos_comando(repetir=True)
-
-    return
-
-
-
-# Efetua a exclusão da tarefa, incluindo sua pasta de destino
-def background_executar_exclusao(codigo_tarefa,
-                                 pasta_memorando,
-                                 pasta_item,
-                                 pasta_tarefa,
-                                 pasta_lixo_tarefa,
-                                 nome_arquivo_log,
-                                 label_processo,
-                                 dados_pai_para_filho):
-
-    # Impede interrupção por sigint
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-    # Inicializa sapilib
-    # Será utilizado o mesmo arquivo de log do processo pai
-    sapisrv_inicializar(Gprograma, Gversao, nome_arquivo_log=nome_arquivo_log, label_processo=label_processo)
-
-    # Restaura dados herdados do processo pai
-    restaura_dados_no_processo_filho(dados_pai_para_filho)
-
-
-    # ------------------------------------------------------------------
-    # Conceito:
-    # ------------------------------------------------------------------
-    sucesso=False
     try:
-        # 1) Marca início em background
-        print_log("Início da exclusão em background para tarefa", codigo_tarefa)
 
-        # 2) Verifica o tamanho da pasta de destino, antes de excluir
-        # -----------------------------------------------------------
-        r = obter_caracteristicas_pasta(pasta_tarefa)
-        tam_pasta_tarefa = r.get("tamanho_total", None)
-        print_log("Pasta a ser excluída possui ", converte_bytes_humano(tam_pasta_tarefa))
-
-        # Uma pequena pausa aqui, para dar tempo ao processo de acompanhamento coletar o tamanho da pasta
-        time.sleep(15)
-
-        # Substitui a exclusão direta, em exclusão lógica, para pasta de lixeira
-        # a qual será posteriormente eliminada pelo garbage colector
-        #
-        # 3) Exclui física da pasta da tarefa
-        # -----------------------------------
-        texto_status = "Excluindo pasta da tarefa"
-        sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status)
-        # Exclui pasta da tarefa
-        print_log("Excluindo pasta", pasta_tarefa)
-        shutil.rmtree(pasta_tarefa)
+        # Move pasta da tarefa para lixeira
+        # ---------------------------------
+        if pasta_trabalho_destino is not None:
+            pasta_destino = pasta_trabalho_destino
+            os.rename(pasta_tarefa, pasta_trabalho_destino)
+        else:
+            (sucesso, pasta_destino, erro) = mover_lixeira_UNC(pasta_tarefa)
+            if not sucesso:
+                raise Exception("Movimentação da pasta da tarefa para a lixeira falhou:", erro)
 
         # Verifica se exclui com sucesso
         if os.path.exists(pasta_tarefa):
             print_log("Não foi possível excluir pasta da tarefa")
             raise Exception("Exclusão da pasta da tarefa falhou")
-        else:
-            print_log("Pasta da tarefa excluída com sucesso")
 
-        # Ok, exclusão concluída
-        texto_status = "Pasta da tarefa foi excluída"
-        sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status)
+        # Exclusão da patas da tarefa efetuada com sucesso
+        print("- Pasta da tarefa movida com sucesso para:", pasta_destino)
+        print("- Verificando se pastas superiores devem ser excluídas. Aguarde...")
 
         # Se não sobrou mais nenhuma pasta abaixo da pasta do item, exclui a pasta do item também
-        time.sleep(5) #Pausa para dar tempo de excluir
-        entradas=os.listdir(pasta_item)
+        time.sleep(5)  # Pausa para dar tempo de excluir
+        entradas = os.listdir(pasta_item)
         qtd_entradas = len(entradas)
-        if (qtd_entradas==0):
-            print_log("Pasta do item",pasta_item,"também será excluída, pois já não contém mais nenhum arquivo")
+        if (qtd_entradas == 0):
+            print_log("Pasta do item", pasta_item, "também será excluída, pois já não contém mais nenhum arquivo")
             shutil.rmtree(pasta_item)
             if os.path.exists(pasta_item):
                 print_log("Não foi possível excluir pasta do item")
@@ -1765,14 +1715,15 @@ def background_executar_exclusao(codigo_tarefa,
             else:
                 print_log("Pasta do item excluída com sucesso")
         else:
-            print_log("Pasta do item não foi excluída pois ainda contém ",qtd_entradas, "entradas: ", entradas)
+            print_log("Pasta do item não foi excluída pois ainda contém ", qtd_entradas, "entradas: ", entradas)
 
         # Se não sobrou mais nenhuma pasta abaixo da pasta do memorando, exclui a pasta do memorando também
-        time.sleep(5) #Pausa para dar tempo de excluir
-        entradas=os.listdir(pasta_memorando)
+        time.sleep(5)  # Pausa para dar tempo de excluir
+        entradas = os.listdir(pasta_memorando)
         qtd_entradas = len(entradas)
-        if (qtd_entradas==0):
-            print_log("Pasta do memorando",  pasta_memorando, "também será excluída, pois não continha mais nenhuma entrada")
+        if (qtd_entradas == 0):
+            print_log("Pasta do memorando", pasta_memorando,
+                      "também será excluída, pois não continha mais nenhuma entrada")
             shutil.rmtree(pasta_memorando)
             if os.path.exists(pasta_memorando):
                 print_log("Não foi possível excluir pasta do memorando")
@@ -1781,162 +1732,15 @@ def background_executar_exclusao(codigo_tarefa,
                 print_log("Pasta do memorando excluída com sucesso")
 
         # Se chegou aqui, sucesso
-        print_log("Exclusão efetuada com sucesso")
-        sucesso=True
+        return (True, pasta_destino)
+
+    except OSError as e:
+        print_tela_log("- [1750] ERRO: ", codigo_tarefa, ":" + str(e))
+        return (False, "")
 
     except BaseException as e:
-        # Erro fatal: Mesmo estando em background, exibe na tela
-        erro_resultado=str(e)
-        print_tela_log("- [1673] ** ERRO na tarefa",codigo_tarefa, "durante exclusão:" + erro_resultado)
-        print("- Consulte log para mais informações")
-        sucesso=False
-
-    # -----------------------------------------------------------------------------------------------------------------
-    # EXCLUSÃO COM ERRO
-    # -----------------------------------------------------------------------------------------------------------------
-    if not sucesso:
-        try:
-            # Troca para situação Abortada
-            # -----------------------------------
-            sapisrv_troca_situacao_tarefa_obrigatorio(
-                codigo_tarefa=codigo_tarefa,
-                codigo_situacao_tarefa=GAbortou,
-                texto_status="Exclusão falhou")
-        except BaseException as e:
-            # Se não conseguiu trocar a situação, avisa que usuário terá que abortar manualmente
-            print()
-            print_tela_log("- [1826] Não foi possível abortar a tarefa",codigo_tarefa, "automaticamente")
-            print_tela_log("- Exclusão falhou, e além disso, quando o sistema tentou atualizar situação para 'Abortada', isto também falhou")
-            print_tela_log("- Tarefa está em situação inconsistente, como se estive sendo excluída, mas na realidade já foi abortada")
-            print_tela_log("- Será necessário abortar manualmente (comando *AB)")
-            print_falha_comunicacao()
-            # Prossegue por gravidade, pois está em background e irá encerrar logo em seguida
-
-        # Encerra
-        sys.exit(0)
-
-    # -----------------------------------------------------------------------------------------------------------------
-    # Exclusão finalizada com sucesso
-    # -----------------------------------------------------------------------------------------------------------------
-    try:
-        # Exclui tarefa no SETEC3
-        # -----------------------------------
-        sapisrv_excluir_tarefa(codigo_tarefa=codigo_tarefa)
-        print_log("Tarefa excluida com sucesso")
-    except BaseException as e:
-        print()
-        print_tela_log("- Exclusão da pasta da tarefa", codigo_tarefa,"foi concluída")
-        print_tela_log("- Contudo, NÃO FOI POSSÍVEL possível excluir a tarefa no SETEC3")
-        print_tela_log("- Esta tarefa ficará em estado inconsistente, pois para o sistema ainda está sendo excluída")
-        print("- Após sanar o problema (rede?), execute novamente o comando para concluir a exclusão")
-        print_falha_comunicacao()
-        sys.exit(0)
-
-    # Tudo certo, avisa na tela
-    print()
-    print("- Tarefa", codigo_tarefa, "excluída com sucesso")
-    print("- Utilize comando *SG para conferir a situação atual da lista de tarefas")
-    print("- Esta tarefa não aparecerá mais na lista de tarefas")
-
-    print_log("Fim da exclusão em background para tarefa", codigo_tarefa)
-    sys.exit(0)
-
-# Acompanhamento de copia em background
-def background_acompanhar_exclusao(codigo_tarefa, pasta_tarefa, nome_arquivo_log, label_processo):
-
-    # Impede interrupção por sigint
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-    # Inicializa sapilib, compartilhando o arquivo de log do processo principal
-    sapisrv_inicializar(Gprograma, Gversao, nome_arquivo_log=nome_arquivo_log, label_processo=label_processo)
-    print_log("Processo de acompanhamento de exclusão iniciado")
-
-    # Executa, e se houver algum erro, registra em log
-    try:
-
-        # simula erro
-        #i=5/0
-
-        _background_acompanhar_exclusao(codigo_tarefa, pasta_tarefa)
-
-    except BaseException as e:
-        # Erro fatal: Mesmo que esteja em background, exibe na tela
-        print()
-        print("*** Acompanhamento de exclusão falhou, consulte log para mais informações ***")
-        print_log("*** Erro *** em acompanhamento de exclusão: ", str(e))
-
-    # Encerra normalmente
-    print_log("Processo de acompanhamento de exclusão finalizado")
-    sys.exit(0)
-
-
-# Processo em background para efetuar o acompanhamento da cópia
-def _background_acompanhar_exclusao(codigo_tarefa, pasta_tarefa):
-
-    # intervalo entre as atualizações
-    pausa=15
-
-    # Recupera características da pasta da tarefa
-    r=obter_caracteristicas_pasta(pasta_tarefa)
-    tam_pasta_destino = r.get("tamanho_total", None)
-    if tam_pasta_destino is None:
-        # Se não tem conteúdo, encerrra....Não deveria acontecer nunca
-        raise Exception("[2027] Falha na obtençao do tamanho da pasta de destino")
-
-    # Avisa que vai começar
-    print_log("A cada ", GtempoEntreAtualizacoesStatus, "segundos será atualizado o status da exclusão")
-
-    # Fica em loop enquanto tarefa estiver em situação EmExclusao
-    tamanho_anterior=-1
-    while True:
-
-        # Intervalo entre atualizações de status
-        time.sleep(pausa)
-
-        # Verifica se tarefa ainda está em estado de Exclusao
-        tarefa=recupera_tarefa_do_setec3(codigo_tarefa)
-        if tarefa is not None:
-            codigo_situacao_tarefa = int(tarefa['codigo_situacao_tarefa'])
-            if codigo_situacao_tarefa != GEmExclusao:
-                print_log("Verificado que situação da tarefa",codigo_tarefa,"foi modificada para",codigo_situacao_tarefa,". Encerrando acompanhamento de exclusão.")
-                return
-
-        # Aumenta o tempo de pausa a cada atualização de status
-        # sem ultrapassar o máximo
-        pausa = round(pausa * 1.2)
-        if pausa > GtempoEntreAtualizacoesStatus:
-            # Pausa nunca será maior que o limite estabelecido
-            pausa = GtempoEntreAtualizacoesStatus
-
-        debug("Novo ciclo de acompanhamento de exclusão de tarefa")
-
-        # Verifica o tamanho atual da pasta de destino
-        try:
-            tamanho_atual = obter_tamanho_pasta_ok(pasta_tarefa)
-        except OSError as e:
-            # Quando a pasta está sendo excluída, é comum que o procedimento
-            # de verificação de tamanho falhe,
-            # pois quando ele vai pegar as propriedades de um arquivo, o mesmo foi excluído pelo outro processo
-            debug("[1800] Ignorando erro: ",str(e))
-            # Não tem o que fazer...Tentar novamente
-            continue
-
-        # Atualiza tamanho atual da pasta
-        tamanho_atual_humano = converte_bytes_humano(tamanho_atual)
-
-        # Atualiza status
-        if tam_pasta_destino>0:
-            percentual = (tamanho_atual / tam_pasta_destino) * 100
-        else:
-            percentual = 0
-        texto_status = "Falta excluir " + tamanho_atual_humano + " (" + str(round(percentual, 1)) + "%)"
-        print_log(texto_status)
-        sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status)
-
-        if percentual==0:
-            # Encerra acompanhamento pois já exclui integralmente
-            debug("Encerrando acompanhamento de exclusão, pois foi excluído todo o conteúdo da pasta da tarefa")
-            return
+        print_tela_log("- [1751] ERRO: ", codigo_tarefa, ":" + str(e))
+        return (False, "")
 
 
 # @*ex - FIM ----------------------------------------------------------------------------------------------------------
@@ -2006,7 +1810,8 @@ def troca_situacao_tarefa_ok(codigo_tarefa, codigo_nova_situacao, texto_status='
 # ======================================================================================================================
 
 
-def exibir_pasta_tarefa_file_explorer():
+
+def exibir_pasta_tarefa_file_explorer(pasta_posicionar=None):
 
     print()
     print("- Exibir pasta da tarefa no storage")
@@ -2041,7 +1846,7 @@ def exibir_pasta_tarefa_file_explorer():
 
 
     # Determina a pasta
-    pasta=escolhe_pasta_para_abrir(ponto_montagem, tarefa)
+    pasta=escolhe_pasta_para_abrir(ponto_montagem, tarefa, pasta_posicionar)
 
     # Abre pasta no File Explorers
     print("- Abrindo file explorer na pasta selecionada")
@@ -2051,7 +1856,15 @@ def exibir_pasta_tarefa_file_explorer():
 
 
 # Escolhe pasta para exibição, seguindo ordem: Tarefa, item, memorando, raiz do storage
-def escolhe_pasta_para_abrir(ponto_montagem, tarefa):
+def escolhe_pasta_para_abrir(ponto_montagem, tarefa, pasta_posicionar=None):
+
+
+    # 0) Existe uma pasta predefinida
+    if pasta_posicionar is not None:
+        pasta = montar_caminho(ponto_montagem, pasta_posicionar)
+        if os.path.exists(pasta):
+            print("- Posicionado em pasta:", pasta_posicionar)
+            return pasta
 
     # 1) Pasta da tarefa
     pasta_tarefa = montar_caminho(ponto_montagem, tarefa["caminho_destino"])
@@ -2156,7 +1969,7 @@ def _copiar_relatorio_cellebrite():
               tarefa['descricao_situacao_tarefa'] + " NÃO está apta para este comando.")
         print("- O comando *CR pode sera aplicado apenas para tarefas com situação 'Aguardando ação PCF' ou 'Abortada'.")
         print("- Se você precisa refazer esta tarefa (caso, por exemplo, tenha feito a cópia da pasta errada)")
-        print("  utilize primeiramente o comando *RI para reinicializar a tarefa.")
+        print("  utilize primeiramente o comando *RI para reiniciar a tarefa.")
         print("- Em caso de divergência, efetue em Refresh na lista de tarefas (*SG).")
         return
 
@@ -2172,7 +1985,7 @@ def _copiar_relatorio_cellebrite():
 
     # Divisão em dua partes, pois depois do tinker
     # tem que "renovar" o try para capturar o keyboarInterrupt
-    caminho_origem = _copia_cellebrite_parte1()
+    caminho_origem = _copia_cellebrite_parte1(tarefa)
     if (caminho_origem == ''):
         # Se não selecionou nada, pede novamente
         print()
@@ -2188,7 +2001,7 @@ def _copiar_relatorio_cellebrite():
         return False
 
 
-def _copia_cellebrite_parte1():
+def _copia_cellebrite_parte1(tarefa):
     # ------------------------------------------------------------------
     # Seleciona e valida pasta local de relatórios
     # ------------------------------------------------------------------
@@ -2199,6 +2012,10 @@ def _copia_cellebrite_parte1():
     print()
     print("1) Pasta de relatórios cellebrite")
     print("=================================")
+
+    # Antes de mais nada, conecta no storage
+    conectar_storage_consulta_ok(dados_storage=tarefa["dados_storage"])
+
     print(
         "- Na janela gráfica que foi aberta, selecione a pasta que contém os relatórios cellebrite relativos ao item desta tarefa.")
     print("- Os arquivos de relatórios devem estar posicionados imediatamente abaixo da pastas informada.")
@@ -2309,7 +2126,7 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
     # Exibe avisos, se houver
     if len(avisos) > 0:
         print()
-        print_centralizado(' AVISOS ')
+        print_atencao()
         for mensagem in avisos:
             print("- AVISO: ", mensagem)
 
@@ -2327,40 +2144,37 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
     # ------------------------------------------------------------------------------------------------------------------
     # Método de cópia
     # ------------------------------------------------------------------------------------------------------------------
-    print()
-    print("4) Método de cópia")
-    print("==================")
-    print(" 1 - Copiar com Robocopy (recomendável):")
-    print("     Excelente robustez e velocidade e permite retomada. Não oferece boa medição de progresso.")
-    print()
-    print(" 2 - Copiar com Python+Windows:")
-    print("     Medição de progresso precisa, mas é lento e pode falhar para caminhos contendo caracteres exóticos.")
-    print()
-    while True:
-        metodo_copia = input("< Escolha o método de cópia (Default 1 - Robocopy): ")
-        metodo_copia = metodo_copia.strip()
-        if metodo_copia=='':
-            metodo_copia='1'
-        elif (not metodo_copia.isdigit()):
-            continue
+    # print()
+    # print("4) Método de cópia")
+    # print("==================")
+    # print(" - O robocopy efetua cópia com robustez e velocidade, e permite retomada em caso de erro. ")
+    # print("   Contudo, não oferece boa medição de progresso.")
+    # print(" - A cópia tradicional via python/Windows é bem mais lenta e pode falhar para arquivos com nomes exóticos.")
+    # print("   Porém oferece uma melhor medição de progresso.")
+    # print()
+    #
+    # utilizar_robocopy = pergunta_sim_nao("< Utilizar robocopy para efetuar cópia? ", default="s")
 
-        metodo_copia = int(metodo_copia)
-        if metodo_copia==1:
-            label_metodo_copia='robocopy'
-            break
-        if metodo_copia==2:
-            label_metodo_copia = 'python/windows'
-            break
+    # Vamos deixar fixo...se der problema, reativo pergunta
+    utilizar_robocopy=True
+    # Parmetriza método de cópia
+    log_copia = None
+    if utilizar_robocopy:
+        metodo_copia= 1
+        label_metodo_copia='robocopy'
+        log_copia = "sapi_log_robocopy_tarefa_" + str(codigo_tarefa) + ".txt"
+    else:
+        metodo_copia=2
+        label_metodo_copia = 'python/windows'
 
-    print_log("Opção para cópia escolhida = ", metodo_copia, label_metodo_copia)
+    print_log("Método de cópia a ser utilizado: ", metodo_copia, label_metodo_copia)
 
     # -----------------------------------------------------------------
     # Pasta de destino
     # -----------------------------------------------------------------
     print()
-    print("5) Verificando pasta de destino")
-    print("================================")
-
+    print("4) Confirmação final")
+    print("====================")
     print("- Storage da tarefa: ", tarefa["dados_storage"]["maquina_netbios"])
 
     # Montagem de storage
@@ -2374,8 +2188,119 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
 
     caminho_destino = montar_caminho_longo(ponto_montagem, tarefa["caminho_destino"])
 
-    print("- Pasta de destino no storage:")
-    print(" ", tarefa["caminho_destino"])
+    print()
+    print(">>> Origem :", caminho_origem)
+    print(">>> Destino:", tarefa["caminho_destino"])
+    print()
+
+    # Verifica se pasta de origem e pasta de destino estão no mesmo storage
+    (caminho_origem_normalizado, origem_storage_ip, origem_pasta_storage) = normaliza_pasta_atualizacao_storage(caminho_origem)
+    (caminho_destino_normalizado, destino_storage_ip, destino_pasta_storage) = normaliza_pasta_atualizacao_storage(caminho_destino)
+
+    #var_dump(origem_storage_ip)
+    #var_dump(destino_storage_ip)
+    # Se estão no mesmo storage, e pasta de origem é lixeira, permite a movimentação
+    # ao invés de cópia
+    apenas_movimentar_pasta = False
+    if origem_storage_ip == destino_storage_ip and "lixeira/" in origem_pasta_storage:
+        print("- Verificou-se que pasta de origem e pasta de destino estão no mesmo storage e a pasta de origem está na lixeira.")
+        print("- É possível efetuar uma cópia dos dados da pasta do origem,")
+        print("  porém movimentar a pasta seria bem mais rápido")
+        print()
+        apenas_movimentar_pasta = pergunta_sim_nao("< Deseja simplesmente movimentar a pasta? ", default="s")
+
+    if (apenas_movimentar_pasta):
+        movimentar_pasta(codigo_tarefa, ponto_montagem, origem_pasta_storage, destino_pasta_storage, dados_relevantes)
+    else:
+        copiar_pasta(codigo_tarefa, dados_relevantes, caminho_origem, caminho_destino, metodo_copia, label_metodo_copia, log_copia)
+
+    # Fim normal
+    return
+
+def movimentar_pasta(codigo_tarefa,
+                     ponto_montagem,
+                     caminho_origem_normalizado,
+                     caminho_destino_normalizado,
+                     dados_relevantes):
+
+    print("- Efetuando movimentação da pasta. Aguarde...")
+    print_log("Movimentação de pasta no storage")
+
+    # Adiciona storage no caminho
+    caminho_origem_normalizado= montar_caminho(ponto_montagem, caminho_origem_normalizado)
+    caminho_destino_normalizado= montar_caminho(ponto_montagem, caminho_destino_normalizado)
+    print_log("Movimentar pasta de  ", caminho_origem_normalizado)
+    print_log("Movimentar pasta para", caminho_destino_normalizado)
+
+
+    # Move pasta temporária para pasta definitiva
+    # -------------------------------------------------------------------------------
+    try:
+
+        # Verifica se pasta de origem existe
+        if os.path.exists(caminho_destino_normalizado):
+            print_log("Pasta de destino contém arquivos")
+            print("- IMPORTANTE: A pasta de destino JÁ EXISTE")
+            print("- Esta pasta será movida para a lixeira antes da movimentação")
+            # Move pasta de destino para lixeira
+            (movida, pasta_lixeira)=mover_lixeira(caminho_destino_normalizado)
+            sapisrv_atualizar_status_tarefa_informativo(
+                codigo_tarefa=codigo_tarefa,
+                texto_status=texto("Pasta de destino atual foi movida para lixeira",
+                                   pasta_lixeira)
+            )
+
+        # Move pasta temporária para definitiva
+        sapisrv_atualizar_status_tarefa_informativo(
+            codigo_tarefa=codigo_tarefa,
+            texto_status="Movendo pasta no storage"
+        )
+        print_log("Movendo pasta", caminho_origem_normalizado, "para", caminho_destino_normalizado)
+        mover_pasta_storage(caminho_origem_normalizado, caminho_destino_normalizado)
+        print_log("Movimentação efetuada com sucesso")
+
+    except Exception as e:
+        # Isto não deveria acontecer nunca
+        erro = "Não foi possível mover pasta: " + str(e)
+        sapisrv_abortar_tarefa(codigo_tarefa, erro)
+        print_tela_log("- Tarefa abortada: ",erro)
+        print_tela_log("- Dica: Uma das causas mais comuns de falha de movimentação é haver algum arquivo aberto, ")
+        print_tela_log("        ou até mesmo a pasta estar aberta no explorer, com algum arquivo sendo visualizado.")
+        return
+
+    # -----------------------------------------------------------------------------------------------------------------
+    # Movimentação finalizada com sucesso
+    # -----------------------------------------------------------------------------------------------------------------
+    try:
+
+        # Recupera características da pasta de destino
+        carac_destino = obter_caracteristicas_pasta(caminho_destino_normalizado)
+
+        # Troca para situação finalizada
+        # -----------------------------------
+        sapisrv_troca_situacao_tarefa_obrigatorio(
+            codigo_tarefa=codigo_tarefa,
+            codigo_situacao_tarefa=GFinalizadoComSucesso,
+            texto_status="Dados copiados com sucesso para pasta de destino",
+            dados_relevantes=dados_relevantes,
+            tamanho_destino_bytes=carac_destino["tamanho_total"])
+
+        print_log("Situação da tarefa atualizada com sucesso")
+
+    except BaseException as e:
+        print_tela_log("- Movimentação da pasta da tarefa", codigo_tarefa, "foi concluída")
+        print_tela_log("- Contudo, NÃO FOI POSSÍVEL possível atualizar situação para 'Sucesso'")
+        print_tela_log("- Esta tarefa ficará em estado inconsistente, pois para o sistema ainda está em execução")
+        print_falha_comunicacao()
+        print_tela_log("- Após sanar o problema, utilize comando *CS para atualizar situação da tarefa")
+        return
+
+    # Sucesso
+    print_tela_log("- Tarefa concluída com sucesso (pasta movimentada)")
+    return
+
+
+def copiar_pasta(codigo_tarefa, dados_relevantes, caminho_origem, caminho_destino, metodo_copia, label_metodo_copia, log_copia):
 
     # Verifica se pasta de destino já existe
     limpar_pasta_destino_antes_copiar = False
@@ -2405,27 +2330,26 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
         # Guarda indicativo que será necessário limpeza da pasta de destino
         limpar_pasta_destino_antes_copiar = True
     else:
-        print_atencao()
-        print("- Confira se a pasta de destino no storage (exibida acima) está bem formada,")
-        print("  ou seja, se o memorando e o item estão ok,")
-        print("  pois será assim que ficará gravado na mídia de destino.")
-        print("- IMPORTANTE: Se a estrutura não estiver ok (por exemplo, o item está errado), cancele comando,")
-        print("  ajuste no SETEC3 (*s3) e depois retome esta tarefa.")
-        print()
-        prosseguir = pergunta_sim_nao("< Estrutura da pasta está ok?", default="n")
-        if not prosseguir:
-            return
+        print("- Pasta de destino JÁ EXISTE")
+        print("- Procedimento de cópia irá tornar a pasta de destino idêntica à pasta de origem")
+        print("- Isto significa que arquivos da pasta de destino poderão ser excluídos, caso estes não estejam na pasta de origem (sincronização)")
+
+
+    #print_atencao()
+    print("- Confira se a pasta de destino no storage (exibida acima) está bem formada,")
+    print("  ou seja, se o memorando e o item estão ok,")
+    print("  pois será assim que ficará gravado na mídia de destino.")
+    print("- IMPORTANTE: Se a estrutura não estiver ok (por exemplo, o item está errado), cancele comando,")
+    print("  ajuste no SETEC3 (*s3) e depois retome esta tarefa.")
 
 
     # -----------------------------------------------------------------
     # Confirmação final
     # -----------------------------------------------------------------
-    #print()
-    #print("- Ok, está tudo pronto para iniciar.")
-    #prosseguir = pergunta_sim_nao("< Iniciar cópia ok? ", default="n")
-    #if not prosseguir:
-    #    return
-
+    print()
+    prosseguir = pergunta_sim_nao("< Iniciar cópia? ", default="n")
+    if not prosseguir:
+        return
 
     print_log("Iniciando execução de comando de cópia (*cr)")
 
@@ -2473,22 +2397,13 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
               label_processo,
               dados_pai_para_filho,
               metodo_copia,
-              label_metodo_copia
+              label_metodo_copia,
+              log_copia
               )
     )
     p_executar.start()
 
     registra_processo_filho(label_processo, p_executar)
-
-    # Inicia processo filho para acompanhamento da cópia
-    # ------------------------------------------------------------------------------------------------------------------
-    label_processo = "acompanhar:" + str(codigo_tarefa)
-    p_acompanhar = multiprocessing.Process(
-        target=background_acompanhar_copia,
-        args=(codigo_tarefa, caminho_origem, caminho_destino, nome_arquivo_log_para_processos_filhos, label_processo))
-    p_acompanhar.start()
-
-    registra_processo_filho(label_processo, p_acompanhar)
 
     # Tudo certo, agora é só aguardar
     print()
@@ -2505,6 +2420,113 @@ def _copia_cellebrite_parte2(tarefa, caminho_origem):
     return
 
 
+
+# Recebe uma pasta e ajusta para utilizá-la em operações de atualização
+# - caminho_normalizado
+# - storage: Se estiver em um storage conhecido pelo programa
+# - pasta_storage: Pasta no storage
+def normaliza_pasta_atualizacao_storage(pasta):
+
+    # Remove notação UNC para caminho longo
+    # ?\\UNC\\10.41.87.235\storage\pasta => \\10.41.87.235\storage
+    pasta = remove_unc(pasta)
+
+    # Trocar drive por notação de compartilhamento
+    # Exemplo:
+    #   Z:/pasta => \\gtpi-sto-03\storage\pasta
+    for sto in Gdrive_mapeado:
+        drive = Gdrive_mapeado[sto]
+        if pasta[0:2] == drive:
+            pasta = pasta.replace(drive, sto)
+
+    # Troca nome netbios por IP
+    # Exemplo:
+    # \\gtpi-sto-03\storage\pasta => \\10.41.87.235\storage\pasta
+    for ip in Gdic_storage:
+        netbios = Gdic_storage[ip]
+        pasta = pasta.replace(netbios, ip)
+
+    # Localiza a palavra storage, que serve como separador
+    partes  =str(pasta).split("\\storage")
+
+    storage_ip = None
+    storage_pasta = pasta
+    if len(partes)>1:
+        # Como é pasta do storage
+        # Separa nos dois componentes necessários
+        storage_ip = partes[0]
+        storage_pasta = "".join(partes[1:])
+        storage_pasta=storage_pasta.strip("/")
+        storage_pasta=storage_pasta.strip("\\")
+
+        # Troca referência ao storage de ip para netbios
+        #storage = storage
+        #for ip in Gdic_storage:
+        #    netbios = Gdic_storage[ip]
+        #    ip = ip + "\\storage"
+        #    storage = storage.replace(ip, netbios)
+        # Remove tudo que é desnecessário, retronando apenas o nome netbios do storage
+        # Exemplo:
+        # \\gtpi-sto-03\storage => gtpi-sto-03
+        storage_ip = storage_ip.replace("\\storage","")
+        storage_ip = storage_ip.strip("/")
+        storage_ip = storage_ip.strip("\\")
+
+    #var_dump(Gdic_storage)
+    #var_dump(2675)
+
+    return (pasta, storage_ip, storage_pasta)
+
+
+# Determina se caminho de origem e destino estão no mesmo storage
+# Em caso positivo, retorna também as pastas ajustadas, para o servidor
+# - sucesso
+# - origem_pasta: Pasta de origem  no servidor
+# - destino_pasta Pasta de destino no srevidor
+def origem_destino_mesmo_storage(caminho_origem, caminho_destino):
+
+    #var_dump(Gdrive_mapeado)
+    #var_dump(Gdic_storage)
+    #die('ponto2641')
+
+    caminho_servidor_origem  = caminho_origem[:]
+    caminho_servidor_destino = caminho_destino[:]
+    # Caminho origem, troca drive por \\xxxx\
+    for sto in Gdrive_mapeado:
+        drive = Gdrive_mapeado[sto]
+        if caminho_servidor_origem[0:2] == drive:
+            caminho_servidor_origem = caminho_servidor_origem.replace(drive, sto)
+
+    # Remove unc
+    caminho_servidor_destino = remove_unc(caminho_servidor_destino)
+
+    # IP para nome netbios
+    for ip in Gdic_storage:
+        netbios = Gdic_storage[ip]
+        caminho_servidor_destino = caminho_servidor_destino.replace(ip, netbios)
+
+    # Separa os componente, antes e depois da palavra storage
+    partes_origem  =str(caminho_servidor_origem).split("\\storage")
+    partes_destino =str(caminho_servidor_destino).split("\\storage")
+    if len(partes_origem)>1 and len(partes_destino)>1:
+        origem_storage=partes_origem[0].strip()
+        origem_pasta="".join(partes_origem[1:])
+        destino_storage=partes_destino[0].strip()
+        destino_pasta="".join(partes_destino[1:])
+        # Remove "/", "\" do início, fim
+        origem_pasta=origem_pasta.strip("/")
+        origem_pasta=origem_pasta.strip("\\")
+        destino_pasta=destino_pasta.strip("/")
+        destino_pasta=destino_pasta.strip("\\")
+        # Pastas de origem e destino compartilham o mesmo storage
+        if (origem_storage==destino_storage):
+            return (True, origem_pasta, destino_pasta)
+
+    # Não estão no mesmo storage
+    return (False, None, None)
+
+
+
 # Efetua a cópia de uma pasta
 def background_executar_copia(codigo_tarefa,
                               caminho_origem,
@@ -2515,7 +2537,8 @@ def background_executar_copia(codigo_tarefa,
                               label_processo,
                               dados_pai_para_filho,
                               metodo_copia,
-                              label_metodo_copia
+                              label_metodo_copia,
+                              log_copia
                               ):
 
     # Impede interrupção por sigint
@@ -2545,6 +2568,17 @@ def background_executar_copia(codigo_tarefa,
     try:
         # 1) Marca início em background
         print_log("Início da cópia em background para tarefa", codigo_tarefa)
+
+        # Se caminho de origem é da lixeira
+        # (ou seja, arquivos pertencem a uma tarefa excluída)
+        # então não faz o ajuste para xml_em_copia,
+        # uma vez que a lixeira não está liberada para escrita
+        renomear_xml=True
+        if ":/lixeira/" in caminho_origem:
+            print_log("Como arquivo de origem está na lixeira, XML não será renomeado")
+            renomear_xml=False
+        else:
+            print_log("XML será renomeado para controle de cópia concorrente")
 
         # 2) Exclui pasta de destino antes de iniciar, se necessário
         # ------------------------------------------------------------------
@@ -2580,13 +2614,36 @@ def background_executar_copia(codigo_tarefa,
 
         # 4) Renomeia o arquivo XML na pasta de origem (nome temporário)
         # ------------------------------------------------------------------
-        print_log("Renomeando arquivo", arquivo_xml_origem, "para", arquivo_xml_origem_renomeado)
-        print_log("No final da cópia o nome original será restaurado")
-        os.rename(arquivo_xml_origem, arquivo_xml_origem_renomeado)
-        print_log("Renomeado com sucesso")
+        if renomear_xml:
+            print_log("Renomeando arquivo", arquivo_xml_origem, "para", arquivo_xml_origem_renomeado)
+            print_log("No final da cópia o nome original será restaurado")
+            os.rename(arquivo_xml_origem, arquivo_xml_origem_renomeado)
+            print_log("Renomeado com sucesso")
+
+        # 4B) Inicia processo filho de acompanhamento da cópia
+        # ------------------------------------------------------------------------------------------------------------------
+        label_processo = "acompanhar:" + str(codigo_tarefa)
+        p_acompanhar = multiprocessing.Process(
+            target=background_acompanhar_copia,
+            args=(codigo_tarefa,
+                  caminho_origem,
+                  caminho_destino,
+                  nome_arquivo_log,
+                  label_processo,
+                  metodo_copia,
+                  label_metodo_copia,
+                  log_copia,
+                  carac_origem))
+        p_acompanhar.start()
+        # Isto aqui não serve para nada, pois estamos em outro processo
+        # Logo, vai registar em uma estrutura que não pode ser acessada pelo pai
+        # Contudo, o método de kill tree deve conseguir localizar todos os processos
+        # filhos e elminá-los
+        registra_processo_filho(label_processo, p_acompanhar)
 
         # 5) Executa a cópia
         # ------------------------------------------------------------------
+        tempo_copia_ini = time.time()
         texto_status=texto("Copiando via ", label_metodo_copia)
         sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status)
 
@@ -2604,10 +2661,21 @@ def background_executar_copia(codigo_tarefa,
         else:
             raise Exception("Opção de cópia com valor inválido" + str(metodo_copia))
 
-        sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status=resultado_copia)
-
         if not sucesso:
             raise Exception(texto("Cópia falhou:", resultado_copia))
+
+        # Calcula taxa média
+        tempo_decorrido = time.time() - tempo_copia_ini
+        taxa_byte_por_segundos = int(tam_pasta_origem / tempo_decorrido)
+        taxa_byte_por_segundos_humano = converte_bytes_humano(taxa_byte_por_segundos, 0)
+
+        # Atualiza status indicativos de término da cópia
+        texto_status = texto(resultado_copia,
+                             "com taxa média:",
+                             taxa_byte_por_segundos_humano + "/s"
+                             )
+
+        sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status=texto_status)
 
         # 6) Confere se cópia foi efetuada com sucesso
         # ------------------------------------------------------------------
@@ -2633,21 +2701,23 @@ def background_executar_copia(codigo_tarefa,
 
         # 7) Restaura o nome do arquivo XML na pasta destino
         # ------------------------------------------------------------------
-        arquivo_xml_destino = montar_caminho_longo(caminho_destino, "Relatório.xml_em_copia")
-        arquivo_xml_destino_renomeado = montar_caminho_longo(caminho_destino, "Relatório.xml")
-        print_log("Restaurado nome de arquivo '",
-                  arquivo_xml_destino, "' para '", arquivo_xml_destino_renomeado, "'")
-        os.rename(arquivo_xml_destino, arquivo_xml_destino_renomeado)
-        print_log("Renomeado com sucesso na pasta de destino")
+        if renomear_xml:
+            arquivo_xml_destino = montar_caminho_longo(caminho_destino, "Relatório.xml_em_copia")
+            arquivo_xml_destino_renomeado = montar_caminho_longo(caminho_destino, "Relatório.xml")
+            print_log("Restaurado nome de arquivo '",
+                      arquivo_xml_destino, "' para '", arquivo_xml_destino_renomeado, "'")
+            os.rename(arquivo_xml_destino, arquivo_xml_destino_renomeado)
+            print_log("Renomeado com sucesso na pasta de destino")
 
         # 8) Restaura o nome do arquivo XML na pasta origem
         # ------------------------------------------------------------------
-        arquivo_xml_origem = montar_caminho_longo(caminho_origem,  "Relatório.xml_em_copia")
-        arquivo_xml_origem_renomeado = montar_caminho_longo(caminho_origem, "Relatório.xml")
-        print_log("Restaurado nome de arquivo '",
-                  arquivo_xml_origem, "' para '", arquivo_xml_origem_renomeado, "'")
-        os.rename(arquivo_xml_origem, arquivo_xml_origem_renomeado)
-        print_log("Renomeado com sucesso na pasta de origem")
+        if renomear_xml:
+            arquivo_xml_origem = montar_caminho_longo(caminho_origem,  "Relatório.xml_em_copia")
+            arquivo_xml_origem_renomeado = montar_caminho_longo(caminho_origem, "Relatório.xml")
+            print_log("Restaurado nome de arquivo '",
+                      arquivo_xml_origem, "' para '", arquivo_xml_origem_renomeado, "'")
+            os.rename(arquivo_xml_origem, arquivo_xml_origem_renomeado)
+            print_log("Renomeado com sucesso na pasta de origem")
 
         # Se chegou aqui, sucesso
         print_log("Cópia concluída com sucesso")
@@ -2655,7 +2725,11 @@ def background_executar_copia(codigo_tarefa,
 
     except OSError as e:
         # Erro fatal: Mesmo estando em background, exibe na tela
-        print_tela_log("- [2581] ** ERRO na tarefa",codigo_tarefa, "durante cópia:" + str(e))
+        erro=texto("- [2581] ** ERRO na tarefa",
+                   codigo_tarefa,
+                   "durante cópia:",
+                   str(e))
+        print_tela_log(erro)
         print("- Consulte log para mais informações")
         sucesso=False
 
@@ -2674,15 +2748,12 @@ def background_executar_copia(codigo_tarefa,
     # COPIA COM ERRO
     # -----------------------------------------------------------------------------------------------------------------
     if not sucesso:
-        # Registrar erro no log
-        sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, erro)
-
         # Troca para situação Abortada
         try:
             sapisrv_troca_situacao_tarefa_obrigatorio(
                 codigo_tarefa=codigo_tarefa,
                 codigo_situacao_tarefa=GAbortou,
-                texto_status="Cópia FALHOU. Consulte log")
+                texto_status=texto("Cópia FALHOU: ", erro))
         except BaseException as e:
             # Se não conseguiu trocar a situação, avisa que usuário terá que abortar manualmente
             print_tela_log("- [1826] Não foi possível abortar a tarefa",codigo_tarefa, "automaticamente")
@@ -2693,7 +2764,7 @@ def background_executar_copia(codigo_tarefa,
             # Prossegue por gravidade, pois está em background e irá encerrar logo em seguida
 
         # Encerra
-        sys.exit(0)
+        os._exit(0)
 
     # -----------------------------------------------------------------------------------------------------------------
     # Cópia finalizada com sucesso
@@ -2714,19 +2785,27 @@ def background_executar_copia(codigo_tarefa,
         print_tela_log("- Esta tarefa ficará em estado inconsistente, pois para o sistema ainda está em execução")
         print("- Após sanar o problema, utilize comando *cs para atualizar situação da tarefa")
         print_falha_comunicacao()
-        sys.exit(0)
+        os._exit(0)
 
     # Tudo certo
     print()
     print("- Cópia de relatório para tarefa", codigo_tarefa, "foi concluída com SUCESSO")
     print("- Utilize comando *SG para conferir a situação atual da tarefa")
     print_log("Fim da cópia em background para tarefa", codigo_tarefa)
-    sys.exit(0)
-
+    os._exit(0)
 
 
 # Acompanhamento de copia em background
-def background_acompanhar_copia(codigo_tarefa, caminho_origem, caminho_destino, nome_arquivo_log, label_processo):
+def background_acompanhar_copia(codigo_tarefa,
+                                caminho_origem,
+                                caminho_destino,
+                                nome_arquivo_log,
+                                label_processo,
+                                metodo_copia,
+                                label_metodo_copia,
+                                log_copia,
+                                carac_origem
+                                ):
 
     # Impede interrupção por sigint
     signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -2741,7 +2820,21 @@ def background_acompanhar_copia(codigo_tarefa, caminho_origem, caminho_destino, 
         # simula erro
         #i=5/0
 
-        _background_acompanhar_copia(codigo_tarefa, caminho_origem, caminho_destino, nome_arquivo_log)
+        if metodo_copia==1:
+            # Acompanhamento de cópia via robocopy
+            # Demora muito para dar uma primeiro sinal de vida...deixa usuário ansioso
+            _background_acompanhar_copia_robocopy(codigo_tarefa, caminho_origem,
+                                                          caminho_destino, log_copia, carac_origem)
+
+        # Método tradicional, via python/windows
+        if metodo_copia == 2:
+            # Acompanhamento de cópia tradicional (python/Windows)
+            _background_acompanhar_copia_tradicional(codigo_tarefa,
+                                                     caminho_origem,
+                                                     caminho_destino)
+
+
+
 
     except BaseException as e:
         # Erro fatal: Mesmo que esteja em background, exibe na tela
@@ -2752,14 +2845,17 @@ def background_acompanhar_copia(codigo_tarefa, caminho_origem, caminho_destino, 
 
     # Encerra normalmente
     print_log("Processo de acompanhamento de cópia finalizado")
-    sys.exit(0)
+    os._exit(0)
 
 
 # Processo em background para efetuar o acompanhamento da cópia
-def _background_acompanhar_copia(codigo_tarefa,
+def _background_acompanhar_copia_tradicional(codigo_tarefa,
                                  caminho_origem,
-                                 caminho_destino,
-                                 nome_arquivo_log):
+                                 caminho_destino):
+
+    print_log("Acompanhamento de cópia tradicional inativo")
+    print_log("Requer revisão para voltar a funcionar")
+    return
 
     start_time = time.time()
 
@@ -2880,6 +2976,123 @@ def _background_acompanhar_copia(codigo_tarefa,
         print("Novo tamanho_anterior = ",tamanho_anterior)
         print("ponto2819")
 
+
+
+# Acompanhamento de cópia efetuada via robocopy
+# Monitora o arquivo de log e efetua calculo aproxima de progresso,
+# Um acompanhamento preciso da evolução da cópia é difícil,
+# uma vez que o robocopy pré-aloca o espaço nos arquivos de destino
+def _background_acompanhar_copia_robocopy(codigo_tarefa,
+                                          caminho_origem,
+                                          caminho_destino,
+                                          log_copia,
+                                          carac_origem):
+
+    print_log("Acompanhamento de cópia via Robocopy")
+
+    start_time = time.time()
+
+    # Recupera características da pasta de origem
+    tam_pasta_origem = carac_origem.get("tamanho_total", None)
+    quantidade_arquivos_pasta_origem = carac_origem.get("quantidade_arquivos", None)
+    if tam_pasta_origem is None or quantidade_arquivos_pasta_origem is None:
+        # Se não tem conteúdo, encerrra....Não deveria acontecer nunca
+        raise Exception("[2027] Falha na obtençao do tamanho da pasta de origem")
+
+    # Aguarda até ter sido criada a pasta de destino
+    while True:
+        if not os.path.exists(caminho_destino):
+            dormir(15, 'Aguardando criação da pasta de destino')
+            continue
+        # Ok, pasta de destino foi criada
+        break
+
+    # Fica em loop enquanto tarefa estiver em situação EmAndamento
+    primeira=True
+    tempo_pausa = 30
+    quantidade_arquivos_processados_anterior = 0
+    while True:
+
+        # Intervalo entre atualizações de status
+        if not primeira:
+            dormir(tempo_pausa, "Próxima atualização de status")
+            pass
+        primeira=False
+
+        # Verifica se tarefa ainda está em estado de Andamento
+        tarefa=recupera_tarefa_do_setec3(codigo_tarefa)
+        if tarefa is not None:
+            codigo_situacao_tarefa = int(tarefa['codigo_situacao_tarefa'])
+            if codigo_situacao_tarefa != GEmAndamento:
+                print_log("Interrompendo acompanhamento, pois situação da tarefa",codigo_tarefa,"foi modificada para",codigo_situacao_tarefa)
+                return
+
+        # Analisa o log e determina a quantidade total de arquivos processados
+        res=acompanhar_log_copia_robocopy(log_copia)
+        if not res["sucesso"]:
+            print_log("Analise do arquivo de log falhou: ", res.get("explicacao","") )
+            continue
+
+        # Estima quantidade de arquivos para o qual já foi iniciado a cópia
+        quantidade_arquivos_processados = res.get("quantidade_arquivos_processados",0)
+        # Despreza os registros de exclusão de arquivos (/mir)
+        quantidade_arquivos_excluidos = res.get("quantidade_arquivos_excluidos",0)
+        if quantidade_arquivos_excluidos >0:
+            quantidade_arquivos_processados -= quantidade_arquivos_excluidos
+        if quantidade_arquivos_processados==0:
+            print_log("Arquivo de log do robocopy ainda não contém nenhum arquivo processado.")
+            # É comum que o robocopy demore um pouco para escrever os primeiros registros no arquivo de log
+            # Enquanto não tem dados no log, vamos ler direto da pasta da destino
+            # Isto aqui também demora....também não funciona
+            #print_log("Obtendo caracteristiscas da pasta de destino")
+            #carac_destino = obter_caracteristicas_pasta_ok(caminho_destino)
+            #if carac_destino is None:
+            #    # Se falhar, ignora e tenta mais tarde
+            #    print_log("Leitura de característica da pasta de destino falhou")
+            #    continue
+            #quantidade_arquivos_processados = carac_destino.get("quantidade_arquivos", 0)
+            #print_log("Arquivos na pasta de destino = ", quantidade_arquivos_processados)
+
+            # Mecanismo anti-ansiedades....serve para dar um número, indicando que a cópia foi iniciada
+            # apenas para usuário não ficar ansioso
+            # Calculando quantidade de arquivos copiados...não é a quantidade real
+            taxa_dummy_bytes_segundo = 5*1024*1024 #5MB/s
+            tempo_decorrido = time.time() - start_time
+            tamanho_total_copiado_estimado = tempo_decorrido * taxa_dummy_bytes_segundo
+            tamanho_medio_arquivo = tam_pasta_origem / quantidade_arquivos_pasta_origem
+            quantidade_arquivos_copiados_estimados = int(tamanho_total_copiado_estimado / tamanho_medio_arquivo)
+
+            # Fictício => Anti-ansiedade
+            quantidade_arquivos_processados = quantidade_arquivos_copiados_estimados
+            print_log("progresso estimado")
+
+        # Se não houve progresso, ou em função de método conflituosos (direto da pasta x log)
+        # houve um decréscimo no número de arquivo processados, ignora a atualização
+        if quantidade_arquivos_processados < quantidade_arquivos_processados_anterior:
+            continue
+
+        # A medição de arquivos processados é bastante imprecisa
+        # Logo, se a quantidade de arquivos processados igualar ou superar a quantidade de arquivos
+        # na pasta de origem, é melhor abandonar o acompanhamento para evitar confusão
+        if quantidade_arquivos_processados >= quantidade_arquivos_pasta_origem:
+            return
+
+        # Calcula o percentual de avanço
+        percentual = (quantidade_arquivos_processados / quantidade_arquivos_pasta_origem) * 100
+        percentual = round(percentual,1)
+        #if percentual==0:
+        #    # Despreza, se o percentual é muito baixo
+        #    continue
+        percentual_texto="("+str(percentual)+"%)"
+        texto_status = texto("Arquivos copiados:", quantidade_arquivos_processados, percentual_texto)
+
+        # Atualiza status
+        print_log(texto_status)
+        sapisrv_atualizar_status_tarefa_informativo(codigo_tarefa, texto_status)
+        quantidade_arquivos_processados_anterior = quantidade_arquivos_processados
+
+        # Depois que fez primeira atualização, diminui a frequencia
+        tempo_pausa = GtempoEntreAtualizacoesStatus
 
 
 # *cr - fim ----------------------------------------------------------------
@@ -3087,6 +3300,12 @@ def refresh_exibir_situacao():
 
 def exibir_situacao_apos_comando(repetir=False):
 
+    # Não vamos mais dar opção de repetir, quase ninguem utiliza
+    print()
+    pausa()
+    refresh_exibir_situacao()
+    return
+
     # Deixa usuário decidir se fará ou não exibição contínua
     print()
     continuo = pergunta_sim_nao("< Deseja entrar em modo de acompanhamento contínuo da situação das tarefas (*sgr)?","n")
@@ -3230,6 +3449,10 @@ def exibir_log(comando, filtro_base="", filtro_usuario="", limpar_tela=True):
             if filtro_usuario!="" and filtro_usuario.lower() not in linha.lower():
                 exibir=False
 
+            # Sanitiza para utf8 na console
+            # ignora os ajustes efetuados
+            (linha, ajustes)=console_sanitiza_utf8(linha)
+
             if exibir:
                 qtd=qtd+1
                 print(format(qtd, '03d'),":", linha.strip())
@@ -3247,61 +3470,6 @@ def exibir_log(comando, filtro_base="", filtro_usuario="", limpar_tela=True):
         print("  Exemplo: ",comando," erro => Lista apenas linhas que contém o termo 'erro'")
 
     return
-
-
-# Salva situação atual para arquivo
-# ----------------------------------------------------------------------
-def salvar_estado():
-
-    # Desabilitado...acho que não vai ser necessário
-    return
-
-    # Monta dicionario de estado
-    estado = dict()
-    estado["Gtarefas"] = Gtarefas
-    estado["GdadosGerais"] = GdadosGerais
-
-    # Abre arquivo de estado para gravação
-    nome_arquivo = Garquivo_estado
-    arquivo_estado = open(nome_arquivo, "w")
-
-    # Grava e encerra
-    json.dump(estado, arquivo_estado, indent=4)
-    arquivo_estado.close()
-
-
-# Carrega situação de arquivo
-# ----------------------------------------------------------------------
-def carregar_estado():
-    # Irá atualizar as duas variáveis relacionadas com estado
-    global Gtarefas
-    global GdadosGerais
-
-    # Por enquanto, não vamos habilitar a carga de estado
-    return
-
-    # Se estiver em ambiente de produção, não efetua o carregamento do estado
-    if not ambiente_desenvolvimento():
-        return
-
-    # Não tem arquivo de estado
-    if (not os.path.isfile(Garquivo_estado)):
-        return
-
-    # Le dados do arquivo e fecha
-    arq_estado = open(Garquivo_estado, "r")
-    estado = json.load(arq_estado)
-    arq_estado.close()
-
-    # Recupera variaveis do estado
-    Gtarefas = estado["Gtarefas"]
-    GdadosGerais = estado["GdadosGerais"]
-
-
-# Avisa que dados vieram do estado
-# print("Dados carregados do estado.sapi")
-# sprint("Isto so deve acontecer em ambiente de desenvolvimento")
-
 
 
 # ----------------------------------------------------------------------
@@ -3568,7 +3736,8 @@ def finalizar_programa():
         if Gpfilhos[ix].is_alive():
             # Finaliza processo
             print_log("Finalizando processo ", ix, " [", Gpfilhos[ix].pid, "]")
-            Gpfilhos[ix].terminate()
+            # Gpfilhos[ix].terminate()
+            kill_processo_completo(Gpfilhos[ix].pid)
             # Se for uma tarefa, coloca na lista para na sequencia atualizar situação para abortada
             if "executar" in ix:
                 dummy, codigo_tarefa = ix.split(':')
@@ -3639,10 +3808,55 @@ def exibir_situacao_repetir():
         print("Saindo de modo *SGR")
         return
 
+
+def acompanhar_log_copia_robocopy(caminho_log_robocopy):
+
+    # Dicionário de resultado
+    res = dict()
+    res["sucesso"]=False
+    res["quantidade_arquivos_processados"]=0
+    res["quantidade_arquivos_excluidos"]=0
+    res["explicacao"]=""
+
+    # Arquivo de log não existe
+    if not os.path.isfile(caminho_log_robocopy):
+        res["explicacao"] = "Arquivo não existe"
+        return res
+
+
+    # Procurar por linha que contem tamanho
+    quantidade_arquivos_processados = 0
+    quantidade_arquivos_excluidos = 0
+    with open(caminho_log_robocopy, "r") as fentrada:
+        for linha in fentrada:
+            #print_sanitizado(linha)
+
+            # Despreza linhas pequenas, que normalmente contém apenas um percentual
+            if len(linha)<10:
+                continue
+
+            # Como o robocopy está rodando com /mir
+            # é possível que a pasta de destino contenha arquivos que serão excluídos
+            # durante o procedimento
+            if "*Arquivo EXTRA" in linha:
+                quantidade_arquivos_excluidos = quantidade_arquivos_excluidos + 1
+
+            # Está no logo, considerada como processado
+            # Isto não significa que a cópia foi concluída
+            quantidade_arquivos_processados=quantidade_arquivos_processados+1
+
+
+    # Tudo certo
+    res["sucesso"]=True
+    res["quantidade_arquivos_processados"]=quantidade_arquivos_processados
+    res["quantidade_arquivos_excluidos"]=quantidade_arquivos_excluidos
+    return res
+
+
+
 # ======================================================================
 # Rotina Principal 
 # ======================================================================
-
 
 def main():
 
@@ -3668,10 +3882,15 @@ def main():
     sapisrv_inicializar_ok(Gprograma, Gversao, auto_atualizar=True, nome_arquivo_log=nome_arquivo_log)
     print_log('Inicializado com sucesso', Gprograma, ' - ', Gversao)
 
-    caminho="\\\\10.41.87.235\\storage\\Memorando_5917-17_XXX_YYY\\item1a\\item1a_extracao9\\"
-    carac=obter_caracteristicas_pasta_python(caminho)
-    var_dump(carac)
-    die('ponto3674')
+    #caminho_log_robocopy="log_teste.txt"
+    #resultado=acompanhar_log_copia_robocopy(caminho_log_robocopy)
+    #var_dump(resultado)
+    #die('ponto3673')
+
+    #caminho="\\\\10.41.87.235\\storage\\Memorando_5917-17_XXX_YYY\\item1a\\item1a_extracao9\\"
+    #carac=obter_caracteristicas_pasta_python(caminho)
+    #var_dump(carac)
+    #die('ponto3674')
 
     # Teste de calculo do tamanho de pasta através do Robocopy
     #caminho_origem = "I:/desenvolvimento/sapi/dados_para_testes/relatorios_cellebrite/00_pequeno_XML_danificado"
@@ -3706,21 +3925,13 @@ def main():
 
     # Carrega o estado anterior
     # -----------------------------------------------------------------------------------------------------------------
-    carregar_estado()
-    if len(Gtarefas) > 0:
-        print("Retomando execução do último memorando. Para trocar de memorando, utilize opção *tt")
-        refresh_tarefas()
-    else:
-        # Obtem lista de tarefas, solicitando o memorando
-        if not (obter_solicitacao_exame()):
-            # Se usuário interromper sem selecionar, finaliza
-            print("- Execução finalizada.")
-            # sys.exit()
-            return
+    # Obtem lista de tarefas, solicitando o memorando
+    if not (obter_solicitacao_exame()):
+        # Se usuário interromper sem selecionar, finaliza
+        print("- Execução finalizada.")
+        # sys.exit()
+        return
 
-
-    # Salva estado atual
-    salvar_estado()
 
     # Processamento das tarefas
     # ---------------------------
@@ -3819,7 +4030,6 @@ def main():
             if obter_solicitacao_exame():
                 # Se trocou de memorando, Inicializa indice da tarefa corrente e exibe
                 Gicor = 1
-                salvar_estado()
                 exibir_situacao()
                 continue
 
@@ -3844,7 +4054,6 @@ if __name__ == '__main__':
     #pasta_destino="\\\\10.41.87.235\\storage\\teste\\copia1xx"
 
     #pasta_pai_destino="\\\\10.41.87.235\\storage\\lixeira\\xxx\\"
-    # kkk
     #if not os.path.exists(pasta_pai_destino):
     #    os.makedirs(pasta_pai_destino)
 
@@ -3874,6 +4083,16 @@ if __name__ == '__main__':
     #
     # GdadosGerais["data_hora_ultima_atualizacao_status"] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     # var_dump(GdadosGerais["data_hora_ultima_atualizacao_status"])
+
+    #path="\\\?\\UNC\\10.41.87.235\\storage\\Memorando_5917-17_XXX_YYY\\item1b\\item1b_extracao"
+    #pasta = path
+    #pasta = remove_unc(pasta)
+    #print(pasta)
+    #if os.path.exists(pasta):
+    #    print("Existe")
+    #else:
+    #    print("Não existe")
+    #die('ponto4116')
 
     main()
 

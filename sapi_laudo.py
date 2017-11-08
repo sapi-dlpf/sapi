@@ -12,7 +12,6 @@
 #    realizada (dados de materiais, procedimentos, etc)
 #  - Geração e substituição de dados variáveis em template de laudo
 #
-#
 # Histórico:
 #  - v1.0 : Inicial
 #  - v1.3 (2017-05-16 Ronaldo): Ajuste para sapilib_0_7_1
@@ -20,13 +19,12 @@
 #    Substituição de variáveis por blocos em respostas aos quesitos
 #  - v1.5 (2017-05-22 Ronaldo):
 #    sapi_lib_0_7_2 que efetua checagem de versão de programa
+#  - V2.1 (2017-11-07 Ronaldo):
+#    * Laudo tanto de celular como de mídias de armazenamento
 # =======================================================================
 # TODO: 
 # - Se laudo já foi concluído, desprezar o que está em cache (o mesmo
 #   problema ocorre no sapi_cellebrite e todos os clientes que tem cache)
-# =======================================================================
-#
-#
 # =======================================================================
 
 # Módulos utilizados
@@ -41,7 +39,6 @@ import shutil
 import zipfile
 import multiprocessing
 import signal
-
 
 
 # Verifica se está rodando versão correta de Python
@@ -1599,7 +1596,11 @@ def _usuario_escolhe_quesitacao(quesitos_respostas):
 
         # Solicita que usuário informe a quantidade de quesitos da solicitação
         while True:
-            pergunta = "< Informe a quantidade de quesitos da quesitação (ou * para listar todas): "
+            print("- Para selecionar a quesitação adequada, primeiramente verifique quantos quesitos existem na solicitação de exame.")
+            print("- Informe esta quantidade na pergunta abaixo.")
+            print("- Se não houver nenhum quesito (por exemplo, solicitação de duplicação), informe zero '0'.")
+            print("- Caso deseje listar todas as quesitos, informe '*' na pergunta abaixo")
+            pergunta = "< Quantidade de quesitos: "
             # Valida resposta
             qtd_quesitos_solicitacao = input(pergunta)
             qtd_quesitos_solicitacao = qtd_quesitos_solicitacao.strip()
@@ -1616,6 +1617,7 @@ def _usuario_escolhe_quesitacao(quesitos_respostas):
 
         # Exibe lista de quesitação que atendem requisito de quantidade
         # -------------------------------------------------------------
+        print()
         map_ix_para_seq=dict()
         qtd_seq = 0
         for ix in range(0, len(lista)):
@@ -1665,13 +1667,14 @@ def _usuario_escolhe_quesitacao(quesitos_respostas):
             continue
 
         print()
-        print("- Dica:  No nome da quesitação identifica-se também a unidade de origem (ex: cac, lda)")
-        print("- Escolha a quesitação que mais se aproxima da quesitação da solicitação.")
-        print('- Caso a quesitação da solicitação de exame não seja idêntica a nenhuma das quesitações padrões,')
+        print("- Dica: Na lista acima, o nome da quesitação é formado pela sigla da unidade requisitante ")
+        print("  concatenado com a quantidade de quesitos (ex: pgz_6 => Ponta Grossa, 6 quesitos)")
+        print("- Escolha a quesitação que mais se aproxima da contida na solicitação de exame.")
+        print('- Caso a quesitação da solicitação de exame não seja idêntica a nenhuma das quesitações listadas,')
         print('  selecione a que possuir maior semelhança, efetue os ajustes diretamente no seu laudo')
         print('  e posteriormente notique o gestor do GTPI (informando o número do laudo), para que este avalie')
         print('  a necessidade de ampliação dos modelos de quesitação.')
-        print('- Em função de limitações da console,  é possível que alguns caracteres acentuados tenham ')
+        print('- Em função de limitações da console, é possível que alguns caracteres acentuados tenham ')
         print('  sido substituídos por "?" no resumo. Não se preocupe, no laudo gerado ficará ok.')
 
         # Solicita que usuário seleciona a quesitação da lista
@@ -2701,7 +2704,7 @@ def laudo_pronto():
             qtd_nao_pronto += 1
 
     if qtd_nao_pronto > 0:
-        print("- Existem ", qtd_nao_pronto, "itens que NÃO ESTÃO PRONTOS para laudo.")
+        print("- Existem", qtd_nao_pronto, "itens que NÃO ESTÃO PRONTOS para laudo.")
         return False
 
     # Tudo certo
@@ -2734,6 +2737,7 @@ def _gerar_laudo():
     if not laudo_pronto():
         # Mensagens já foram exibidas na rotina chamada
         print("- Geração de laudo não pode ser realizada nesta situação")
+        print("- Em caso de dúvida, consulte a situação no SETEC3 (*s3)")
         print("- Comando cancelado")
         return
 
@@ -2745,9 +2749,10 @@ def _gerar_laudo():
     # Método de entrega
     metodo_entrega = Gsolicitacao_exame['dados_exame']['metodo_entrega']
     if metodo_entrega=='indefinido':
-        print_centralizado(" ERRO ")
+        print_atencao()
         print("- Para gerar o laudo você deve primeiramente definir o método de entrega (mídia óptica, cópia storage, etc).")
-        print("- Configure no SETEC3 e em seguida retorne a esta opção.")
+        print("- Dica: Configure no SETEC3 (*s3) e em seguida retorne a esta opção.")
+        print("- Comando cancelado.")
         return
 
     # ------------------------------------------------------------------------------------------------------------------
@@ -2944,10 +2949,15 @@ def exibir_situacao():
         print("- A lista acima apresenta apenas os materiais vinculados ao laudo.")
 
     if (qtd_nao_pronto > 0):
-        print("- ATENÇÃO: Existem ", qtd_nao_pronto,
-              "materiais que não estão prontos para laudo (ver coluna 'Pronto'), pois ainda possuem tarefas pendentes.")
-        print("  Enquanto esta condição persistir, não será possível efetuar a geração de laudo (*GL)")
-        print("- Em caso de dúvida, consulte o setec3 (comando *S3)")
+        print_atencao()
+        print("- Existem", qtd_nao_pronto,
+              "itens/materiais que foram vinculados ao laudo que ainda não estão prontos (ver coluna 'Pronto'), ")
+        print("  pois ainda possuem tarefas pendentes.")
+        print("- Enquanto esta condição persistir, não será possível efetuar a geração de laudo (*GL)")
+        print("- Caso não seja possível examinar os materiais restantes, vá ao SETEC3, entre nas tarefas correspondentes,")
+        print("  e utilize a opção REPORTAR INEXEQUILIDADE, para finalizar a tarefa.")
+        print("- Para acessar rapidamente o setec3, utilize o comando *S3")
+        return
 
     # Confere o método de entrega
     metodo_entrega = Gsolicitacao_exame['dados_exame']['metodo_entrega']

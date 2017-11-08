@@ -75,6 +75,7 @@ import traceback
 from tkinter import filedialog
 import ssl
 import shutil
+import psutil
 from optparse import OptionParser
 import webbrowser
 import tempfile
@@ -2052,7 +2053,28 @@ def ajusta_texto_saida(s):
         nome_storage=Gdic_storage[caminho_storage]
         sant=s[:]
         s=s.replace(caminho_storage, nome_storage)
+        # Troca completa de caminho com ip por caminho com nome netbios
         s=s.replace(caminho_storage.strip("\\"), nome_storage.strip("\\"))
+
+        # No dicionário tem entrada por IP e correspondente netbios
+        # '\\\\10.41.87.235\\storage': '\\\\gtpi-sto-03\\storage'}
+        # Nem sempre o caminho vem certo, da forma como está acima
+        # Logo, tem que tratar também os casos em que vem o IP junto
+        # com outras coisas
+        # Isola IP
+        ip=caminho_storage
+        ip=ip.replace("\\storage","")
+        ip=ip.replace("\\","")
+        ip=ip.replace("/","")
+        # Isola nome netbios
+        netbios=nome_storage
+        netbios=netbios.replace("\\storage","")
+        netbios=netbios.replace("\\","")
+        netbios=netbios.replace("/","")
+        # Substitui ip por nome netbios
+        s=s.replace(ip, netbios)
+
+        # Troca ip por nome netbios
         if (s!=sant and modo_debug()):
             # Insere marcador que houve alteração
             s=s + " *A*"
@@ -2136,7 +2158,7 @@ def print_log_dual(*arg):
 def print_tela_log(*arg):
     if not modo_background():
         # Exibe na tela
-        print(*arg)
+        print_tela(*arg)
 
     # Grava no log
     _print_log_apenas(*arg)
@@ -2374,6 +2396,7 @@ def obter_caracteristicas_pasta_python(start_path):
             fp = montar_caminho_longo(dirpath, f)
             total_size += os.path.getsize(fp)
             qtd=qtd+1
+            #print("qtd arquivos: ", qtd)
 
     # Dicionários de retorno
     ret=dict()
@@ -2578,15 +2601,14 @@ def robocopy_log_parse_total(linha):
 
 #
 def obter_caracteristicas_pasta(pasta):
-    return obter_caracteristicas_pasta_via_robocopy(pasta)
+    return obter_caracteristicas_pasta_python(pasta)
 
-# Retorna tamanho da pasta calculada através do Robocopy, e se ocorrer erro retorna None
 # Retorna dicionário com chaves:
 #  quantidade_arquivos: Total de arquivos
 #  quantidade_pastas: Total de pasta
 #  tamanho_total: Tamanho em bytes
 def obter_caracteristicas_pasta_ok(pasta):
-    return obter_caracteristicas_pasta_via_robocopy_ok(pasta)
+    return obter_caracteristicas_pasta_python_ok(pasta)
 
 # Retorna apenas o tamanho da pasta
 def obter_tamanho_pasta_ok(path):
@@ -2600,9 +2622,10 @@ def obter_tamanho_pasta_ok(path):
 # Converte Bytes para formato Humano
 def converte_bytes_humano(size, precision=1, utilizar_base_mil=False):
     # Converte para numérico, caso tenha recebido string
-    if not str(size).isdigit():
-        return None
-    size=int(size)
+    try:
+        size=int(round(size))
+    except:
+        return "? bytes"
 
     suffixes = ['B', 'KB', 'MB', 'GB', 'TB', "PB", "EB", "ZB", "YB"]
     suffix_index = 0
@@ -2627,11 +2650,14 @@ def copiar_pasta_via_robocopy(pasta_origem, pasta_destino, caminho_log):
     # Executa comando de disparo do robocopy
     try:
         print_log("Executando comando robocopy")
+        print_log("pasta_origem: ", pasta_origem)
+        print_log("pasta_destino: ", pasta_destino)
         print_log("Log de execução será gravado em", caminho_log)
         (sucesso, explicacao) = _copiar_pasta_via_robocopy(pasta_origem, pasta_destino, caminho_log)
         return (sucesso, explicacao)
     except Exception as e:
-        erro = texto("Execução de robocopy falhou :", str(e))
+        trc_string=traceback.format_exc()
+        erro = texto("Execução de robocopy falhou :", str(e), trc_string)
         return (False, erro)
 
 
@@ -2667,15 +2693,21 @@ def _copiar_pasta_via_robocopy(pasta_origem, pasta_destino, caminho_log):
     /v       Produces verbose output, and shows all skipped files.
     /np      Specifies that the progress of the copying operation
              (the number of files or directories copied so far) will not be displayed.
+    /bytes   Exibe tamanhos em bytes.
+    /NJH     Especifica que não há nenhum cabeçalho no log.
     /r:<N>   Specifies the number of retries on failed copies. The default value of N is 1,000,000 (one million retries).
     /w:<N>   Specifies the wait time between retries, in seconds. The default value of N is 30 (wait time 30 seconds).
 
     '''
-    opcoes_robocopy="/MT /mir /np /r:20 /w:60"
-    # Para debug
-    opcoes_robocopy+=" /v" #Verbose
+    # Opções gerais
+    opcoes_robocopy="/MT /mir /v /np /bytes /NJH /r:120 /w:60 "
+    # Arquivo de log
+    opcoes_robocopy+=" /log:" + caminho_log
 
-    saida = ">"+caminho_log + " 2>&1 "
+    # Redirecionamento de saída padrão e saída de erros
+    arquivo_saida_padrao = "saida_"+caminho_log
+    saida = ">"+ arquivo_saida_padrao + " 2>&1 "
+
     comando=' '.join(['robocopy',
                       comando_caminho_origem,
                       comando_caminho_destino,
@@ -2697,18 +2729,22 @@ def _copiar_pasta_via_robocopy(pasta_origem, pasta_destino, caminho_log):
     # Executa robocopy
     try:
         print_log("Invocando comando robocopy")
-        debug(comando)
-        resultado = subprocess.check_output(comando, shell=True, stderr=subprocess.STDOUT, universal_newlines=True)
+        print_log("Saída padrão e saída de erros no arquivo: ", arquivo_saida_padrao)
+        print_log("Log do robocopy armazenado no arquivo: ", caminho_log)
+        print_log(comando)
+        subprocess.check_output(comando, shell=True, stderr=subprocess.STDOUT, universal_newlines=True)
         # Ok, tudo certo
-        print_log("Comando robocopy finalizado sem erro")
-        # Tudo certo
+        print_log("Comando robocopy finalizado")
+        # Tudo certo?? Incomum?? O normal seria sair com exit code=1
         texto_resultado=texto(
-            "Robocopy finalizado com sucesso, mas nenhum arquivo foi copiado:",
-            "exit code 0 - The source and destination directory trees are completely synchronized.")
+            "Robocopy finalizado, mas nenhum arquivo foi copiado:",
+            "exit code 0 - The source and destination directory trees are completely synchronized.",
+            "Este exit code também pode significar que o robocopy foi simplesmente killed")
         return (True, texto_resultado)
     except subprocess.CalledProcessError as execucao:
         # Quando o robocopy finaliza com sucesso (ou seja, copiou arquivos)
-        # retorna um exit code de 1
+        # retorna um exit code = 1
+        # Mas também retorna outros exit code, alguns significando erros
         return_code=execucao.returncode
 
         #var_dump(return_code)
@@ -2716,18 +2752,17 @@ def _copiar_pasta_via_robocopy(pasta_origem, pasta_destino, caminho_log):
         # Simula falha para teste
         # return_code=17
 
-        # Verifica qual o error code do robocopy
+        # Verifica qual resultado do comando
         if (return_code==1):
-            # Este é o exit_code quando o robocopy executou, finalizou com sucesso
+            # Este é o exit_code quando o robocopy finalizou com sucesso
             # E COPIOU ARQUIVOS (o exit_code 0 é quando não copiou arquivos)
-            texto_resultado="Cópia via Robocopy finalizada com arquivos copiados"
+            texto_resultado="Cópia via Robocopy finalizada OK"
             return (True, texto_resultado)
         else:
             texto_return_code=Grobocopy_texto_return_code.get(return_code, None)
             if texto_return_code is not None:
                 texto_resultado=texto(
-                    "Cópia via Robocopy finalizada com anomalia",
-                    "exit code",
+                    "Cópia via Robocopy finalizada com exit code",
                     return_code,
                     ":",
                     texto_return_code)
@@ -3287,6 +3322,23 @@ def conectar_storage_atualizacao_ok(dados_storage):
 
 #
 def mover_pasta_storage(pasta_origem, pasta_destino):
+
+    # Pasta de origem tem que existir
+    if not os.path.exists(pasta_origem):
+        raise Exception("[3307] Pasta de origem não localizada: ", pasta_origem)
+
+    # Pasta de destino não pode existir
+    if os.path.exists(pasta_destino):
+        raise Exception("[3310] Pasta de origem não localizada: ", pasta_origem)
+
+    # Verifica se a pasta pai existe, e se não existir cria
+    pasta_destino=pasta_destino.replace("\\","/")
+    partes=pasta_destino.split("/")
+    pasta_pai='/'.join(partes[:-1])
+    if not os.path.exists(pasta_pai):
+        os.makedirs(pasta_pai)
+        print_log("Criada pasta pai para movimentação:", pasta_pai)
+
     print_log("Movendo pasta ", pasta_origem, "para", pasta_destino)
     os.rename(pasta_origem, pasta_destino)
     print_log("Movido com sucesso")
@@ -3636,7 +3688,7 @@ def print_sanitizado(dado):
     (texto, qtd_alteracoes) = console_sanitiza_utf8(dado)
     print(texto)
     if qtd_alteracoes>0:
-        print(qtd_alteracoes, "para santizacao de uft8")
+        print(qtd_alteracoes, "para sanitizacao de uft8")
 
 # Faz dump formatado de um objeto qualquer na console
 # --------------------------------------------------------------------------------
@@ -4404,6 +4456,29 @@ def converte_segundos_humano(sec):
     return ('%d dia %d h') % (d, h)
 
 
+# ===================================================================================
+# Exclusão de processos
+# ===================================================================================
+
+# Exclui os filhos de um processo e o próprio processo selecionado
+def kill_processo_completo(pid):
+    print_log("Excluindo processo", pid, "e todos os seus descendentes")
+    kill_pai_e_filhos(pid, including_parent=True)
+
+
+# Exclui os filhos de um processo e o próprio processo selecionado
+def kill_pai_e_filhos(pid, including_parent=True):
+    print_log("Excluindo recursivamente árvore de processos iniciando com pai:", pid)
+    parent = psutil.Process(pid)
+    children = parent.children(recursive=True)
+    for child in children:
+        print_log("Eliminando processo ", child.pid, "[", child.name(),"]")
+        child.kill()
+    gone, still_alive = psutil.wait_procs(children, timeout=15)
+    if including_parent:
+        print_log("Eliminando processo (pai)", parent.pid, "[", parent.name(),"]")
+        parent.kill()
+        parent.wait(5)
 
 
 # *********************************************************************************************************************

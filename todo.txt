@@ -1,14 +1,7 @@
 TODO - Lista de pendências do projeto SAPI
 ============================================
 
-BUG urgente: Brunori
-sapi_laudo.py
-matricula: 17652
-https://10.41.84.5/setec3/sapisrv_obter_itens_laudo.php?codigo_solicitacao_exame_siscrim=35994980&token=token_fixo_v0_7&execucao_programa=sapi_laudo&execucao_programa_versao=1.8.2&execucao_nome_agente=pcf-ronaldo&codigo_laudo=36858555
-- Está trazendo linha de materiais adicionais, contendo apenas o campo {pronto_para_laudo}
-
 Ajustes diversos:
-* Não permitir gerar tarefas se houver tarefas órfãs
 * GTPI-STO-02:
   * Fundos de tela: Padronizar
   * Screen saver (ajustar mensagem) para todos os usuários
@@ -21,42 +14,43 @@ Ajustes diversos:
   * Comparar GTPI-STO-01 com GTPI-STO-02 para descobrir porque tem comportamentos diferentes...
 * GTPI-STO-01:
   * Verificar se GTPI-STO-01 está utilizando proxy para conversar com SETEC3.
-
 * Trocar senha de atualização das contas SAPI nos servidores (e nos arquivos de configuração)
 
 Versão 2.0:
-Bugs:
-* Quando for exibir o log na console, invocar rotina de sanitização
-  console_sanitiza_utf8 para cada linha (indicar com *sanitizado no final se houve algum ajuste para exibição)
+* Colocar gtpi-sto-03 em produção
+* Ajustar gtpi-sto-02 com cópia do gtpi-sto-03 (e acertar nomes...)
+* sapi_tableau.py: Liberar
+* sapi_aquisicao.py: Liberar
+* Instalar IPED 3.13 (se tiver estabilizado)
+
+Melhorias:
 * Exibir progresso de operações demoradas (por exemplo, validação do arquivo XML...
   Uma linha, com sem lf (ou retornado para o início da linha....para mostrar o andamento)
 * Tarefa de imagem já iniciada (já tem pasta de destino). Para excluir, tem que colocar na fila.
   - Pode reiniciar? Se puder reiniciar, irá deixar excluir direto (sem colocar na fila)....
   - O conceito tem que ser o mesmo do IPED....revisar
 * IPED: Fazer upload do Lista Arquivos.csv
-* Sapi_laudo: Avisar na tela de entrada, que está faltando a definição do tipo de mídia de destino.
-  - Avisar que usuário deve corrigir no SETEC3 (dar a dica do comando), e em seguida digitar *SG (para busca a nova situação)
-  - Não permitir comando *GL sem ter ajustado a mídia de destino.
-  - O *SG não está carregado a situação atual da 'midia de destino'...porque??
 * Configurar as máquinas de storage, para quando voltar a energia,
   permanecerem desligadas (primeiro STO-03)
 * Configurar storage para não acordarem com teclado/mouse
-* Aumentar tamanho da operação para 15 caracteres (8 está muito pequeno)
 * Para desfazer uma tarefa para a qual foi reportado a inexiquilidade,
   tem que excluir a tarefa.
   * Permitir excluir tarefa de imagem que não tenha pasta.
 * sapi_exame: Dar aviso/esclarecimento sobre mídia de destino, quando o usuário tentar colocar a mídia como destino e não tem mídia de destino.
-* sapi_imagem
 * Exclusões de pastas: Jogar para o garbage coletor, para ser mais rápido
 * Testes/ajustes no sapi_iped
 * Ajsutes no sapi_atualiza_iped
-* Novo storage GTPI-STO-03
-* Para tarefa abortada, mudar padrão no SETEC3. Talvez um fundo VERMELHO, com letras brancas
 * Parse do log do tableau: Quando os números de séries USB e dispositivo são iguais,
   significa que pegou o número de série do USB. Neste caso, deixa em branco o número de série do
   dispositivo, pois não reconheceu esta informação.
 * Testar deployment do sapi_tableau direto do setec3
 * Quando roda o *CS no sapi_cellebrite, tem que atualizar o tamanho da pasta de destino no banco também.
+
+Próxima:
+* sapi_iped: Na exclusão, jogar dados para lixeira, para ser mais rápido (usuário não precisa ficar aguardando exclusão)
+* Ativar garbage colector:
+  - Sempre que ficar inativo ou com baixa carga de trabalho (definir isto....)
+  - Ou quando o espaço ficar crítico.
 
 
 Próxima:
@@ -251,6 +245,11 @@ Colocar instrução na tela de como acessar:
 
 @sapi_laudo:
 ------------
+  - Sapi_laudo: Avisar na tela de entrada, que está faltando a definição do tipo de mídia de destino.
+    - Avisar que usuário deve corrigir no SETEC3 (dar a dica do comando), e em seguida digitar *SG (para busca a nova situação)
+    - Não permitir comando *GL sem ter ajustado a mídia de destino.
+    - O *SG não está carregado a situação atual da 'midia de destino'...porque??
+
   - Mostrar o nome do PCF no cabeçalho.
   - Só exibir dicas de uso (comandos GM GL etc) se todos os itens estão prontos para laudo.
   (1) Mudança de conceito:
@@ -258,7 +257,6 @@ Colocar instrução na tela de como acessar:
     - Pedir solicitação de exame, e verificar se tem laudo
     - Se não tiver, dar opção para criar através CL, que irá invocar diretamente a tela de cadastro de laudo do SisCrim
 
-  (1) MSISDN: Quando não existir, já preencher como 'INDISPONÍVEL'
   (2) Preencher com descrição de inexequibilidade.
   -  Tratar material de destino compartilhado, que esteja sendo referenciado em mais de um laudo.
     - Na árvore, este material aparece em um só lugar, mas existem vários laudos citando este material
