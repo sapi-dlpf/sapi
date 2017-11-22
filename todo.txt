@@ -2,36 +2,43 @@ TODO - Lista de pendências do projeto SAPI
 ============================================
 
 Ajustes diversos:
+
+* GTPI-STO-01:
+  * Verificar se GTPI-STO-01 está utilizando proxy para conversar com SETEC3.
+
 * GTPI-STO-02:
+  * Copiar disco do GTPI-STO-03 e ajustar
   * Fundos de tela: Padronizar
   * Screen saver (ajustar mensagem) para todos os usuários
+  * Quando o GTPI-STO-02 foi desligado, entrou em modo hibernação???
+    - Isto é um risco, pois pode gerar inconsistência...ou é uma oportunidade
+      Se a hibernação for confiável (IPED retornar ok), utilizar esta feature.
+    - Desligar esta 'feature' e fazer testes no GTPI-STO-03
+    - Comparar GTPI-STO-01 com GTPI-STO-02 para descobrir porque tem comportamentos diferentes...
+
+* GTPI-STO-03:
+  - Duplicar disco para levar para GTPI-STO-02
+  - Colocar gtpi-sto-03 em produção
+  - Configurar as máquinas de storage, para quando voltar a energia,
+    permanecerem desligadas (primeiro STO-03)
+
 * Fazer nova versão do manual (novos comandos)
   * Explicar o conceito de multicase
   * Explicar o ferramenta_pesquisa.bat
-* Quando o GTPI-STO-02 foi desligado, entrou em modo hibernação???
-  - Isto é um risco, pois pode gerar inconsistência...ou é uma oportunidade
-  - Desligar esta 'feature' e fazer testes no GTPI-STO-03
-  * Comparar GTPI-STO-01 com GTPI-STO-02 para descobrir porque tem comportamentos diferentes...
-* GTPI-STO-01:
-  * Verificar se GTPI-STO-01 está utilizando proxy para conversar com SETEC3.
+
 * Trocar senha de atualização das contas SAPI nos servidores (e nos arquivos de configuração)
 
+
 Versão 2.0:
-* Colocar gtpi-sto-03 em produção
-* Ajustar gtpi-sto-02 com cópia do gtpi-sto-03 (e acertar nomes...)
 * sapi_tableau.py: Liberar
 * sapi_aquisicao.py: Liberar
 * Instalar IPED 3.13 (se tiver estabilizado)
 
 Melhorias:
-* Exibir progresso de operações demoradas (por exemplo, validação do arquivo XML...
-  Uma linha, com sem lf (ou retornado para o início da linha....para mostrar o andamento)
 * Tarefa de imagem já iniciada (já tem pasta de destino). Para excluir, tem que colocar na fila.
   - Pode reiniciar? Se puder reiniciar, irá deixar excluir direto (sem colocar na fila)....
   - O conceito tem que ser o mesmo do IPED....revisar
 * IPED: Fazer upload do Lista Arquivos.csv
-* Configurar as máquinas de storage, para quando voltar a energia,
-  permanecerem desligadas (primeiro STO-03)
 * Configurar storage para não acordarem com teclado/mouse
 * Para desfazer uma tarefa para a qual foi reportado a inexiquilidade,
   tem que excluir a tarefa.
@@ -39,12 +46,11 @@ Melhorias:
 * sapi_exame: Dar aviso/esclarecimento sobre mídia de destino, quando o usuário tentar colocar a mídia como destino e não tem mídia de destino.
 * Exclusões de pastas: Jogar para o garbage coletor, para ser mais rápido
 * Testes/ajustes no sapi_iped
-* Ajsutes no sapi_atualiza_iped
+* Ajustes no sapi_atualiza_iped
 * Parse do log do tableau: Quando os números de séries USB e dispositivo são iguais,
   significa que pegou o número de série do USB. Neste caso, deixa em branco o número de série do
   dispositivo, pois não reconheceu esta informação.
 * Testar deployment do sapi_tableau direto do setec3
-* Quando roda o *CS no sapi_cellebrite, tem que atualizar o tamanho da pasta de destino no banco também.
 
 Próxima:
 * sapi_iped: Na exclusão, jogar dados para lixeira, para ser mais rápido (usuário não precisa ficar aguardando exclusão)
@@ -52,14 +58,12 @@ Próxima:
   - Sempre que ficar inativo ou com baixa carga de trabalho (definir isto....)
   - Ou quando o espaço ficar crítico.
 
-
 Próxima:
 - Quando desabilitar um storage, colocar explicação na lista [Desabilitado....]
 - sapi_exame web: Não permitir alterar um item que já tem tarefas.
   - Quando usuário clicar no item (para ir ao Siscrim), avisar
     que é necessário que ele primeiro exclua as tarefas existentes,
     para em seguida alterar o item.
-
 
 - sapi_laudo: Para contas de usuário (aparelho), separar por linha (uma conta em cada linha)...talvez se a conta for muito grande (testar...)
 - Quando tarefa foi abortada, tem que mostrar um icone mais significativo (ou cor) em sapi_exame.php
@@ -137,18 +141,18 @@ Componentes PYTHON:
 
 @sapi_cellebrite:
 -----------------
-- SGR: Evoluir o tempo de 15, 30, 60 (segundos), para no começo mostrar a mudança.
-  - Só mostrar a mensagem que está com 60 segundos, quando estiver realmente neste tempo.
-- Colocar Robocopy como mecanismo de cópia padrão (para resolver o problema do & no nome dos arquivos)
-- Se MSISDN não estiver disponível, trocar por "Não disponível"
+* Trocar *LG por *LOG ou *LOGT  Verificar também minusculas.
+* Quando der problema da atualização do status definitivo, ser tolerante à falha:
+  - Ficar repetindo com intervalo de 1 minutos, por xx vezes,
+  - Dar mensagem de aviso a cada erro, e comunicar que ficará tentando
+* Comando *RI: Quando muda o computador, exibe uma mensagem meio mística.
+  * Se esta restrição realmente faz sentido (pensar),
+    verificar isto antes e avisar o usuário que ele tem que utilizar o mesmo computador
+* Exibir progresso de operações demoradas (por exemplo, validação do arquivo XML...
+  Uma linha, com sem lf (ou retornado para o início da linha....para mostrar o andamento)
 - Permitir nomes diferentes do default (Atualmente apenas relatório.pdf).
   - Buscar o XML, e a partir daí buscar o nome dos demais componentes.
-- Previsão de término:
-  - O primeiro valor está bem ruim.
-  - Talvez o tempo de cálculo do espaço esteja sendo embutido no primeira estimativa
-- Comando IPED: Invoca IPED para conferir resultado
-- Incluir novos campos (serial, ....), ver dados que marcos passou em
-  I:\desenvolvimento\sapi\novos_campos_laudo\marcos_01
+- Incluir novos campos (serial, ....) ver se vale a pena...
 - Comando SI => Exibe situação de todas as tarefas de cada item. Algo como:
     Item                   Tarefa          Situação
     01/01: xxxxx           514-Extração    Sucesso

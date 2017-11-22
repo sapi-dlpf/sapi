@@ -50,12 +50,11 @@ if sys.version_info <= (3, 0):
 # GLOBAIS
 # =======================================================================
 Gprograma = "sapi_tableau"
-Gversao = "1.8.1"
+Gversao = "1.8.7"
 
 #  Configuração e dados gerais
 Gconfiguracao = dict()
 Gcaminho_pid = "sapi_tableau_pid.txt"
-
 
 
 # Cache de tarefas, para evitar releitura
@@ -75,7 +74,7 @@ Gtableau_imagem = "image"
 
 # Para código produtivo, o comando abaixo deve ser substituído pelo
 # código integral de sapi.py, para evitar dependência
-from sapilib_0_8_1 import *
+from sapilib_0_8_2 import *
 
 
 # **********************************************************************
@@ -117,7 +116,12 @@ def main():
         finalizar_programa()
 
     while True:
-        executar()
+        (sucesso, msg_erro) = executar_tableau()
+        if not sucesso:
+            print_log("Execução do Tableau falhou: ", msg_erro)
+            print_log("Abandonando programa para buscar estabilização")
+            finalizar_programa()
+
         dormir(60, "Pausa entre ciclo de execução de tarefas do tableau")
         if not inicializar():
             # Falhou na inicialização, talvez falha de comunicação, talvez mudança de versão...
@@ -195,10 +199,22 @@ def inicializar():
     # Tudo certo
     return True
 
+
 # ===================================================================================
 # Executa tarefas do tableau
 # ===================================================================================
-def executar():
+def executar_tableau():
+    try:
+        return _executar_tableau()
+
+    except BaseException as e:
+        trc_string = traceback.format_exc()
+        print_log("[207]: executar_tableau falhou, com exceção abaixo.")
+        print_log(trc_string)
+        return (False, "Exceção inesperada")
+
+def _executar_tableau():
+
     # Recupera a lista de pasta das tarefas de imagem
     # -----------------------------------------------
     try:
@@ -210,18 +226,18 @@ def executar():
         )
     except BaseException as e:
         erro = "Não foi possível recuperar a situação atualizada das tarefas do servidor"
+        # Provavelmente é um erro transiente (rede)
+        # Mas para garantir, vamos encerrar o programa e tentar novamente mais tarde
         return (False, erro)
 
     if not sucesso:
+        # Servidor não conseguiu executar...
         return (False, msg_erro)
-
-    # var_dump(sucesso)
-    # var_dump(tarefas_imagem)
-    # die('ponto1581')
 
     if len(tarefas_imagem)==0:
         print_log("Não existe nenhuma tarefa de imagem para ser processada")
-        return
+        # Tudo certo, isto é normal
+        return (True, "")
 
     print_log("Foram recuperadas", len(tarefas_imagem), "tarefas de imagem")
 
@@ -234,21 +250,27 @@ def executar():
             # Se está na fila para criação de pasta,
             # Cria pasta para tarefa
             criar_pasta_tableau(codigo_tarefa)
-        elif codigo_situacao_tarefa == GAguardandoPCF:
+        elif codigo_situacao_tarefa == GAguardandoPCF :
             # Se está aguardando PCF,
             # Verifica se upload já iniciou
+            monitorar_tarefa(codigo_tarefa)
+        elif codigo_situacao_tarefa == GAbortou :
+            # Se tarefa abortou,
+            # verifica se foi reiniciada
             monitorar_tarefa(codigo_tarefa)
         elif codigo_situacao_tarefa == GTableauExecutando:
             # Se já está executando, monitora tarefa
             monitorar_tarefa(codigo_tarefa)
-        elif codigo_situacao_tarefa == GFilaExclusao:
-            # Se já está executando, monitora tarefa
-            excluir_tarefa(codigo_tarefa)
+        # Isto aqui será efetuado pelo sapi_aquisicao
+        #elif codigo_situacao_tarefa == GFilaExclusao:
+        #    # Se já está executando, monitora tarefa
+        #    excluir_tarefa(codigo_tarefa)
         else:
             # Nada a fazer para as demais situações
             print_log("Nenhuma ação tomada para tarefa", codigo_tarefa, "que está com situação", codigo_situacao_tarefa)
 
-
+    # Tudo certo
+    return (True, "")
 
 # Obtem dados de uma tarefa
 # Armazena em cache, para evitar sobrecarregar o servidor
@@ -287,15 +309,19 @@ def obter_caminho_pasta_tableau(tarefa):
 
     # Protocolo
     protocolo = tarefa["dados_solicitacao_exame"]["numero_protocolo"]
-    protocolo = protocolo.zfill(5)
-    # Tirei o ano, para ficar mais curto
+    protocolo = protocolo.zfill(4)
     #protocolo = "p_" + protocolo + "_" + tarefa["dados_solicitacao_exame"]["ano_protocolo"]
-    protocolo = "p_" + protocolo + "_" + tarefa["dados_solicitacao_exame"]["ano_protocolo"]
+    ano = tarefa["dados_solicitacao_exame"]["ano_protocolo"]
+    ano = ano[-2:]
+    # Tirei o ano, para ficar mais curto
+    protocolo = "p" + protocolo + "_" + ano
     protocolo = sanitiza_parte_caminho(protocolo)
 
     # Material
-    material = "mt_" + tarefa["dados_item"]["material_simples"]
+    material = "m" + tarefa["dados_item"]["material_simples"]
     material = sanitiza_parte_caminho(material)
+    # Vamos tirar a palavra parte, para deixar mais enxuto
+    material = material.replace("_parte", "")
 
     # Agrupa
     pasta_material = montar_caminho(sujeito, protocolo, material)
@@ -368,6 +394,8 @@ def criar_pasta_tableau(codigo_tarefa):
     if ambiente_desenvolvimento():
         recupera_dados_pasta_destino(tarefa)
 
+    # Simula um erro irrecuperável, trocando o código de tarefa para uma inexistente
+    #codigo_tarefa=12345095
 
     # Se pasta de destino existe, atualiza a situação de tarefa para GAguardandoPCF
     if os.path.exists(pasta_tableau):
@@ -388,7 +416,7 @@ def criar_pasta_tableau(codigo_tarefa):
 def recupera_dados_pasta_destino(tarefa):
 
     caminho_destino = tarefa["caminho_destino"]
-    (pasta_destino, pasta_item, nome_base) = decompor_caminho_destino(caminho_destino)
+    (pasta_destino, pasta_item, nome_base) = decompor_caminho_destino_imagem(caminho_destino)
 
     # Se pasta de destino não contém dados, nada a fazer
     if obter_tamanho_pasta_ok(pasta_destino) == 0:
@@ -448,38 +476,30 @@ def recupera_dados_pasta_destino(tarefa):
 
 
 
-# Desmonta o caminho de destino em vários elementos
-# -----------------------------------------------------------------------------------
-def decompor_caminho_destino(caminho_destino):
-    # O caminho de destino para o arquivo E01 vem completo,
-    # e tem que ser desmontado nos componentes:
-    # caminho_destino     =
-    #   "Memorando_1880-17_CF_PR-26/item01Arrecadacao01a/item01Arrecadacao01a_imagem/item01Arrecadacao01a.E01"
-    # pasta_destino       =
-    #   "Memorando_1880-17_CF_PR-26/item01Arrecadacao01a/item01Arrecadacao01a_imagem"
-    # nome_arquivo_imagem = "item01Arrecadacao01a"
-    partes = caminho_destino.split('/')
-    # var_dump(partes)
 
-    # Nome base do arquivo de imagem
-    # Exemplo: item01Arrecadacao01a
-    # Na pasta do tableau, existirão vários aquivos .E01 .E02 .Exx .log
-    # Todos estes serão renomeado para este nome base
-    nome_base = partes.pop()
-    nome_base = nome_base.replace(".E01", "")
 
-    # A pasta de destino é a pasta onde serão armazenados os arquivos .E01 .E02 etc
-    pasta_destino = "/".join(partes)
-    pasta_item = "/".join(partes[:-1])
-    # Adiciona caminho relativo (uma vez que está sendo executado na pasta /sistema)
-    pasta_destino = montar_caminho(get_parini('raiz_storage'), pasta_destino)
-    pasta_item = montar_caminho(get_parini('raiz_storage'), pasta_item)
-
-    return (pasta_destino, pasta_item, nome_base)
+# Monta label do processo de acompanhamento
+def get_label_processo_acompanhamento(codigo_tarefa):
+    label_processo = "acompanhar:" + str(codigo_tarefa)
+    return label_processo
 
 
 # Retorna verdadeiro se a tarefa já está sendo acompanhada
 def tarefa_sendo_acompanhada(codigo_tarefa):
+
+    # Monta label do processo de acompanhamento
+    label_processo = get_label_processo_acompanhamento(codigo_tarefa)
+
+    # Verifica se existe processo
+    if Gpfilhos.get(label_processo, None) is None:
+        # Não existe processo de acompanhamento para esta tarefa
+        return False
+
+    # Verifica se processo está ativo
+    if Gpfilhos[label_processo].is_alive():
+        return True
+
+    # Processo não está mais ativo
     return False
 
 def monitorar_tarefa(codigo_tarefa):
@@ -527,13 +547,16 @@ def monitorar_tarefa(codigo_tarefa):
     erro_exception = None
     try:
 
-        if int(tarefa["codigo_situacao_tarefa"]) != GTableauExecutando:
-            # Registra comando de execução do IPED
-            sapisrv_troca_situacao_tarefa_loop(
-                codigo_tarefa=codigo_tarefa,
-                codigo_situacao_tarefa=GTableauExecutando,
-                texto_status="Pasta do tableau contém dados"
-            )
+        # Transferi para posição após constatar que existe uma subpasta a ser processada
+        # O tamanho só não é indicativo, pois a pasta existente pode ser uma pasta com ERRO
+        # if int(tarefa["codigo_situacao_tarefa"]) != GTableauExecutando:
+        #     # Registra comando de execução do IPED
+        #     sapisrv_troca_situacao_tarefa_loop(
+        #         codigo_tarefa=codigo_tarefa,
+        #         codigo_situacao_tarefa=GTableauExecutando,
+        #         texto_status="Pasta do tableau contém dados"
+        #     )
+        codigo_situacao_tarefa=int(tarefa["codigo_situacao_tarefa"])
 
         # Inicia processo para acompanhamento em background
         print_log("Tarefa: ", codigo_tarefa, "Pasta do tableau tem conteúdo. Iniciando acompanhamento")
@@ -542,11 +565,16 @@ def monitorar_tarefa(codigo_tarefa):
         # ------------------------------------------------
         nome_arquivo_log = obter_nome_arquivo_log()
         dados_pai_para_filho = obter_dados_para_processo_filho()
-        label_processo = "acompanhar:" + str(codigo_tarefa)
+        label_processo = get_label_processo_acompanhamento(codigo_tarefa)
         item = tarefa["item"]
         caminho_destino = tarefa["caminho_destino"]
 
-        (pasta_destino, pasta_item, nome_base)=decompor_caminho_destino(caminho_destino)
+        (pasta_destino, pasta_item, nome_base)=decompor_caminho_destino_imagem(caminho_destino)
+
+        # Adiciona raiz do storage na pasta de destino
+        # Desta forma, não importa em qual pasta o sapi_tableau é iniciado
+        # O caminho será sempre relativo à raiz do storage
+        pasta_destino = montar_caminho(get_parini('raiz_storage'), pasta_destino)
 
         # Inicia tarefa em background
         # ----------------------------
@@ -560,7 +588,8 @@ def monitorar_tarefa(codigo_tarefa):
                   nome_base,
                   nome_arquivo_log,
                   label_processo,
-                  dados_pai_para_filho
+                  dados_pai_para_filho,
+                  codigo_situacao_tarefa
                   )
         )
         p_acompanhar.start()
@@ -597,7 +626,8 @@ def background_acompanhar_tableau(
         nome_base,
         nome_arquivo_log,
         label_processo,
-        dados_pai_para_filho):
+        dados_pai_para_filho,
+        codigo_situacao_tarefa):
 
     # Restaura dados herdados do processo pai
     restaura_dados_no_processo_filho(dados_pai_para_filho)
@@ -619,9 +649,8 @@ def background_acompanhar_tableau(
 
     # Fica em loop infinito.
     # Será encerrado quando não tiver mais nada a fazer,
-    # ou então pelo pai (com terminate)
+    # ou então pelo pai (kill)
     tam_pasta_tableau = 0
-    registrado_subpasta = False
     while True:
 
         # Se pasta do Tableau não existe, não tem o que acompanhar
@@ -636,46 +665,63 @@ def background_acompanhar_tableau(
         # que o usuário está duplicando mais do que uma material para a
         # mesma pasta raiz do tableau...pode ter se enganado de material.
         # -------------------------------------------------------------------------------
-        qtd_pastas = 0
+        qtd_pastas_ok = 0
         for dirpath, dirnames, filenames in os.walk(pasta_tableau):
             for sub in dirnames:
+                print_log("Verificada presença de subpasta", sub)
+
                 # Despreza pasta que foi classificada com erro
                 if "ERRO" in sub:
-                    print_log("Desprezada subpasta com indicativo de erro", sub)
+                    print_log("Desprezada subpasta pois contém indicativo de erro")
                     continue
+                else:
+                    qtd_pastas_ok += 1
+                    print_log("Pasta ok para ser processada")
+                    # Subpasta a ser processada
+                    subpasta_processar = montar_caminho(dirpath, sub)
 
-                qtd_pastas += 1
-
-                # Subpasta a ser processada
-                print_log("Verificada presença de subpasta", sub)
-                subpasta = montar_caminho(dirpath, sub)
+        # TODO: Isto aqui não está legal
+        # A pasta só estará ok se:
+        # - Tiver um arquivo E01
+        # - Não tiver log de cancelada
+        # - Se tiver log de cancelada, tem que ser renomeada
+        # **** reformular esta lógica aqui
+        # - Tem dados para teste no m1027_17 => Não excluir esta pasta
 
         # Se não tem nenhuma subpasta,
         # encerra o acompanhamento
-        if qtd_pastas==0:
+        if qtd_pastas_ok==0:
             # Pode ser que só tivesse uma pasta de erro
             print_log("Nenhuma subpasta disponível para processamento. Finalizando subprocesso")
             return
 
         # Se tiver mais do que uma pasta, tem algo errado
         # Será necessária a intervenção manual do perito
-        if qtd_pastas > 1:
-            texto_status = \
-                texto("Existe mais de uma subpasta.",
-                      "É possível que tenha ocorrido algum equivoco, ",
-                      "e existam dois processos de duplicação em andamento",
-                      "de materiais distintos para a mesma pasta")
-            sapisrv_abortar_tarefa(codigo_tarefa, texto_status)
+        if qtd_pastas_ok > 1:
+            print_log("Existe mais de uma subpasta para processamento:", qtd_pastas_ok)
+            # Se ainda não está abortado, aborta
+            if int(codigo_situacao_tarefa) != int(GAbortou):
+                print_log("Abortando tarefa")
+                texto_status = \
+                texto("Existe mais de uma subpasta na pasta",
+                      pasta_tableau,
+                      "É possível que você tenhas se equivocado na seleção da pasta do tableau, ",
+                      "e existam dois processos de duplicação em andamento de materiais distintos para esta pasta.",
+                      "Se for este o caso, cancele a duplicação incorreta e tudo continuará normalmente.")
+                sapisrv_abortar_tarefa(codigo_tarefa, texto_status)
+            else:
+                print_log("Tarefa já está abortada. Nada a ser feito")
             return
 
-        # Registra no log a subpasta que será processada
-        if not registrado_subpasta:
-            print_log("Processando subpasta:", subpasta)
-            sapisrv_atualizar_status_tarefa_informativo(
+        # Se tem pasta a processar, e ainda não está no estado correto, corrige
+        if int(codigo_situacao_tarefa) != int(GTableauExecutando):
+            # Registra comando de execução do IPED
+            codigo_situacao_tarefa=GTableauExecutando
+            sapisrv_troca_situacao_tarefa_loop(
                 codigo_tarefa=codigo_tarefa,
-                texto_status=texto("Processando subpasta", subpasta)
+                codigo_situacao_tarefa=GTableauExecutando,
+                texto_status=texto("Pasta do tableau contém dados, subpasta", subpasta_processar)
             )
-            registrado_subpasta = True
 
         # Verifica se já tem o primeiro arquivo
         # Por convenção (fixado no tableau), grava será
@@ -691,7 +737,7 @@ def background_acompanhar_tableau(
 
         encontrado_primeiro = False
         for nome_arquivo in nome_possiveis:
-            caminho_primeiro_arquivo = montar_caminho(subpasta, nome_arquivo)
+            caminho_primeiro_arquivo = montar_caminho(subpasta_processar, nome_arquivo)
             if os.path.isfile(caminho_primeiro_arquivo):
                 print_log("Encontrado arquivo", caminho_primeiro_arquivo)
                 encontrado_primeiro = True
@@ -702,7 +748,10 @@ def background_acompanhar_tableau(
 
         if not encontrado_primeiro:
             texto_status = texto("Não foi encontrado arquivo indicativo ",
-                                 "de início de cópia")
+                                 "de início de cópia.",
+                                 "Algo como: ", Gtableau_imagem +".E01*",
+                                 "na pasta",
+                                 subpasta_processar)
             sapisrv_abortar_tarefa(codigo_tarefa, texto_status)
             return
 
@@ -711,7 +760,7 @@ def background_acompanhar_tableau(
         encontrado_log = False
         for prefixo in (Gtableau_imagem, nome_base):
             arquivo_log = prefixo + ".log"
-            caminho_arquivo_log = montar_caminho(subpasta, arquivo_log)
+            caminho_arquivo_log = montar_caminho(subpasta_processar, arquivo_log)
             if os.path.isfile(caminho_arquivo_log):
                 encontrado_log = True
                 break
@@ -731,7 +780,7 @@ def background_acompanhar_tableau(
             print_log("Ainda não existe arquivo de log")
 
         # Calcula o tamanho da pasta do tableau e atualiza
-        carac = obter_caracteristicas_pasta_ok(subpasta)
+        carac = obter_caracteristicas_pasta_ok(subpasta_processar)
         if carac is not None:
             tam_pasta_tableau = carac.get("tamanho_total", None)
             sapisrv_atualizar_status_tarefa_informativo(
@@ -781,15 +830,15 @@ def background_acompanhar_tableau(
         # para não ser mais reprocessada
         # Adicionar o sufixo "_ERRO"
         try:
-            subpasta_renomeada = subpasta + "_ERRO"
-            os.rename(subpasta, subpasta_renomeada)
+            subpasta_renomeada = subpasta_processar + "_ERRO"
+            os.rename(subpasta_processar, subpasta_renomeada)
             sapisrv_atualizar_status_tarefa_informativo(
                 codigo_tarefa=codigo_tarefa,
                 texto_status=texto("Pasta de com erro foi renomeada para ", subpasta_renomeada)
             )
         except Exception as e:
             # Adiciona erro
-            erro_adicional = texto("E também não foi possível renomear pasta com erro", subpasta, ":", e)
+            erro_adicional = texto("E também não foi possível renomear pasta com erro", subpasta_processar, ":", e)
             erro = texto(erro, erro_adicional)
             return
 
@@ -809,9 +858,9 @@ def background_acompanhar_tableau(
         )
 
         # Ajusta nomes dos arquivos na pasta de destino
-        for nome_arquivo in os.listdir(subpasta):
+        for nome_arquivo in os.listdir(subpasta_processar):
 
-            nome_arquivo=montar_caminho(subpasta, nome_arquivo)
+            nome_arquivo=montar_caminho(subpasta_processar, nome_arquivo)
 
             if not os.path.isfile(nome_arquivo):
                 continue
@@ -841,7 +890,6 @@ def background_acompanhar_tableau(
     # Move pasta temporária para pasta definitiva. Exemplo:
     # De:   tableau\Ronaldo_14940\proto_00943_2017\mat_1023_17_parte_2\2071005050_09_01_05
     # para:
-    #
     # -------------------------------------------------------------------------------
     try:
 
@@ -864,11 +912,11 @@ def background_acompanhar_tableau(
             codigo_tarefa=codigo_tarefa,
             texto_status="Movendo pasta temporária para definitiva"
         )
-        mover_pasta_storage(subpasta, pasta_destino)
+        mover_pasta_storage(subpasta_processar, pasta_destino)
 
         # Adiciona no arquivo sapi.info a pasta de origem
         sapi_tableau=dict()
-        sapi_tableau['pasta_origem']=subpasta
+        sapi_tableau['pasta_origem']=subpasta_processar
         sapi_tableau['base_nome_original']=Gtableau_imagem
         sapi_tableau['base_nome_novo']=nome_base
         sapi_info_set(pasta_destino, 'sapi_tableau', sapi_tableau)
@@ -887,6 +935,65 @@ def background_acompanhar_tableau(
         return
 
 
+    # Exclusão da pasta temporária do Tableau
+    # Se este procedimento falhar, não tem problema,
+    # pois poderá ser feita exclusão manual posteriormente
+    # -----------------------------------------------------------------------------------------
+    try:
+        print_log("Tratamento para pasta temporária do tableau:", pasta_tableau)
+        erro=None
+        # Como deu tudo certo, elimina a pasta do Tableau correspondente, se puder
+        # Primeiro, move para a lixeira todas as subpastas que abortaram
+        for dirpath, dirnames, filenames in os.walk(pasta_tableau):
+            for subpasta_erro in dirnames:
+                # Despreza pasta que foi classificada com erro
+                if "ERRO" in subpasta_erro:
+                    subpasta_erro=montar_caminho(dirpath, subpasta_erro)
+                    print_log("Movendo para lixeira a subpasta", subpasta_erro)
+                    (sucesso, pasta_lixeira) = mover_lixeira(subpasta_erro)
+                    if sucesso:
+                        sapisrv_atualizar_status_tarefa_informativo(
+                            codigo_tarefa=codigo_tarefa,
+                            texto_status=texto("Movido subpasta com falha de execução do tableau",
+                                               subpasta_erro,
+                                               "para lixeira",
+                                               pasta_lixeira)
+                        )
+                    else:
+                        print_log("Movimentação para lixeira da pasta", subpasta_erro, "falhou")
+
+        # Se não sobrou nenhum conteúdo na pasta temporária, pode excluir
+        tamanho_restante=obter_tamanho_pasta_ok(pasta_tableau)
+        if tamanho_restante == 0:
+            shutil.rmtree(pasta_tableau)
+            print_log("Pasta tableau excluída com sucesso:", pasta_tableau)
+        else:
+            sapisrv_atualizar_status_tarefa_informativo(
+                codigo_tarefa=codigo_tarefa,
+                texto_status=texto("AVISO: Não foi excluída a pasta temporária do tableau",
+                                   pasta_tableau,
+                                   "pois a mesma ainda contém arquivos.",
+                                   " Verifique se não foi feita algum upload por engano para esta pasta")
+            )
+
+    except Exception as e:
+        # Se ocorrer algo inesperado, guarda no log
+        trc_string=traceback.format_exc()
+        erro=texto("- [947] ** ERRO na exclusão da pasta",
+                   subpasta_processar,
+                   trc_string)
+        print_log(erro)
+
+    # Se não foi possível excluir pasta do Tableau, registra um aviso
+    if os.path.exists(pasta_tableau):
+        if erro is None:
+            erro="É possível que outro material tenha sido duplicado por engano para esta pasta. Confira o conteúdo da mesma"
+        sapisrv_atualizar_status_tarefa_informativo(
+            codigo_tarefa=codigo_tarefa,
+            texto_status=texto("AVISO: Não foi excluída a pasta temporária do tableau. Erro:",
+                               erro)
+        )
+
     # Atualiza situação da tarefa para sucesso
     # ----------------------------------------
     sapisrv_troca_situacao_tarefa_loop(
@@ -898,114 +1005,6 @@ def background_acompanhar_tableau(
     )
     print_log("Tarefa de imagem do tableau finalizada com sucesso")
 
-
-
-def excluir_tarefa(codigo_tarefa):
-
-    print_log("Exclusão da tarefa da tarefa", codigo_tarefa)
-
-    # Recupera dados da tarefa do cache,
-    # para evitar sobrecarregar o servidor com requisições
-    tarefa = obter_tarefa_cache(codigo_tarefa)
-
-    # Pasta para a tarefa
-    (pasta_tableau, pasta_material) = obter_caminho_pasta_tableau(tarefa)
-    print_log("Pasta de tableau da tarefa: ", pasta_tableau)
-
-    # Se pasta não existe, tem algo erro aqui
-    if not os.path.exists(pasta_tableau):
-        # Isto aqui não deveria acontecer nunca...foi feita exclusão manual?
-        erro = texto("Pasta do tableau não existe")
-        sapisrv_reportar_erro_tarefa(codigo_tarefa, erro)
-        return False
-
-    # Se pasta da tarefa está vazia,
-    # ou seja, ainda não foi iniciado o upload,
-    # então não tem nada a fazer
-    # Recupera tamanho da pasta
-    carac = obter_caracteristicas_pasta_ok(pasta_tableau)
-    if carac is None:
-        return False
-
-    if carac["tamanho_total"] == 0:
-        # Pasta está zerada (tamanho zero)
-        # Logo, ainda não tem nada a fazer
-        print_log("Tarefa ainda sem dados na pasta de temporária. Aguardar início do tableau")
-        return False
-
-    # Acompanha execução da tarefa de cópia
-    deu_erro = False
-    erro_exception = None
-    try:
-
-        if int(tarefa["codigo_situacao_tarefa"]) != GTableauExecutando:
-            # Registra comando de execução do IPED
-            sapisrv_troca_situacao_tarefa_loop(
-                codigo_tarefa=codigo_tarefa,
-                codigo_situacao_tarefa=GTableauExecutando,
-                texto_status="Pasta do tableau contém dados"
-            )
-
-        # Inicia processo para acompanhamento em background
-        print_log("Tarefa: ", codigo_tarefa, "Pasta do tableau tem conteúdo. Iniciando acompanhamento")
-
-        # Inicia subprocesso para acompanhamento do Tableau
-        # ------------------------------------------------
-        nome_arquivo_log = obter_nome_arquivo_log()
-        dados_pai_para_filho = obter_dados_para_processo_filho()
-        label_processo = "acompanhar:" + str(codigo_tarefa)
-        item = tarefa["item"]
-        caminho_destino = tarefa["caminho_destino"]
-
-        (pasta_destino, pasta_item, nome_base)=decompor_caminho_destino(caminho_destino)
-
-        # Inicia tarefa em background
-        # ----------------------------
-        p_acompanhar = multiprocessing.Process(
-            target=background_acompanhar_tableau,
-            args=(codigo_tarefa,
-                  item,
-                  pasta_tableau,
-                  pasta_item,
-                  pasta_destino,
-                  nome_base,
-                  nome_arquivo_log,
-                  label_processo,
-                  dados_pai_para_filho
-                  )
-        )
-        p_acompanhar.start()
-        registra_processo_filho(label_processo, p_acompanhar)
-
-    except subprocess.CalledProcessError as e:
-        # Se der algum erro, não volta nada acima, mas tem como capturar pegando o output da exception
-        erro_exception = str(e.output)
-        deu_erro = True
-    except Exception as e:
-        # Alguma outra coisa aconteceu...
-        erro_exception = str(e)
-        deu_erro = True
-
-    if deu_erro:
-        print_log("Erro na chamada do acompanhamento de tarefa: ", erro_exception)
-        return False
-
-    #time.sleep(100)
-    #print("Interrompendo principal para iniciar apenas uma tarefa")
-    #die('ponto1784')
-
-    # Ok, tudo certo. O resto é com o processo em background
-    return True
-
-
-
-
-
-
-
-
-
-
 # Abortar execução do programa
 # Esta rotina é invocada quando alguma situação exige que para a restauração da ordem
 # o ambiente seja reiniciado
@@ -1015,8 +1014,9 @@ def finalizar_programa():
     for ix in sorted(Gpfilhos):
         if Gpfilhos[ix].is_alive():
             # Finaliza processo
-            print_log("Finalizando processo ", ix, " [", Gpfilhos[ix].pid, "]")
-            Gpfilhos[ix].terminate()
+            pid =  Gpfilhos[ix].pid
+            print_log("Finalizando processo ", ix, " [", pid, "]")
+            kill_pai_e_filhos(pid, including_parent=True)
 
     # Para garantir, aguarda caso ainda tenha algum processo não finalizado...NÃO DEVERIA ACONTECER NUNCA
     # --------------------------------------------------------------------------------------------------------------
@@ -1041,47 +1041,10 @@ def finalizar_programa():
     os._exit(1)
 
 
-
 # ----------------------------------------------------------------------------------
 # Chamada para rotina principal
 # ----------------------------------------------------------------------------------
 if __name__ == '__main__':
-    pasta_sapi_info= "H:\\sapi_simulacao_storage\\Memorando_1880-17_CF_PR-26"
-
-    #variavel="sub_pasta"
-    #valor="c:\\tempr\\testexxx"
-    #sapi_info_set(pasta_sapi_info, variavel, valor)
-
-    #complexo=dict()
-    #complexo["xxx"]="teste"
-    #complexo["yyy"]="abc"
-    #sapi_info_set(pasta_sapi_info, "complexo1", complexo)
-    #die('ponto1403')
-
-    #sapi_info=sapi_info_carregar(pasta_sapi_info)
-    #var_dump(sapi_info)
-    #die('ponto1407')
-
-    #xxx=sapi_info_get(pasta_sapi_info, "sub_pasta")
-    #var_dump(xxx)
-    #die('ponto1397')
-
-
-    # # Parse de um arquivo
-    # ret=parse_arquivo_log("tableau_imagem.log", "item01Arrecadacao01")
-    # var_dump(ret)
-    # die('ponto2211')
-    #
-    #
-    # # Para testar o processamento do log,
-    # # processa um conjunto de arquivos de log do tableau usados para teste
-    # pasta = "I:\\desenvolvimento\\sapi\\dados_para_testes\\tableau_log_total"
-    # for f in os.listdir(pasta):
-    #     print()
-    #     print("======== Arquivo ", f," ======================")
-    #     ret = parse_arquivo_log(os.path.join(pasta,f), "item01Arrecadacao01")
-    #     var_dump(ret)
-    #     print()
 
     # Executa rotina principal
     main()

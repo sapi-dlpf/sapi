@@ -1266,9 +1266,10 @@ def sapisrv_troca_situacao_tarefa_obrigatorio(
 
 
 # Troca a situação da tarefa no servidor
-# Se ocorrer um erro, fica em loop ETERNO até conseguir efetuar a operação
-# Se for problema transiente, mais cedo ou mais tarde será resolvido
-# Caso contrário, algum humano irá intervir e cancelar o programa
+# Se for um problema for permanente, retorna False
+# Se for um problema transiente, fica em loop ETERNO,
+#   contando que mais cedo ou mais tarde será resolvido
+#   ou que algum humano irá intervir
 def sapisrv_troca_situacao_tarefa_loop(
         codigo_tarefa,
         codigo_situacao_tarefa,
@@ -1293,9 +1294,19 @@ def sapisrv_troca_situacao_tarefa_loop(
             print_log("Nova situação atualizada no SETEC3")
             return True
 
+        except SapiExceptionFalhaTrocaSituacaoTarefa as e:
+            # Esta exceção é gerada quando o SERVIDOR afirma que recebeu os parâmetros ok,
+            # mas que a operação não pode ser realizada
+            # Logo, iremos interromper, pois não existe possibilidade de haver sucesso
+            # se continuar tentando
+            print_log("Falha PERMANENTE na atualização da situação para tarefa", codigo_tarefa, ":",e)
+            # Repassa exceção para o chamador
+            raise SapiExceptionFalhaTrocaSituacaoTarefa(str(e))
+
         except Exception as e:
             # Atualização de situação falhou
-            print_log("Falhou atualização de situação para tarefa", codigo_tarefa, ":",e)
+            print_log("Falha transiente na atualização de situação para tarefa", codigo_tarefa, ":",e)
+            # Continua em loop, pois a falha é transiente
 
         # Pausa para evitar sobrecarregar o servidor
         dormir=60
@@ -2082,7 +2093,7 @@ def ajusta_texto_saida(s):
         # Troca ip por nome netbios
         if (s!=sant and modo_debug()):
             # Insere marcador que houve alteração
-            s=s + " *A*"
+            s=s + " #"
 
     return s
 
@@ -2258,7 +2269,7 @@ def print_erro():
 
 def print_falha_comunicacao():
     print_erro()
-    print("- Consulte o log para entender melhor o problema(*LG)")
+    print("- Consulte o log para entender melhor o problema(*LOG)")
     print("- Se você suspeita de falha de comunicação (rede), ")
     print("  tente acessar o SETEC3 utilizando um browser computador para conferira se a conexão está ok")
 
@@ -3325,8 +3336,12 @@ def conectar_storage_atualizacao_ok(dados_storage):
 # Movimentação de pastas no storage
 # =======================================================================================================
 
-#
+# Efetua movimentação de pasta no storage
+# Esta rotina deve ser utilizada por programas rodando no servidor
+# Para programas rodando no cliente, utilizar mover_pasta_storage_UNC
 def mover_pasta_storage(pasta_origem, pasta_destino):
+
+    # Adiciona raiz do servidor
 
     # Pasta de origem tem que existir
     if not os.path.exists(pasta_origem):
@@ -3343,6 +3358,8 @@ def mover_pasta_storage(pasta_origem, pasta_destino):
     if not os.path.exists(pasta_pai):
         os.makedirs(pasta_pai)
         print_log("Criada pasta pai para movimentação:", pasta_pai)
+
+    # xxxxx
 
     print_log("Movendo pasta ", pasta_origem, "para", pasta_destino)
     os.rename(pasta_origem, pasta_destino)
@@ -4517,6 +4534,16 @@ def decompor_caminho_destino_imagem(caminho_destino):
     # A pasta de destino é a pasta onde serão armazenados os arquivos .E01 .E02 etc
     pasta_destino = "/".join(partes)
     pasta_item = "/".join(partes[:-1])
+
+    return (pasta_destino, pasta_item, nome_base)
+
+
+# Efetua a decomposição e mapemaento no próprio storage
+# Esta rotina só deve ser invocada por programa que rodam no servidor
+def servidor_decompor_caminho_destino_imagem(caminho_destino):
+    # Efetua decomposição
+    (pasta_destino, pasta_item, nome_base) = decompor_caminho_destino_imagem(caminho_destino)
+
     # Adiciona caminho relativo (uma vez que está sendo executado na pasta /sistema)
     pasta_destino = montar_caminho(get_parini('raiz_storage'), pasta_destino)
     pasta_item = montar_caminho(get_parini('raiz_storage'), pasta_item)
