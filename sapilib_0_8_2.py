@@ -2268,10 +2268,9 @@ def print_erro():
 '''
 
 def print_falha_comunicacao():
-    print_erro()
     print("- Consulte o log para entender melhor o problema(*LOG)")
     print("- Se você suspeita de falha de comunicação (rede), ")
-    print("  tente acessar o SETEC3 utilizando um browser computador para conferira se a conexão está ok")
+    print("  tente acessar o SETEC3 utilizando um browser computador para conferir se a conexão está ok")
 
 
 
@@ -2362,7 +2361,9 @@ def pausa(mensagem=None):
         return False
 
 
-# Funções agregadas na versão 0.5.3 (antes estavam em código separados)
+# ==============================================================================================
+# Operações com pastas
+# ==============================================================================================
 
 # Separa pasta do nome do arquivo em um caminho
 # Entrada:
@@ -2397,6 +2398,43 @@ def cria_pasta_se_nao_existe(pasta):
     # Algo inesperado aconteceu
     erro_fatal("Criação de pasta [", pasta, "] falhou")
 
+
+# Retorna: True (se exclui), ou False
+def excluir_pasta_se_vazia(pasta):
+
+    # Se não existe, não tem o que excluir
+    if not os.path.exists(pasta):
+        print_log("Pasta para ser excluída se estiver vazia NÃO EXISTE:", pasta)
+        return False
+
+    # Pausa para SO se achar
+    time.sleep(5)
+    print_log("Verificando se pasta a ser excluída está vazia:", pasta)
+
+    # Se ainda tem algum contéudo na pasta, não efetua a exclusão (nem conseguiria)
+    if os.listdir(pasta)!=[]:
+        print_log("Pasta não pode ser excluída pois não está vazia")
+        return False
+
+    # Efetua exclusão
+    try:
+        erro=None
+        os.rmdir(pasta)
+        print_log("Pasta vazia foi excluída:", pasta)
+    except OSError as e:
+        trc_string = traceback.format_exc()
+        erro = "[1103] Exclusão de pasta falhou: " + str(e) + trc_string
+    except BaseException as e:
+        trc_string = traceback.format_exc()
+        erro = "[1099] Exclusão de pasta falhou: " + str(e) + trc_string
+
+    # Ocorreu erro, registra no log
+    if erro is not None:
+        print_log(erro)
+        return False
+
+    # Ok, exclusão com sucesso
+    return True
 
 # -----------------------------------------------------------------------------------
 # Determina características de uma pasta
@@ -2875,6 +2913,19 @@ def remove_unc(caminho):
     return caminho
 
 
+def obter_pasta_pai(pasta):
+
+    # Normaliza separador de pasta
+    pasta_destino=pasta.replace("\\","/")
+    # Decompões
+    partes=pasta_destino.split("/")
+    # Descarta última pasta para chegar no pai
+    pasta_pai='/'.join(partes[:-1])
+
+    return pasta_pai
+
+
+
 # Efetua uma cópia do diretorio de origem para o diretório de destino,
 # mesclando
 # Ou seja, se o diretorio de destino já existe, os novos arquivos/pastas do diretório de origem
@@ -3349,7 +3400,7 @@ def mover_pasta_storage(pasta_origem, pasta_destino):
 
     # Pasta de destino não pode existir
     if os.path.exists(pasta_destino):
-        raise Exception("[3310] Pasta de origem não localizada: ", pasta_origem)
+        raise Exception("[3310] Pasta de destino já existe: ", pasta_destino)
 
     # Verifica se a pasta pai existe, e se não existir cria
     pasta_destino=pasta_destino.replace("\\","/")
@@ -3689,7 +3740,7 @@ def console_sanitiza_utf8(dado):
         qtd = 0
         for v in dado:
             (novo_valor, q) = console_sanitiza_utf8(v)
-            saida.append(q)
+            saida.append(novo_valor)
             qtd += q
         return (saida, qtd)
 
@@ -3824,10 +3875,21 @@ def sapi_info_set(pasta_sapi_info, variavel, valor):
         sapi_info=dict()
 
     # Atualiza variável
-    sapi_info[variavel]=valor
+    if valor is not None:
+        sapi_info[variavel]=valor
+    else:
+        # Remove elemento, se existir
+        if sapi_info.get(variavel, None) is not None:
+            del sapi_info[variavel]
 
     # Grava
     return sapi_info_gravar(pasta_sapi_info, sapi_info)
+
+# Exclui variável do arquivo sapi.info
+# ----------------------------------------------------------------------
+def sapi_info_del(pasta_sapi_info, variavel):
+    return sapi_info_set(pasta_sapi_info, variavel, None)
+
 
 # Recupera valor da variável de sapi.info da pasta indicada
 # Se não existir, retorna None
@@ -4124,9 +4186,7 @@ def exec_tableau_parse_arquivo_log(caminho_arquivo_log, item):
     # Duplicação não foi finalizada
     erro_geral = valores.get('start:erro_geral', None)
     if erro_geral is not None:
-        erro = texto("Erro:", erro_geral,
-                     " Consulte o log do tableau que foi carregado para o SAPI",
-                     " para mais detalhes")
+        erro = texto(erro_geral)
         return (False, erro, {})
 
     # Verificação não deveria estar ligada
@@ -4147,7 +4207,7 @@ def exec_tableau_parse_arquivo_log(caminho_arquivo_log, item):
         erro = texto("A verificação do Tableau está ligada.",
                      " Isto dobra o tempo de imagem.",
                      " Desligue a verificação"
-                     );
+                     )
         return (False, erro, {})
 
     # -----------------------------------------------------------------------------
@@ -4213,6 +4273,10 @@ def exec_tableau_parse_arquivo_log(caminho_arquivo_log, item):
 
         # Filename of first chunk: 1023_17_parte_1/2017-09-21_14-31-52/temporario.E01
         'result:first_chunk': 'sapiCaminhoImagemTemporario',
+
+        # Chunks written: 2
+        # Ou seja, existe o xxx.E01 e xxx.E02
+        'result:chunks_written': 'sapiArquivosEnnQuantidade',
 
         # Total errors: 0
         'result:total_erros': 'sapiErrosLeituraQuantidade'

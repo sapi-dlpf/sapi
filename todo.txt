@@ -3,8 +3,30 @@ TODO - Lista de pendências do projeto SAPI
 
 Ajustes diversos:
 
+* sapi_cellebrite:
+  * Para o Felipe, aparece aviso que a pasta de destino já existia, mas aparentemente não tinha
+    sido feito ainda....bug....estudar
+
+* sapi (web):
+  * Sanitizar item: Não perimitir caracteres acentuados, parenteses, ou qualquer outra coisa estranha
+    no item, por exemplo: 01 (único)
+  * Avisar com javascript se usuário clicar no item (para ir para o Siscrim) e já tiver tarefas
+    * Se você está pensando em alterar o item, primeiro exclua todas as tarefas.
+      Não é permitido alterar um item se já existir tarefas, pois isto criaria tarefas órfãs.
+      A exclusão das tarefas deve ser de trás para frente, ou seja, das últims geradas para as primeiras.
+
+  * Na tela de tarefas órfãs, recomendar que usuário restaura a situação anterior (corrija os itens),
+    exclua as tarefas, e depois mude o item.
+
+* sapi_iped:
+  * Quando item foi alterado de '01 (único)' para '01', ao mandar excluir a tarefa órfã do IPED, não funcionou.
+
+
 * GTPI-STO-01:
   * Verificar se GTPI-STO-01 está utilizando proxy para conversar com SETEC3.
+  * Tem no mínimo uma das contas que não está bloqueando a tela depois de um tempo.
+  * Trocar as senhas, deixando mais forte.
+
 
 * GTPI-STO-02:
   * Copiar disco do GTPI-STO-03 e ajustar

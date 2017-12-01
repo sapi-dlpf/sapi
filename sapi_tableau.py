@@ -50,7 +50,7 @@ if sys.version_info <= (3, 0):
 # GLOBAIS
 # =======================================================================
 Gprograma = "sapi_tableau"
-Gversao = "1.8.7"
+Gversao = "1.8.11"
 
 #  Configuração e dados gerais
 Gconfiguracao = dict()
@@ -114,6 +114,7 @@ def main():
     if not inicializar():
         # Falhou na inicialização, talvez falha de comunicação, talvez mudança de versão...
         finalizar_programa()
+
 
     while True:
         (sucesso, msg_erro) = executar_tableau()
@@ -268,6 +269,10 @@ def _executar_tableau():
         else:
             # Nada a fazer para as demais situações
             print_log("Nenhuma ação tomada para tarefa", codigo_tarefa, "que está com situação", codigo_situacao_tarefa)
+
+        # Fazemos uma pausa aqui, para evitar que os processos fiquem muito sincronizado
+        # pois isto dificulta a análise do arquivo de log
+        time.sleep(10)
 
     # Tudo certo
     return (True, "")
@@ -524,7 +529,7 @@ def monitorar_tarefa(codigo_tarefa):
     # Se pasta não existe, tem algo erro aqui
     if not os.path.exists(pasta_tableau):
         # Isto aqui não deveria acontecer nunca...foi feita exclusão manual?
-        erro = texto("Pasta do tableau não existe")
+        erro = texto("Pasta do tableau não existe", pasta_tableau)
         sapisrv_reportar_erro_tarefa(codigo_tarefa, erro)
         return False
 
@@ -571,10 +576,11 @@ def monitorar_tarefa(codigo_tarefa):
 
         (pasta_destino, pasta_item, nome_base)=decompor_caminho_destino_imagem(caminho_destino)
 
-        # Adiciona raiz do storage na pasta de destino
+        # Adiciona raiz do storage nas pastas
         # Desta forma, não importa em qual pasta o sapi_tableau é iniciado
         # O caminho será sempre relativo à raiz do storage
         pasta_destino = montar_caminho(get_parini('raiz_storage'), pasta_destino)
+        pasta_item = montar_caminho(get_parini('raiz_storage'), pasta_item)
 
         # Inicia tarefa em background
         # ----------------------------
@@ -647,6 +653,47 @@ def background_acompanhar_tableau(
 
     print_log("Processo de acompanhamento de tarefa de imagem Tableau iniciado")
 
+    try:
+        erro=None
+        # Executa acompanhamento de tableau, capturando e registrando qualquer erro ocorrido
+        _background_acompanhar_tableau(
+            codigo_tarefa,
+            item,
+            pasta_tableau,
+            pasta_item,
+            pasta_destino,
+            nome_base,
+            codigo_situacao_tarefa)
+    except BaseException as e:
+        # Qualquer outra coisa
+        trc_string = traceback.format_exc()
+        erro="[671]: ERRO: Exceção sem tratamento: " + trc_string
+
+    if erro is not None:
+        print_log(erro)
+        # Atualiza erro na situação da tarefa
+        sapisrv_atualizar_status_tarefa_informativo(
+            codigo_tarefa=codigo_tarefa,
+            texto_status=erro
+        )
+        os._exit(1)
+
+    # Fim normal
+    print_log("Processo de acompanhamento de tarefa de imagem Tableau finalizado normalmente")
+    # Na realidade não retornar para lugar nenhum, pois é um processo em background.
+    # Irá simplesmente finalizar
+    return
+
+
+def _background_acompanhar_tableau(
+        codigo_tarefa,
+        item,
+        pasta_tableau,
+        pasta_item,
+        pasta_destino,
+        nome_base,
+        codigo_situacao_tarefa):
+
     # Fica em loop infinito.
     # Será encerrado quando não tiver mais nada a fazer,
     # ou então pelo pai (kill)
@@ -660,34 +707,58 @@ def background_acompanhar_tableau(
             print_log("Abandonando acompanhamento desta tarefa")
             return
 
-        # Verifica quantas subpastas existem no tableau
-        # Não pode ter mais do que uma pasta, pois isto pode indicar
-        # que o usuário está duplicando mais do que uma material para a
-        # mesma pasta raiz do tableau...pode ter se enganado de material.
+        # Verifica quantas subpastas ok para processamento existem no pasta do tableau
+        # Não pode ter mais do que uma pasta, pois isto indica
+        # que o usuário está duplicando mais do que um material para a
+        # mesma pasta temporária o tableau...pode ter se enganado de material.
         # -------------------------------------------------------------------------------
         qtd_pastas_ok = 0
         for dirpath, dirnames, filenames in os.walk(pasta_tableau):
             for sub in dirnames:
                 print_log("Verificada presença de subpasta", sub)
 
-                # Despreza pasta que foi classificada com erro
+                # Despreza pasta que foi anteriormente classificada como duplicação com erro
                 if "ERRO" in sub:
                     print_log("Desprezada subpasta pois contém indicativo de erro")
                     continue
-                else:
-                    qtd_pastas_ok += 1
-                    print_log("Pasta ok para ser processada")
-                    # Subpasta a ser processada
-                    subpasta_processar = montar_caminho(dirpath, sub)
 
-        # TODO: Isto aqui não está legal
-        # A pasta só estará ok se:
-        # - Tiver um arquivo E01
-        # - Não tiver log de cancelada
-        # - Se tiver log de cancelada, tem que ser renomeada
-        # **** reformular esta lógica aqui
-        # - Tem dados para teste no m1027_17 => Não excluir esta pasta
+                # caminho completo para a subpasta
+                subpasta_caminho_completo=montar_caminho(dirpath, sub)
 
+                # Vamos ver se esta pasta está pronta para ser processada
+                if not subpasta_contem_primeiro_arquivo(subpasta_caminho_completo, nome_base):
+                    print_log("Desprezada subpasta pois ainda não contém arquivo indicando início de imagem do tableau")
+                    continue
+
+                # Vamos ver se a subpasta contém duplicação abortada
+                # Para isto, é necessário que tenha arquivo de log,
+                # e o arquivo de log indique que ocorreu erro
+                (encontrado_log, caminho_arquivo_log) = existe_arquivo_log_tableau(subpasta_caminho_completo, nome_base)
+                if encontrado_log:
+                    print_log("Pasta já possui arquivo de log")
+                    # Verifica se log indica que duplicação falhou
+                    (sucesso, erro_log, dados_relevantes) = tableau_parse_arquivo_log(caminho_arquivo_log, item)
+                    if sucesso:
+                        print_log("Arquivo de log indica sucesso")
+                    else:
+                        # Renomeia pasta com erro, e interrompe este ciclo
+                        print_log("Arquivo de log indica falha: ", erro_log)
+                        print_log("Renomeando pasta para _ERRO e interrompendo ciclo")
+                        renomear_pasta_com_erro_e_abortar(subpasta_caminho_completo, codigo_tarefa, erro_log)
+                        return
+
+                # Ok, pasta está pronta para ser processada
+                qtd_pastas_ok += 1
+                subpasta_processar = subpasta_caminho_completo
+                print_log("Pasta ok para ser processada:", subpasta_processar)
+
+
+        # ---------------------------------------------------------------------------------------
+        # Agora que varreu todas as subpastas, vamos ver como ficou
+        # Se tiver zero subpastas, fica aguardando
+        # Se tiver mais do que uma, tem algo erro, e neste caso aborta a tarefa
+        # Se tiver exatamente uma subpasta, está tudo certo, e continua monitorando esta subpasta
+        # ---------------------------------------------------------------------------------------
         # Se não tem nenhuma subpasta,
         # encerra o acompanhamento
         if qtd_pastas_ok==0:
@@ -705,68 +776,29 @@ def background_acompanhar_tableau(
                 texto_status = \
                 texto("Existe mais de uma subpasta na pasta",
                       pasta_tableau,
-                      "É possível que você tenhas se equivocado na seleção da pasta do tableau, ",
-                      "e existam dois processos de duplicação em andamento de materiais distintos para esta pasta.",
-                      "Se for este o caso, cancele a duplicação incorreta e tudo continuará normalmente.")
+                      "É possível que você tenha se equivocado na seleção da pasta do tableau, ",
+                      "e existam dois processos de duplicação em andamento de materiais distintos para esta mesma pasta.",
+                      "Se for este o caso, cancele a duplicação incorreta no Tableau (botão CANCELAR),",
+                      "aguarde alguns minutos, e tudo voltará ao normal.")
                 sapisrv_abortar_tarefa(codigo_tarefa, texto_status)
             else:
                 print_log("Tarefa já está abortada. Nada a ser feito")
             return
 
-        # Se tem pasta a processar, e ainda não está no estado correto, corrige
+        # Ok, temos apenas uma pasta, Tudo certo até aqui
+        # ------------------------------------------------
+
+        # Se ainda não está no estado de execução, ajusta
         if int(codigo_situacao_tarefa) != int(GTableauExecutando):
             # Registra comando de execução do IPED
             codigo_situacao_tarefa=GTableauExecutando
             sapisrv_troca_situacao_tarefa_loop(
                 codigo_tarefa=codigo_tarefa,
                 codigo_situacao_tarefa=GTableauExecutando,
-                texto_status=texto("Pasta do tableau contém dados, subpasta", subpasta_processar)
+                texto_status=texto("Pasta do tableau contém subpasta com dados:", subpasta_processar)
             )
 
-        # Verifica se já tem o primeiro arquivo
-        # Por convenção (fixado no tableau), grava será
-        # image.E01.partial (se ainda não terminou o primeiro arquivo)
-        # image.E01 (se já terminou o primeiro arquivo)
-        # Se pasta já foi renomeada, então será algo como
-        # item01Arrecadacao01.E01
-        nome_possiveis=list()
-        for prefixo in (Gtableau_imagem, nome_base):
-            for sufixo in (".E01", ".E01.partial"):
-                nome_arquivo=prefixo + sufixo
-                nome_possiveis.append(nome_arquivo)
-
-        encontrado_primeiro = False
-        for nome_arquivo in nome_possiveis:
-            caminho_primeiro_arquivo = montar_caminho(subpasta_processar, nome_arquivo)
-            if os.path.isfile(caminho_primeiro_arquivo):
-                print_log("Encontrado arquivo", caminho_primeiro_arquivo)
-                encontrado_primeiro = True
-                # Ok, achou o arquivo
-                break
-            else:
-                print_log("Não foi encontrado arquivo", caminho_primeiro_arquivo)
-
-        if not encontrado_primeiro:
-            texto_status = texto("Não foi encontrado arquivo indicativo ",
-                                 "de início de cópia.",
-                                 "Algo como: ", Gtableau_imagem +".E01*",
-                                 "na pasta",
-                                 subpasta_processar)
-            sapisrv_abortar_tarefa(codigo_tarefa, texto_status)
-            return
-
-        # Verifica se já existe arquivo de log
-        print_log("Verificando se já existe arquivo de log")
-        encontrado_log = False
-        for prefixo in (Gtableau_imagem, nome_base):
-            arquivo_log = prefixo + ".log"
-            caminho_arquivo_log = montar_caminho(subpasta_processar, arquivo_log)
-            if os.path.isfile(caminho_arquivo_log):
-                encontrado_log = True
-                break
-            else:
-                print_log("Não encontrado arquivo", arquivo_log)
-
+        # Se já tem arquivo de log, interrompe loop para finalizar processamento da pasta
         if encontrado_log:
             print_log("Encontrado arquivo de log:", caminho_arquivo_log)
             sapisrv_atualizar_status_tarefa_informativo(
@@ -776,8 +808,10 @@ def background_acompanhar_tableau(
             )
             print_log("Interrompe loop de acompanhamento. Será analisado resultado")
             break
-        else:
-            print_log("Ainda não existe arquivo de log")
+
+        # Ainda não tem arquivo de log
+        # Como ainda não tem arquivo de log, apenas atualiza a situação atual
+        print_log("Ainda não existe arquivo de log. Apenas atualiza situação atual (tamanho)")
 
         # Calcula o tamanho da pasta do tableau e atualiza
         carac = obter_caracteristicas_pasta_ok(subpasta_processar)
@@ -795,8 +829,15 @@ def background_acompanhar_tableau(
         dormir(60, "pausa entre atualizações de status")
 
         # Fim do While - Fica em loop até achar arquivo de log
+        # ou surgir alguma outra situação inesperada
         # ----------------------------------------------------
 
+
+    # =========================================================================================
+    # Saiu do loop
+    # Se chegou até aqui, indica que o processamento terminou com sucesso
+    # Ou seja, tem log, e o log indica conclusão com sucesso
+    # =========================================================================================
 
     # Faz upload do arquivo de log do tableau
     # -------------------------------------------------------------------------------
@@ -807,44 +848,6 @@ def background_acompanhar_tableau(
             conteudo_log += linha
 
     sapisrv_armazenar_texto_tarefa(codigo_tarefa, 'Log do tableau', conteudo_log)
-
-    # Processa log do tableau, extraindo dados da tarefa para utilização no laudo
-    # -------------------------------------------------------------------------------
-    (sucesso, erro, dados_relevantes) = tableau_parse_arquivo_log(caminho_arquivo_log, item)
-
-    if sucesso:
-        print_log("Tudo certo no log")
-    else:
-        print_log("Detectado erro no parse do log: ", erro)
-
-    # var_dump(sucesso)
-    # var_dump(erro)
-    # var_dump(dados_relevantes)
-    # die('ponto310')
-
-    # Se tableau não finalizou com sucesso, renomeia a pasta com erro e aborta a tarefa
-    # -------------------------------------------------------------------------------
-    if not sucesso:
-
-        # Renomeia a pasta que está com problema,
-        # para não ser mais reprocessada
-        # Adicionar o sufixo "_ERRO"
-        try:
-            subpasta_renomeada = subpasta_processar + "_ERRO"
-            os.rename(subpasta_processar, subpasta_renomeada)
-            sapisrv_atualizar_status_tarefa_informativo(
-                codigo_tarefa=codigo_tarefa,
-                texto_status=texto("Pasta de com erro foi renomeada para ", subpasta_renomeada)
-            )
-        except Exception as e:
-            # Adiciona erro
-            erro_adicional = texto("E também não foi possível renomear pasta com erro", subpasta_processar, ":", e)
-            erro = texto(erro, erro_adicional)
-            return
-
-        # Aborta tarefa
-        sapisrv_abortar_tarefa(codigo_tarefa, erro)
-        return
 
     # Ajusta nomes dos arquivos de imagem e log, para ficarem com nomes padronizados
     # Exemplo: item01Arrecadacao01.E01
@@ -888,11 +891,11 @@ def background_acompanhar_tableau(
 
 
     # Move pasta temporária para pasta definitiva. Exemplo:
-    # De:   tableau\Ronaldo_14940\proto_00943_2017\mat_1023_17_parte_2\2071005050_09_01_05
-    # para:
+    # De:   tableau\Ronaldo_14940\p_00943_17\m_1023_17_2\2017-10-05_09-01-05
+    # para: Memorando_1880-16\item01Arrecadacao02\item01Arrecadacao02_imagem
     # -------------------------------------------------------------------------------
     try:
-
+        moveu_sucesso=False
         # Se pasta de destino já existe, move para lixeira
         # Isto pode acontecer se a tarefa foi reiniciada
         if os.path.exists(pasta_destino):
@@ -903,7 +906,7 @@ def background_acompanhar_tableau(
             # Move pasta de destino para lixeira
             mover_lixeira(pasta_destino)
 
-        # Se não existe pasta pai, cria
+        # Se pasta pai (do item) não existe, cria
         if not os.path.exists(pasta_item):
             os.makedirs(pasta_item)
 
@@ -915,6 +918,7 @@ def background_acompanhar_tableau(
         mover_pasta_storage(subpasta_processar, pasta_destino)
 
         # Adiciona no arquivo sapi.info a pasta de origem
+        # Este arquivo posteriormente permite identificar qual a foi a origem da pasta
         sapi_tableau=dict()
         sapi_tableau['pasta_origem']=subpasta_processar
         sapi_tableau['base_nome_original']=Gtableau_imagem
@@ -925,74 +929,40 @@ def background_acompanhar_tableau(
         # Movimentação concluída
         sapisrv_atualizar_status_tarefa_informativo(
             codigo_tarefa=codigo_tarefa,
-            texto_status="Pasta temporária movida para pasta definitiva"
+            texto_status=texto("Pasta temporária movida para pasta definitiva", pasta_destino)
         )
-
+        moveu_sucesso=True
     except Exception as e:
         # Isto não deveria acontecer nunca
-        erro = "Não foi possível mover para pasta definitiva: " + str(e)
+        moveu_sucesso = False
+        trc_string = traceback.format_exc()
+        erro = texto("[891] ** ERRO na movimentação da pasta",
+                     subpasta_processar,
+                     trc_string)
+        print_log(erro)
+
+    # Se movimentação falhou, aborta tarefa
+    if not moveu_sucesso:
         sapisrv_abortar_tarefa(codigo_tarefa, erro)
         return
 
-
     # Exclusão da pasta temporária do Tableau
-    # Se este procedimento falhar, não tem problema,
-    # pois poderá ser feita exclusão manual posteriormente
-    # -----------------------------------------------------------------------------------------
+    # ---------------------------------------
     try:
-        print_log("Tratamento para pasta temporária do tableau:", pasta_tableau)
-        erro=None
-        # Como deu tudo certo, elimina a pasta do Tableau correspondente, se puder
-        # Primeiro, move para a lixeira todas as subpastas que abortaram
-        for dirpath, dirnames, filenames in os.walk(pasta_tableau):
-            for subpasta_erro in dirnames:
-                # Despreza pasta que foi classificada com erro
-                if "ERRO" in subpasta_erro:
-                    subpasta_erro=montar_caminho(dirpath, subpasta_erro)
-                    print_log("Movendo para lixeira a subpasta", subpasta_erro)
-                    (sucesso, pasta_lixeira) = mover_lixeira(subpasta_erro)
-                    if sucesso:
-                        sapisrv_atualizar_status_tarefa_informativo(
-                            codigo_tarefa=codigo_tarefa,
-                            texto_status=texto("Movido subpasta com falha de execução do tableau",
-                                               subpasta_erro,
-                                               "para lixeira",
-                                               pasta_lixeira)
-                        )
-                    else:
-                        print_log("Movimentação para lixeira da pasta", subpasta_erro, "falhou")
-
-        # Se não sobrou nenhum conteúdo na pasta temporária, pode excluir
-        tamanho_restante=obter_tamanho_pasta_ok(pasta_tableau)
-        if tamanho_restante == 0:
-            shutil.rmtree(pasta_tableau)
-            print_log("Pasta tableau excluída com sucesso:", pasta_tableau)
-        else:
-            sapisrv_atualizar_status_tarefa_informativo(
-                codigo_tarefa=codigo_tarefa,
-                texto_status=texto("AVISO: Não foi excluída a pasta temporária do tableau",
-                                   pasta_tableau,
-                                   "pois a mesma ainda contém arquivos.",
-                                   " Verifique se não foi feita algum upload por engano para esta pasta")
-            )
-
+        erro = None
+        excluir_pasta_temporaria_tableau(codigo_tarefa, pasta_tableau)
     except Exception as e:
         # Se ocorrer algo inesperado, guarda no log
-        trc_string=traceback.format_exc()
-        erro=texto("- [947] ** ERRO na exclusão da pasta",
-                   subpasta_processar,
-                   trc_string)
-        print_log(erro)
+        trc_string = traceback.format_exc()
+        erro = texto("[947] ERRO na exclusão da pasta temporária do tableau",
+                     e,
+                     trc_string)
 
-    # Se não foi possível excluir pasta do Tableau, registra um aviso
-    if os.path.exists(pasta_tableau):
-        if erro is None:
-            erro="É possível que outro material tenha sido duplicado por engano para esta pasta. Confira o conteúdo da mesma"
-        sapisrv_atualizar_status_tarefa_informativo(
-            codigo_tarefa=codigo_tarefa,
-            texto_status=texto("AVISO: Não foi excluída a pasta temporária do tableau. Erro:",
-                               erro)
-        )
+    # Se falhar a exclusão da pasta temporária, prosseguimos, pois isto não é essencial
+    if erro is not None:
+        # Apenas registra em log
+        print_log(erro)
+        # Prossegue
 
     # Atualiza situação da tarefa para sucesso
     # ----------------------------------------
@@ -1004,6 +974,138 @@ def background_acompanhar_tableau(
         tamanho_destino_bytes=tam_pasta_tableau
     )
     print_log("Tarefa de imagem do tableau finalizada com sucesso")
+
+
+# Verifica se já tem o primeiro arquivo
+# Por convenção (fixado no tableau), grava será
+# image.E01.partial (se ainda não terminou o primeiro arquivo)
+# image.E01 (se já terminou o primeiro arquivo)
+# Se pasta já foi renomeada, então será algo como
+# item01Arrecadacao01.E01
+# Retorna: True/False
+def subpasta_contem_primeiro_arquivo(subpasta, nome_base):
+    nome_possiveis = list()
+    for prefixo in (Gtableau_imagem, nome_base):
+        for sufixo in (".E01", ".E01.partial"):
+            nome_arquivo = prefixo + sufixo
+            nome_possiveis.append(nome_arquivo)
+
+    for nome_arquivo in nome_possiveis:
+        caminho_primeiro_arquivo = montar_caminho(subpasta, nome_arquivo)
+        if os.path.isfile(caminho_primeiro_arquivo):
+            print_log("Encontrado arquivo", caminho_primeiro_arquivo)
+            # Ok, achou o arquivo
+            return True
+        else:
+            print_log("Não foi encontrado arquivo", caminho_primeiro_arquivo)
+
+    # Não econtrado arquivo
+    print_log("Não foi encontrado nenhum arquivo que indique início de imagem")
+    return False
+
+
+# Verifica se já existe arquivo de log do tableau
+def existe_arquivo_log_tableau(subpasta_processar, nome_base):
+    print_log("Verificando se já existe arquivo de log")
+    encontrado_log = False
+    for prefixo in (Gtableau_imagem, nome_base):
+        arquivo_log = prefixo + ".log"
+        caminho_arquivo_log = montar_caminho(subpasta_processar, arquivo_log)
+        if os.path.isfile(caminho_arquivo_log):
+            encontrado_log = True
+            return (True, caminho_arquivo_log)
+        else:
+            print_log("Não encontrado arquivo", arquivo_log)
+
+    # Não foi encontrado arquivo de log
+    return (False, None)
+
+
+# Renomeia a pasta que está com problema,
+# para não ser mais reprocessada
+# Adicionar o sufixo "_ERRO"
+def renomear_pasta_com_erro_e_abortar(subpasta_processar, codigo_tarefa, erro_log):
+
+    try:
+        erro = texto("Duplicação na pasta", subpasta_processar, "foi abortada com erro:", erro_log)
+        subpasta_renomeada = subpasta_processar + "_ERRO"
+        os.rename(subpasta_processar, subpasta_renomeada)
+        erro = texto(erro, "Pasta com erro foi renomeada para ", subpasta_renomeada)
+    except Exception as e:
+        # Não conseguiu renomear
+        erro = texto(erro," [1043] Além disso, tentativa de renomear pasta com erro", subpasta_processar, "também falhou :", e)
+
+    # Aborta tarefa
+    sapisrv_abortar_tarefa(codigo_tarefa, erro)
+    return
+
+
+# Exclusão da pasta temporária do Tableau
+# Se este procedimento falhar, não tem problema,
+# pois poderá ser feita exclusão manual posteriormente
+# -----------------------------------------------------------------------------------------
+def excluir_pasta_temporaria_tableau(codigo_tarefa, pasta_tableau):
+
+    print_log("Tratamento/exclusão da pasta temporária do tableau:", pasta_tableau)
+
+    # 1) Move as pastas de duplicação marcadas com _ERRO para a lixeira,
+    #    para ser mais rápido
+    # -------------------------------------------------------------------------
+    # Primeiro, move para a lixeira todas as subpastas que abortaram
+    for dirpath, dirnames, filenames in os.walk(pasta_tableau):
+        for subpasta_erro in dirnames:
+            # Despreza pasta que foi classificada com erro
+            if "ERRO" in subpasta_erro:
+                subpasta_erro = montar_caminho(dirpath, subpasta_erro)
+                print_log("Movendo para lixeira a subpasta", subpasta_erro)
+                (sucesso, pasta_lixeira) = mover_lixeira(subpasta_erro)
+                if sucesso:
+                    sapisrv_atualizar_status_tarefa_informativo(
+                        codigo_tarefa=codigo_tarefa,
+                        texto_status=texto("Movido subpasta com falha de execução do tableau",
+                                           subpasta_erro,
+                                           "para lixeira",
+                                           pasta_lixeira)
+                    )
+                else:
+                    print_log("Movimentação para lixeira da pasta", subpasta_erro, "falhou")
+            else:
+                print_log("Pasta do tableau contém subpasta inesperada:", subpasta_erro)
+
+
+
+    # 2) Exclui a pasta tableau referente ao material
+    # -------------------------------------------------------------------------
+    # Se não sobrou nenhum conteúdo na pasta temporária, pode excluir
+    print_log("Verificando se é possível excluir pasta tableau:", pasta_tableau)
+    if excluir_pasta_se_vazia(pasta_tableau):
+        # Exclusão ok
+        print_log("Pasta tableau excluída com sucesso:", pasta_tableau)
+    else:
+        sapisrv_atualizar_status_tarefa_informativo(
+            codigo_tarefa=codigo_tarefa,
+            texto_status=texto("AVISO: Não foi possível excluir pasta temporária do tableau",
+                               pasta_tableau,
+                               "Normalmente isto indica que a pasta ainda contém arquivos.",
+                               "Verifique se não foi feita algum upload por engano para esta pasta")
+        )
+        return False
+
+    # 3) Se pasta do protocolo estiver vazia, será excluída
+    #    O mesmo se aplica para a pasta do perito
+    #    A ideia é manter a pasta do tableau o mais limpo possível, para evitar confusão
+    # ---------------------------------------------------------------------------------------
+    pasta_protocolo=obter_pasta_pai(pasta_tableau)
+    print_log("Verificando se deve excluir pasta do protocolo:", pasta_protocolo)
+    if excluir_pasta_se_vazia(pasta_protocolo):
+        # Se pasta do perito estiver vazia, será excluída
+        pasta_perito = obter_pasta_pai(pasta_protocolo)
+        print_log("Verificando se deve excluir pasta do perito:", pasta_perito)
+        excluir_pasta_se_vazia(pasta_perito)
+
+    # Tudo certo
+    return True
+
 
 # Abortar execução do programa
 # Esta rotina é invocada quando alguma situação exige que para a restauração da ordem
@@ -1045,6 +1147,7 @@ def finalizar_programa():
 # Chamada para rotina principal
 # ----------------------------------------------------------------------------------
 if __name__ == '__main__':
+
 
     # Executa rotina principal
     main()
