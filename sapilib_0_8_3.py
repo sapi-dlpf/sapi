@@ -48,6 +48,7 @@
 #   0.6.1 - Ajustado para nas chamadas ao servidor passar também o programa de execução
 #   0.7   - Melhoria na tolerância a falhas, exibindo mensagens explicativas dos problemas.
 #   0.7.2 - Tratamento para execução em background.
+#   0.8.3 - Ajuste para ignorar proxy
 #
 # *********************************************************************************************************************
 # *********************************************************************************************************************
@@ -83,6 +84,10 @@ import tempfile
 # Desativa a verificação de certificado no SSL
 ssl._create_default_https_context = ssl._create_unverified_context
 
+# Desabilita o proxy, ignorando caso a máquina esteja com proxy ligado
+proxy = urllib.request.ProxyHandler({})
+opener = urllib.request.build_opener(proxy)
+urllib.request.install_opener(opener)
 
 # ---------- Constantes (na realidade variáveis Globais) ------------
 Gversao_sapilib = "0.8.1a"
@@ -784,11 +789,12 @@ def sapisrv_inicializar_ok(*args, **kwargs):
         os._exit(1)
 
     except SapiExceptionProgramaDesautorizado:
+        mensagem="Programa não autorizado pelo SETEC3. Consulte a configuração."
         if modo_background():
-            print_log("Programa não autorizado. Consulte a configuração")
+            print_log(mensagem)
         else:
             # Modo iterativo, mostra mensagem
-            print_tela_log("- Programa não autorizado. Consulte a configuração")
+            print_tela_log(mensagem)
             pausa()
         # Encerra
         os._exit(1)
@@ -1541,7 +1547,6 @@ class SapiExceptionGeral(Exception):
 def testa_comunicacao_servidor_sapi(url_base):
     url = url_base + "sapisrv_ping.php"
     debug("Testando conexao com servidor SAPI em " + url)
-
     try:
         f = urllib.request.urlopen(url, timeout=Ghttp_timeout_corrente)
         resposta = f.read()
@@ -2994,6 +2999,15 @@ def acesso_storage_linux(ponto_montagem, conf_storage):
         # Tudo bem, storage montado e confirmado
         return True
 
+    # Resultado do comando, para poder tratar caso ocorra algum erro
+    arquivo_temporario = tempfile.NamedTemporaryFile(delete=False)
+    arquivo_resultado_comando = arquivo_temporario.name
+    arquivo_temporario.close()
+
+    # Para depurar, mono-usuário, é melhor deixar em um arquivo fixo
+    arquivo_resultado_comando = "resultado_comando_mount.txt"
+
+
     # Monta storage
     # O comando é algo como:
     # mount -t cifs //10.41.87.239/storage -o username=sapi,password=sapi /mnt/smb/gtpi_storage
@@ -3003,7 +3017,8 @@ def acesso_storage_linux(ponto_montagem, conf_storage):
         "/" + conf_storage["pasta_share"] +
         " -o username=" + conf_storage["usuario"] +
         ",password=" + conf_storage["senha"] +
-        " " + ponto_montagem
+        " " + ponto_montagem +
+        " >" + arquivo_resultado_comando
     )
 
     # print(comando)

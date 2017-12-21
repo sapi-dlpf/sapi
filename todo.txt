@@ -1,6 +1,8 @@
 TODO - Lista de pendências do projeto SAPI
 ============================================
 
+Alterado no Linux e agora no Windows
+
 Ajustes diversos:
 
 * sapi_cellebrite:
@@ -20,7 +22,6 @@ Ajustes diversos:
 
 * sapi_iped:
   * Quando item foi alterado de '01 (único)' para '01', ao mandar excluir a tarefa órfã do IPED, não funcionou.
-
 
 * GTPI-STO-01:
   * Verificar se GTPI-STO-01 está utilizando proxy para conversar com SETEC3.
