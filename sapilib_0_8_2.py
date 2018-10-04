@@ -75,10 +75,13 @@ import traceback
 from tkinter import filedialog
 import ssl
 import shutil
-import psutil
 from optparse import OptionParser
 import webbrowser
 import tempfile
+
+# Modulo que não é padrão na instalação do python
+import psutil
+
 
 # Desativa a verificação de certificado no SSL
 ssl._create_default_https_context = ssl._create_unverified_context
@@ -3800,14 +3803,14 @@ class JanelaTk(tkinter.Frame):
         super().__init__(master)
         self.pack()
 
-    def selecionar_arquivo(self, filetypes=None):
+    def selecionar_arquivo(self, filetypes=None, title=None):
 
         if filetypes is None:
             filetypes = [('All files', '*.*'),
                           ('ODT files', '*.odt'),
                           ('CSV files', '*.csv')]
 
-        self.file_name = tkinter.filedialog.askopenfilename(filetypes=filetypes)
+        self.file_name = tkinter.filedialog.askopenfilename(filetypes=filetypes, title=title)
 
         # self.file_name = tkinter.filedialog.askopenfilename(filetypes=([('All files', '*.*'),
         #                                                                 ('ODT files', '*.odt'),

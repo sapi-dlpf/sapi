@@ -55,11 +55,11 @@ Garquivo_estado = Gprograma + "v" + Gversao.replace('.', '_') + ".sapi"
 GdadosGerais = dict()  # Dicionário com dados gerais
 Glaudo = None
 Gitens = list()  # Lista de itens do laudo
-Gtarefas = None
+Gstorages = None
 Gsolicitacao_exame = None
 Gmateriais_solicitacao = None
 Gstorages_laudo = list()  # Lista de storages associados a tarefas do laudo
-Gmodelo_configuracao = list() # Dados coletados do modelo
+Gmod_constantes = list() # Dados coletados do modelo
 
 # Relativo a mídia de destino
 Gitem_midia=dict()

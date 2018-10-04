@@ -59,7 +59,7 @@ Gdesenvolvimento = True  # Ambiente de desenvolvimento
 
 # Base de dados (globais)
 GdadosGerais = {}  # Dicionário com dados gerais
-Gtarefas = []  # Lista de tarefas
+Gstorages = []  # Lista de tarefas
 
 # Diversos sem persistência
 Gnome_agente = "Não definido"

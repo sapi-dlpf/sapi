@@ -48,7 +48,7 @@
 #   0.6.1 - Ajustado para nas chamadas ao servidor passar também o programa de execução
 #   0.7   - Melhoria na tolerância a falhas, exibindo mensagens explicativas dos problemas.
 #   0.7.2 - Tratamento para execução em background.
-#   0.8.3 - Ajuste para ignorar proxy
+#   0.8.3 - Ajuste para ignorar proxy. Inclusão de tratamento para unidade (codigo_unidade_organizacional).
 #
 # *********************************************************************************************************************
 # *********************************************************************************************************************
@@ -56,7 +56,8 @@
 # *********************************************************************************************************************
 # *********************************************************************************************************************
 
-# Módulos utilizados
+# Módulos utilizados (padrão Python)
+# ----------------------------------
 import codecs
 import copy
 import datetime
@@ -64,22 +65,36 @@ import json
 import os
 import pprint
 import sys
+import subprocess
+import time
+import traceback
+# Interface grafica
+import tkinter
+from tkinter import filedialog
+from tkinter import ttk
+# Comunicacao
 import urllib
 import urllib.parse
 import urllib.request
-import subprocess
+import ssl
 import http.client
 import socket
-import tkinter
-import time
-import traceback
-from tkinter import filedialog
-import ssl
+
 import shutil
-import psutil
 from optparse import OptionParser
 import webbrowser
 import tempfile
+
+# Modulo que não é padrão na instalação do python
+# ------------------------------------------------
+try:
+    import psutil
+except ImportError:
+    print("Erro: Módulo adicional 'psutil' é necessário para rodar este programa")
+    print("Assegure-se que computador está conectado à internet, e utilize comando:")
+    print("pip install psutil")
+    time.sleep(30) #Um sleep aqui, para garantir que a mensagem será vista em qualquer circunstância
+    sys.exit(1)
 
 # Desativa a verificação de certificado no SSL
 ssl._create_default_https_context = ssl._create_unverified_context
@@ -364,11 +379,15 @@ def desligar_modo_debug():
     set_parini('debug', False)
     print_log("Modo debug foi desligado")
 
-
 # Se estiver em modo debug, registra no log
 def debug(*arg):
     if modo_debug():
         print_log("DEBUG:", *arg)
+
+def ligar_modo_config():
+    set_parini('config', True)
+    print_log("Modo config foi ativado")
+
 
 # ----------------------------------------------------------------------------------------------------------------------
 # Funções relacionadas com arquivos
@@ -466,6 +485,8 @@ def sapi_processar_parametros_usuario():
                           action="store_true", dest="debug", help="Informações adicionais para debug")
         parser.add_option("--background",
                           action="store_true", dest="background", help="Mensagens serão gravadas apenas em log")
+        parser.add_option("--config",
+                          action="store_true", dest="config", help="Modo de configuração")
         parser.add_option("--dual",
                           action="store_true", dest="dual", help="Mensagens de log são exibidas também na tela")
         parser.add_option("--logfile",
@@ -506,6 +527,9 @@ def sapi_processar_parametros_usuario():
 
         if options.debug:
             ligar_modo_debug()
+
+        if options.config:
+            ligar_modo_config()
 
     Gparametros_usuario_ja_processado = True
 
@@ -788,8 +812,8 @@ def sapisrv_inicializar_ok(*args, **kwargs):
         # Encerra
         os._exit(1)
 
-    except SapiExceptionProgramaDesautorizado:
-        mensagem="Programa não autorizado pelo SETEC3. Consulte a configuração."
+    except SapiExceptionProgramaDesautorizado as e:
+        mensagem="Programa não autorizado pelo SETEC3: " + str(e)
         if modo_background():
             print_log(mensagem)
         else:
@@ -883,10 +907,10 @@ def _sapisrv_reportar_erro_cliente(erro):
 
 # Registra mensagem de erro do cliente
 def sapisrv_reportar_erro(*arg):
-    linha = concatena_args(*arg)
+    linha = concatena_args("ERRO:", *arg)
     try:
         # Registra no log (local)
-        print_log("ERRO: ", linha)
+        print_log(linha)
 
         # Reportanto ao servidor, para registrar no log do servidor
         _sapisrv_reportar_erro_cliente(linha)
@@ -908,6 +932,45 @@ def sapisrv_reportar_erro_tarefa(codigo_tarefa, texto_erro):
         codigo_tarefa=codigo_tarefa,
         texto_status="ERRO: " + texto_erro
     )
+
+# Atualiza status da tarefa do sapisrv
+# ----------------------------------------------------------------------------------------------------------------------
+def sapisrv_registrar_configuracao_cliente(
+        programa,
+        configuracao,
+        ip,
+        unidade):
+
+    # Lista de parâmetros
+    param = dict()
+    param['programa'] = programa
+    param['ip'] = ip
+    param['unidade'] = unidade
+
+    # Configuração
+    configuracao_json = json.dumps(configuracao, sort_keys=True)
+    param['configuracao'] = configuracao_json
+
+    # Invoca sapi_srv
+    (sucesso, msg_erro, resultado) = sapisrv_chamar_programa(
+        programa="sapisrv_registrar_configuracao_cliente.php",
+        parametros=param,
+        registrar_log=False,
+        #metodo='post'
+        # Durante desenvolvimento, vamos deixar um get e depois trocar para post
+        metodo='get'
+    )
+
+    # Registra em log
+    if sucesso:
+        print_log("Registrada configuração com sucesso")
+    else:
+        # Se der erro, registra no log e prossegue (tolerância a falhas)
+        print_log("Não foi possível registrar a configuração no SETEC3: ", msg_erro)
+
+    # Retorna se teve ou não sucesso, e caso negativo a mensagem de erro
+    return (sucesso, msg_erro)
+
 
 
 # Obtem a configuração de um programa cliente
@@ -937,9 +1000,10 @@ def sapisrv_obter_configuracao_cliente(
     # Agente tem que ser tolerante a erros, e ficar tentando sempre.
     # Logo, iremos registrar no log e levantar uma exceção, deixando o chamador decidir o que fazer
     if not sucesso:
-        print_log_dual("sapisrv_obter_configuracao_cliente.php", msg_erro)
+        print_log("sapisrv_obter_configuracao_cliente.php ERRO:", msg_erro)
         # Não tem tarefa disponível para processamento
-        raise SapiExceptionGeral("Não foi possível obter configuração")
+        #raise SapiExceptionGeral("Não foi possível obter configuração")
+        return None
 
     # Configuração obtida com sucesso
     return configuracao
@@ -953,6 +1017,7 @@ def sapisrv_obter_configuracao_cliente(
 #    ao esforço computacional.
 def sapisrv_obter_iniciar_tarefa(
         tipo,
+        unidade,
         storage=None,
         dispositivo=None,
         tamanho_minimo=None,
@@ -961,6 +1026,7 @@ def sapisrv_obter_iniciar_tarefa(
     # Lista de parâmetros
     param = dict()
     param['tipo'] = tipo
+    param['unidade'] = unidade
     if (storage is not None):
         param['storage'] = storage
     if (dispositivo is not None):
@@ -989,6 +1055,7 @@ def sapisrv_obter_iniciar_tarefa(
     # Logo, iremos registrar no log e devolver ao chamador como uma simples "Ausência" de tarefas
     if not sucesso:
         print_log_dual("Erro na chamada do sapisrv_obter_iniciar_tarefa", msg_erro)
+        sapisrv_reportar_erro(msg_erro)
         # Não tem tarefa disponível para processamento
         return (False, None)
 
@@ -1071,11 +1138,13 @@ def sapisrv_obter_iniciar_tarefa(
 #  storage: Quando o agente tem conexão limitada (apenas um storage)
 def sapisrv_obter_excluir_tarefa(
         tipo,
+        unidade,
         storage=None
 ):
     # Lista de parâmetros
     param = dict()
     param['tipo'] = tipo
+    param['unidade'] = unidade
     if (storage is not None):
         param['storage'] = storage
 
@@ -1931,7 +2000,9 @@ def modo_debug():
     debug=get_parini('debug', False)
     return debug
 
-
+def modo_config():
+    config=get_parini('config', False)
+    return config
 
 
 def obter_timestamp(remover_milisegundo=True):
@@ -2368,6 +2439,41 @@ def pausa(mensagem=None):
     except KeyboardInterrupt:
         print("- Operação interrompida pelo usuário com <CTR>-<C>")
         return False
+
+def dialogo_selecionar_opcao(lista_opcoes, label="", ajuda=""):
+    label = label.strip()
+    if (len(label) > 0):
+        print(label)
+        print("="*len(label))
+    ajuda = ajuda.strip()
+    if len(ajuda) > 0:
+        print(ajuda)
+
+    # Exibe lista de opções
+    q = 0
+    for x in lista_opcoes:
+        # Cada elmento da lista é uma tupla, com o formato:
+        # (codigo, descricao)
+        q = q + 1
+        codigo = x[0]
+        descricao = x[1]
+        print(q, "-", codigo, ":", descricao)
+
+    while True:
+        #
+        print()
+        ix_escolhido = input(
+            "< Escolha uma das opções da lista acima: ")
+        ix_escolhido = ix_escolhido.strip()
+
+        if not ix_escolhido.isdigit() or not (1 <= int(ix_escolhido) <= q):
+            print("- Entre com um dos valores da lista entre 1 e", q, "ou digite <CTR><C> para cancelar")
+            continue
+        ix_escolhido = int(ix_escolhido)
+
+        # Ok, selecionado
+        return lista_opcoes[ix_escolhido - 1][0]
+
 
 
 # ==============================================================================================
@@ -3227,8 +3333,9 @@ def obter_usuario_senha_conexao_storage(conf_storage, tipo_conexao='consulta'):
 
     if tipo_conexao=='atualizacao':
         # Conta e usuário para conexão de atualização
-        usuario = conf_storage["usuario"]
-        senha = conf_storage["senha"]
+        # Na versão 1.9.1, os campos passaram a ser denominados usuario_atualiza e senha_atualiza
+        usuario = conf_storage.get("usuario", conf_storage.get("usuario_atualiza"))
+        senha = conf_storage.get("senha", conf_storage.get("senha_atualiza"))
     elif tipo_conexao=='consulta':
         usuario = conf_storage["usuario_consulta"]
         senha = conf_storage["senha_consulta"]
@@ -3431,8 +3538,6 @@ def mover_pasta_storage(pasta_origem, pasta_destino):
     if not os.path.exists(pasta_pai):
         os.makedirs(pasta_pai)
         print_log("Criada pasta pai para movimentação:", pasta_pai)
-
-    # xxxxx
 
     print_log("Movendo pasta ", pasta_origem, "para", pasta_destino)
     os.rename(pasta_origem, pasta_destino)
@@ -3785,6 +3890,9 @@ def print_sanitizado(dado):
     if qtd_alteracoes>0:
         print(qtd_alteracoes, "para sanitizacao de uft8")
 
+def print_console(texto):
+    print(console_sanitiza_utf8_ok(texto))
+
 # Faz dump formatado de um objeto qualquer na console
 # --------------------------------------------------------------------------------
 def console_dump_formatado(d, largura_tela=129):
@@ -3815,14 +3923,14 @@ class JanelaTk(tkinter.Frame):
         super().__init__(master)
         self.pack()
 
-    def selecionar_arquivo(self, filetypes=None):
+    def selecionar_arquivo(self, filetypes=None, titulo=None):
 
         if filetypes is None:
             filetypes = [('All files', '*.*'),
                           ('ODT files', '*.odt'),
                           ('CSV files', '*.csv')]
 
-        self.file_name = tkinter.filedialog.askopenfilename(filetypes=filetypes)
+        self.file_name = tkinter.filedialog.askopenfilename(filetypes=filetypes, title=titulo)
 
         # self.file_name = tkinter.filedialog.askopenfilename(filetypes=([('All files', '*.*'),
         #                                                                 ('ODT files', '*.odt'),
@@ -3851,7 +3959,169 @@ def tk_get_clipboard():
     return clip
 
 
+# ----------------------------------------------------------------------
+# Diálogo de credencial
+# ----------------------------------------------------------------------
+class DialogoCredencial(tkinter.Frame):
 
+    def __init__(self):
+        super().__init__()
+
+        self.initUI()
+
+        # Inicializa propriedadas da classe
+        self.usuario = ""
+        self.senha = ""
+
+    def initUI(self):
+
+        self.master.title("Credencial (igual SisCrim) ")
+        self.pack()
+
+        ttk.Label(self, text="Usuário").grid(row=0)
+        ttk.Label(self, text="Senha").grid(row=1)
+
+        self.entrada_usuario = ttk.Entry(self)
+        self.entrada_senha = ttk.Entry(self, show="*")
+        self.entrada_usuario.focus()
+
+        self.entrada_usuario.grid(row=0, column=1)
+        self.entrada_senha.grid(row=1, column=1)
+
+        ttk.Button(self, text='OK', command=self.validar).grid(row=3, column=0, pady=4)
+        ttk.Button(self, text='CANCELAR', command=self.exit).grid(row=3, column=1, pady=4)
+
+        self.master.bind('<Return>', self.validar)
+        self.focus_force()
+
+    def validar(self, dummy=0):
+        self.usuario = self.entrada_usuario.get()
+        self.senha = self.entrada_senha.get()
+        #print("usuario = ", self.usuario)
+        #print("senha = ", self.senha)
+
+        if (self.usuario != "") and (self.senha !=""):
+            # Ok, forneceu os dois campos
+            self.exit()
+            return
+
+        # Limpa e permanece na tela
+        print_tela("Campo de usuário e senha são obrigatórios")
+        #self.e1.delete(0, tkinter.END)
+        #self.e2.delete(0, tkinter.END)
+        self.entrada_usuario.focus()
+
+    def exit(self):
+        self.master.destroy()
+
+# Obtem e autentica credencial de usuário (através de interface gráfica)
+def autenticar_usuario():
+
+    # Dados do usuário autenticado
+    usuario=dict()
+
+    # Fica em loop até autenticar ou usuário desistir
+    while True:
+
+        # Abre janela gráfica para pegar credencial
+        root = tkinter.Tk()
+        #xxx
+        dialogo = DialogoCredencial()
+        root.geometry("400x150+300+300")
+        root.mainloop()
+
+        # Credencial fornecida
+        if (dialogo.usuario==""):
+            # Usuário não foi fornecido
+            return None
+        if (dialogo.senha==""):
+            # Senha não foi fornecida
+            return None
+
+        #print(dialogo.usuario)
+        #print(dialogo.senha)
+        #die('ponto3941')
+
+        # Verifica se credencial é válida
+        print("- Autenticando credencial. Aguarde...")
+        try:
+            print_log("Autenticando credencial para matrícula: ", dialogo.usuario)
+            (sucesso, msg_erro, dados_usuario) = sapisrv_chamar_programa(
+                "sapisrv_autenticar_credencial_usuario.php",
+                {'usuario': dialogo.usuario,
+                 'senha': dialogo.senha}
+            )
+
+            # Insucesso. Servidor retorna mensagem de erro (exemplo: Login/senha incorretar)
+            if (not sucesso):
+                # Exibe mensagem de erro reportada pelo servidor
+                # e continua no loop
+                print("-", msg_erro)
+                print()
+                continue
+
+        except BaseException as e:
+            # Provavel falha de comunicação
+            print_falha_comunicacao()
+            return None
+
+        # Tudo certo. Devolve dados do usuário
+        return dados_usuario
+
+# ------------------------------------------------------------------------------------
+
+# Obtem lista de storages da unidade
+def obter_lista_storages_unidade(unidade):
+
+    try:
+        print_log("Obtendo lista de storages da unidade: ", unidade)
+        (sucesso, msg_erro, lista_storage) = sapisrv_chamar_programa(
+            "sapisrv_obter_lista_storage.php",
+            {'unidade': unidade}
+        )
+
+        # Isto não deveria acontecer
+        if (not sucesso):
+            # Exibe mensagem de erro reportada pelo servidor
+            print_log(msg_erro)
+            return None
+
+    except BaseException as e:
+        # Provavel falha de comunicação
+        print_falha_comunicacao()
+        return None
+
+    # Tudo certo. Devolve lista de storage
+    return lista_storage
+
+
+# Obtem lista de perfis do IPED
+def obter_dict_perfil_iped(unidade):
+
+    try:
+        print_log("Obtendo lista de perfis do sapi_iped da unidade: ", unidade)
+        (sucesso, msg_erro, dict_perfil) = sapisrv_chamar_programa(
+            "sapisrv_obter_lista_perfil_iped.php",
+            {'unidade': unidade}
+        )
+
+        # Isto não deveria acontecer
+        if (not sucesso):
+            # Exibe mensagem de erro reportada pelo servidor
+            print_log(msg_erro)
+            return None
+
+    except BaseException as e:
+        # Provavel falha de comunicação
+        print_falha_comunicacao()
+        return None
+
+    # Tudo certo. Devolve lista de storage
+    return dict_perfil
+
+
+
+# ------------------------------------------------------------------------------------
 
 # Recupera dados de tarefa do servidor
 def recupera_tarefa_do_setec3(codigo_tarefa):
@@ -4635,6 +4905,50 @@ def servidor_decompor_caminho_destino_imagem(caminho_destino):
     pasta_item = montar_caminho(get_parini('raiz_storage'), pasta_item)
 
     return (pasta_destino, pasta_item, nome_base)
+
+
+# Obtem o IP da máquina
+# Não sei como irá se comportar em uma máquina com vários IPs!
+def get_ip_local():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        # doesn't even have to be reachable
+        s.connect(('10.255.255.255', 1))
+        IP = s.getsockname()[0]
+    except:
+        IP = '127.0.0.1'
+    finally:
+        s.close()
+    return IP
+
+# Executa comando de sistema operacional e trata erro
+def executa_comando_os(comando):
+
+    saida=""
+    deu_erro = False
+    erro_exception=None
+    try:
+        saida = subprocess.check_output(comando, shell=True, stderr=subprocess.STDOUT, universal_newlines=True)
+    except subprocess.CalledProcessError as e:
+        # Se der algum erro, não volta nada acima, mas tem como capturar pegando o output da exception
+        erro_exception = str(e)
+        deu_erro = True
+    except Exception as e:
+        # Alguma outra coisa aconteceu...
+        erro_exception = str(e)
+        deu_erro = True
+
+    #var_dump(resultado)
+    #var_dump(deu_erro)
+    #var_dump(erro_exception)
+    #die('ponto4863')
+
+    if deu_erro:
+        return (False, erro_exception, saida)
+
+    # Deu tudo certo
+    return (True, "", saida)
+
 
 
 

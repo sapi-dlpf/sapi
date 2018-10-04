@@ -1,17 +1,117 @@
 TODO - Lista de pendências do projeto SAPI
 ============================================
 
+Modificados => Colocar em produção:
+===================================
+
+
+=====================================
+=== Período de Beta-teste ===========
+=====================================
+- Liberado em 04/10/2018
+- Aguardar até pelo menos duas outras unidades estarem utilizando o SAPI.
+- Avisar Rodrigo que foi liberado, e pode liberar para os demais.
+
+=== Logo depois de liberar  =====
+Problema de XML do Cellebrite para password do iphone:
+* Fazer teste com dados do Werner, para pode reportar o problema
+* Memorando_547_2018
+* Werner utilizou a primeira máquina da esquerda...mas talvez tenha guardado em Hd externo....
+
+Problemas específicos do SETEC/PR:
+- VNC no GTPI_STO_04 (porque não está funcionando)
+* Segurança servidor:
+  - Não permitir que usuário Consulta altere drive C:
+  * Documentar isto no procedimento também, para evitar que alguma outra unidade deixe aberto.
+  - Firewall dos storages: Configurar para restringir acesso para IPs de máquinas do SETEC/PR.
+    * Como fazer isto???
+      https://social.technet.microsoft.com/Forums/windows/en-US/6cdee681-7f92-4562-be36-539f458fda58/firewall-rules-to-allow-smb1-to-specific-ip-addresses?forum=winserverNIS
+  - Talvez o melhor seja transferir imediatamente para o archiving,
+    e deixar o mínimo possível de dados na área de trabalho
+
+
+
+====== Depois que retomar Odebrecht (em paralelo) =========
+- Forma simples e rápida de mostrar conta do usuário do SAPI
+  (Lista de tarefas, na solicitação de exame, em qualquer lugar que aparecer a conta)
+  => Link para o Siscrim...uso geral
+
+- Log SETEC3: Fazer por unidade de localização, e não por unidade de lotação.
+
+- sapi_laudo:
+  + Verificar se foram utilizadas versões incompatíveis do iped (ex: 3.14 e 3.15).
+    * Se isto aconteceu, avisa o usuário que pode não ser possível executar o
+      o iped...recomendar utilizar *sto, e rodar iped.
+  + Buscar "Inexequibilidade" e exibir no laudo.
+
+- Upgrade de versão x threads:
+  + Se um programa está rodando, e durante a sua execução é atualizada a versão,
+    quando tenta iniciar uma nova thread, esta thread checa a versão
+    e se estivar desatulizado interrompe a thread (enquanto o programa principal fica rodando)
+    Alternativas (pode inclusive implementar mais do que uma):
+    - 1) Em um procedimento background, registrar em log como um erro e abortar
+    a tarefa...Desta forma o PCF fica ciente que ocorreu o problema.
+    - 2) Antes de iniciar uma thread, verifica se a versão ainda é compatível.
+      Se não for, instrui usuário a encerrar programa e reiniciar....
+      Mas isto só funcionaria para programas interativos.
+
+- sapi_cellebrinte:
+  + No que diz respeito ao campo de marca, deduzir a partir do modelo (iPad, iPhone => Apple).
+    * Se estiver nulo, e for um destes, coloca 'Apple'
+
+- sapi_iped:
+  + Diferenciar mensagem no log quando agente não está registrado x quando agente está desabilitado
+    * Pegar a mensagem de retorno do servidor, e inserir no log (que também volta para o servidor)
+  + sapi_iped --config
+    * Caso a versão nova seja incompatível com a versão atual (x.yy),
+      alertar o administrador SAPI que TODAS as tarefas para casos que tenham
+      ficado pela metade (versões antigas) terão que ser reprocessados.
+      "Atenção: Você está fazendo um upgrade da versão x.yy para a versão a.bb.
+      Possivelmente estas versões são incompatíveis, em termos de estrutura de dados.
+      Logo, se em um mesmo exame existirem itens processados nas duas versões, o resultado é imprevisível.
+      Recomenda-se que upgrades sejam executados apenas quando não houver nenhum exame já iniciado."
+    * Simular algo que implique em acompanhamento de progresso,
+      para garantir que irá detectar algum progresso....
+  + Na exclusão, jogar dados para lixeira,
+    para ser mais rápido (usuário não precisa ficar aguardando exclusão)
+  + Limpeza de index_temp (quando estiver ocioso)
+  + Limpeza de log (quando estiver ocioso)
+  + Ver o que o sapi_iped_atualizar fazia além disso
+
+- sapi_exame.php
+  + Criar marcador para quais itens será gerado tarefa. Por default, marcar todas as tarefas.
+  + Botão MARCAR TODOS e DESMARCAR TODOS
+
+- sapi_laudo:
+  + Comando ??, que invoca wiki (utilizar o mesmo conceito em todos os programas)
+  + Na verificação do modelo:
+    - Checar se tabela_hashes está integra.
+    - Checar se as outras tabelas (materiais_devolvidos) estão integras também.
+  + Contas de usuário: Quando não houver nenhuma disponível, prencher com "Não disponível" (igual MSISDN)
+
+
+
+=== Próximas etapas ===
+
+- Servidor redudante para SETEC3 (SETEC/PR ou BSB)
+
+- sapi_archive:
+  * Archiving e garabage colector.
+  * Reconhecer que foi feito backup (ver com o NTI como indicaria isto)
+  * Jogar para um pasta de exame concluído, tão logo a solicitação de exame seja arquivada (com laudo entregue)
+  * Ver backup em fita com o NTI
+  - Limpeza da lixeira (se for muito antiga...ou estiver com pouco espaço)
+
+
+========= Registros antigos (antes da versão 2.0) ================
+
+- Muitos tem que ser revisado.
+
 Alterado no Linux e agora no Windows
 
 Ajustes diversos:
 
-* sapi_cellebrite:
-  * Para o Felipe, aparece aviso que a pasta de destino já existia, mas aparentemente não tinha
-    sido feito ainda....bug....estudar
-
 * sapi (web):
-  * Sanitizar item: Não perimitir caracteres acentuados, parenteses, ou qualquer outra coisa estranha
-    no item, por exemplo: 01 (único)
   * Avisar com javascript se usuário clicar no item (para ir para o Siscrim) e já tiver tarefas
     * Se você está pensando em alterar o item, primeiro exclua todas as tarefas.
       Não é permitido alterar um item se já existir tarefas, pois isto criaria tarefas órfãs.
@@ -21,23 +121,13 @@ Ajustes diversos:
     exclua as tarefas, e depois mude o item.
 
 * sapi_iped:
-  * Quando item foi alterado de '01 (único)' para '01', ao mandar excluir a tarefa órfã do IPED, não funcionou.
+  * Quando item foi alterado de '01 (único)' para '01',
+    ao mandar excluir a tarefa órfã do IPED, não funcionou.
 
 * GTPI-STO-01:
   * Verificar se GTPI-STO-01 está utilizando proxy para conversar com SETEC3.
   * Tem no mínimo uma das contas que não está bloqueando a tela depois de um tempo.
   * Trocar as senhas, deixando mais forte.
-
-
-* GTPI-STO-02:
-  * Copiar disco do GTPI-STO-03 e ajustar
-  * Fundos de tela: Padronizar
-  * Screen saver (ajustar mensagem) para todos os usuários
-  * Quando o GTPI-STO-02 foi desligado, entrou em modo hibernação???
-    - Isto é um risco, pois pode gerar inconsistência...ou é uma oportunidade
-      Se a hibernação for confiável (IPED retornar ok), utilizar esta feature.
-    - Desligar esta 'feature' e fazer testes no GTPI-STO-03
-    - Comparar GTPI-STO-01 com GTPI-STO-02 para descobrir porque tem comportamentos diferentes...
 
 * GTPI-STO-03:
   - Duplicar disco para levar para GTPI-STO-02
@@ -51,11 +141,10 @@ Ajustes diversos:
 
 * Trocar senha de atualização das contas SAPI nos servidores (e nos arquivos de configuração)
 
-
-Versão 2.0:
+==================================================================================================
+Versão 3.0:
 * sapi_tableau.py: Liberar
 * sapi_aquisicao.py: Liberar
-* Instalar IPED 3.13 (se tiver estabilizado)
 
 Melhorias:
 * Tarefa de imagem já iniciada (já tem pasta de destino). Para excluir, tem que colocar na fila.
@@ -66,7 +155,6 @@ Melhorias:
 * Para desfazer uma tarefa para a qual foi reportado a inexiquilidade,
   tem que excluir a tarefa.
   * Permitir excluir tarefa de imagem que não tenha pasta.
-* sapi_exame: Dar aviso/esclarecimento sobre mídia de destino, quando o usuário tentar colocar a mídia como destino e não tem mídia de destino.
 * Exclusões de pastas: Jogar para o garbage coletor, para ser mais rápido
 * Testes/ajustes no sapi_iped
 * Ajustes no sapi_atualiza_iped
@@ -76,7 +164,6 @@ Melhorias:
 * Testar deployment do sapi_tableau direto do setec3
 
 Próxima:
-* sapi_iped: Na exclusão, jogar dados para lixeira, para ser mais rápido (usuário não precisa ficar aguardando exclusão)
 * Ativar garbage colector:
   - Sempre que ficar inativo ou com baixa carga de trabalho (definir isto....)
   - Ou quando o espaço ficar crítico.
@@ -89,11 +176,9 @@ Próxima:
     para em seguida alterar o item.
 
 - sapi_laudo: Para contas de usuário (aparelho), separar por linha (uma conta em cada linha)...talvez se a conta for muito grande (testar...)
-- Quando tarefa foi abortada, tem que mostrar um icone mais significativo (ou cor) em sapi_exame.php
 - sapi_tarefa: Quando uma tarefa for reiniciada, ou alguma coisa assim, se deu tudo certo, retonar para sapi_exame e exibir mensagem de feedback lá. Se der erro, fica na mesma tela e exibe mensagem de erro.
 - Incluir a verificação da imagem (Ver ftkimager cli, instalei em d:\tempr)
 - Implementar verificação do E01 no storage utilizando o ewf_verify
-- Utilizar Robocopy para fazer as cópias.
 - sapi-cellebrite: Mostrar no acompanhamento a quantidade de arquivos copiados também => 13% (28.5GB, 125.714 arquivos) Taxa:....
 - Instalação do java hardcode (pasta específica, chamando em linha de comando hardcoded)
 - Quando tem mais do que um item, dar uma mensagem mais explícita (com cor),
@@ -134,11 +219,6 @@ D:\tempr\ftkimager>type resultado.txt
 Componentes PYTHON:
 =======================================================================================================================
 
-
-
-@sapi_lib
----------
-- Nada a fazer
 
 @sapi_tableau (NOVO):
 --------------------
@@ -184,7 +264,7 @@ Componentes PYTHON:
     02/03: xxxxx           525-Extração    Aguardando ação PCF
                            526-iped-basico Aguardando Processamento
     -----------------------------------------------------------------------
-- Comando HELP: Exibe página de ajuda no Wiki
+- Comando ??: Exibe página de ajuda no Wiki
 - Comando VNC: Invoca VNC para o storage associado a este exame.
 Invocar em outro processo, para não travar...ver como o módulo webbrowser faz para invocar o browser...
 Tem que passar como parâmetro o nome (ou IP da storage)
@@ -196,10 +276,6 @@ Colocar instrução na tela de como acessar:
 - Testar se gerando para VHD local e depois copiando para o storage, e reabrindo no VHD de destino tem ganho
 - Parsing de campos: pegar todos os modelos, selecionado pelo usuário, detectado, se houver mais do que um.
 - Permitir que o usuário descreva a inexquilidade (Lista com as mais comuns), que será atualizada no servidor.
-
-@sapi_iped_executar_bat:
--------------------------
-- No log do servidor, está aparecendo sapi_iped@10.2.192.23. Motivo???
 
 @sapi_atualiza_iped:
 --------------------

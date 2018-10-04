@@ -66,7 +66,7 @@ Gversao = "0.6"
 
 # Base de dados (globais)
 GdadosGerais = {}  # Dicionário com dados gerais
-Gtarefas = []  # Lista de tarefas
+Gstorages = []  # Lista de tarefas
 
 # Controle de tempos/pausas
 GtempoEntreAtualizacoesStatus = 180

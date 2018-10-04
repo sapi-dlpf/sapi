@@ -51,7 +51,7 @@ Gdesenvolvimento = True  # Ambiente de desenvolvimento
 
 # Base de dados (globais)
 GdadosGerais = {}  # Dicionário com dados gerais
-Gtarefas = []  # Lista de tarefas
+Gstorages = []  # Lista de tarefas
 
 # Define nome do agente, que será repassado ao servidor sapi
 Gnome_agente = socket.gethostbyaddr(socket.gethostname())[0]

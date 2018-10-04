@@ -58,7 +58,7 @@ if sys.version_info <= (3, 0):
 # GLOBAIS
 # =======================================================================
 Gprograma = "sapi_atualiza_iped"
-Gversao = "1.8.2"
+Gversao = "1.9"
 
 # Controle de tempos/pausas
 GtempoEntreAtualizacoesStatus = 180
@@ -345,7 +345,7 @@ def atualizar_sapi_iped():
         # Localiza pasta de destino de profiles do IPED
         lista_pasta_iped=list()
         for item in os.listdir(caminho_destino):
-            if "IPED-" in item:
+            if "IPED-" in item.upper():
                 pasta_iped = os.path.join(caminho_destino, item)
                 print_log("Localizada pasta do IPED em  =>", pasta_iped)
                 lista_pasta_iped.append(pasta_iped)
@@ -359,7 +359,7 @@ def atualizar_sapi_iped():
 
             # Copia a pasta de profiles customizados para o IPED
             # --------------------------------------------------
-            pasta_profiles_iped = os.path.join(pasta_iped, "profiles")
+            pasta_profiles_iped = os.path.join(pasta_iped, "profiles", "pt-BR")
             pasta_profiles_customizados = os.path.join(caminho_origem, "profiles_customizados")
             print_log("Copiando pasta [", pasta_profiles_customizados, "] para [", pasta_profiles_iped, "]")
             adiciona_diretorio(pasta_profiles_customizados, pasta_profiles_iped)
